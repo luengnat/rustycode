@@ -915,10 +915,20 @@ impl TUI {
             for (server_id, server_config) in config_file.servers {
                 tracing::info!("Starting MCP server '{}'", server_id);
 
-                // Create a tool proxy for this server
+                // Create a tool proxy for this server (stdio only)
+                let command = match server_config.command.clone() {
+                    Some(cmd) => cmd,
+                    None => {
+                        tracing::debug!(
+                            "Skipping MCP server '{}': no command (remote transport)",
+                            server_id
+                        );
+                        continue;
+                    }
+                };
                 let proxy_config = ProxyConfig {
                     server_name: server_id.clone(),
-                    command: server_config.command.clone(),
+                    command,
                     args: server_config.args.clone(),
                     tool_prefix: None,
                     cache_tools: true,

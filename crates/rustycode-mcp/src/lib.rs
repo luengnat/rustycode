@@ -87,7 +87,9 @@ pub mod allowlist;
 pub mod client;
 pub mod enterprise;
 pub mod headers_helper;
+pub mod http_transport;
 pub mod manager;
+pub mod sse_transport;
 pub mod oauth;
 pub mod protocol;
 pub mod proxy;
@@ -109,8 +111,8 @@ pub use enterprise::{
     RateLimiter, RateLimiterConfig, RetryConfig,
 };
 pub use manager::{
-    HealthStatus, ManagerConfig, McpConfigFile, McpServer as ManagedMcpServer, McpServerManager,
-    ServerConfig,
+    HealthStatus, ManagerConfig, McpConfigFile, McpOAuthConfig, McpServer as ManagedMcpServer,
+    McpServerManager, McpTransportType, ServerConfig,
 };
 pub use oauth::{
     AuthorizationUrl, OAuthClientCredentials, OAuthManager, OAuthMetadata, OAuthToken,
@@ -134,6 +136,8 @@ pub use system_prompt::{
 pub use tools::{
     CacheStats, ToolCache, ToolCall, ToolExecutionEngine, ToolExecutionResult, ToolRegistry,
 };
+pub use http_transport::HttpTransport;
+pub use sse_transport::SseTransport;
 pub use transport::{StdioTransport, Transport};
 pub use types::*;
 

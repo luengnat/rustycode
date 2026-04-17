@@ -284,6 +284,13 @@ impl SchemaValidator {
                             "type": "object",
                             "description": "Experimental features"
                         },
+                        "mcp_servers_map": {
+                            "type": "object",
+                            "description": "MCP server configurations",
+                            "additionalProperties": {
+                                "$ref": "#/$defs/mcp_server_config"
+                            }
+                        },
                         "lsp_config": {
                             "$ref": "#/$defs/lsp_config",
                             "description": "LSP server configurations"
@@ -330,6 +337,88 @@ impl SchemaValidator {
                         }
                     },
                     "required": ["command"]
+                },
+                "mcp_transport_type": {
+                    "type": "string",
+                    "enum": ["stdio", "http", "sse"],
+                    "description": "Transport type for an MCP server"
+                },
+                "mcp_oauth_config": {
+                    "type": "object",
+                    "properties": {
+                        "client_id": {
+                            "type": "string",
+                            "description": "OAuth client identifier"
+                        },
+                        "scopes": {
+                            "type": "string",
+                            "description": "Requested OAuth scopes"
+                        },
+                        "callback_port": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 65535,
+                            "description": "OAuth callback port"
+                        }
+                    },
+                    "required": ["client_id"]
+                },
+                "mcp_server_config": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Server name/identifier"
+                        },
+                        "transport_type": {
+                            "$ref": "#/$defs/mcp_transport_type",
+                            "description": "Explicit transport type"
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "Command to start the MCP server"
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Arguments to pass to the command"
+                        },
+                        "env": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                            "description": "Environment variables for the server"
+                        },
+                        "url": {
+                            "type": "string",
+                            "description": "Remote server URL"
+                        },
+                        "headers": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                            "description": "Static HTTP headers"
+                        },
+                        "headers_helper": {
+                            "type": "string",
+                            "description": "Script that emits dynamic headers as JSON"
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Server description"
+                        },
+                        "oauth": {
+                            "$ref": "#/$defs/mcp_oauth_config",
+                            "description": "OAuth configuration"
+                        },
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "Whether this server config is active"
+                        },
+                        "transport": {
+                            "type": "string",
+                            "description": "Legacy transport field"
+                        }
+                    },
+                    "required": ["name"]
                 },
                 "project_tools": {
                     "type": "object",
@@ -948,6 +1037,34 @@ mod tests {
         assert!(validator.validate(&config).is_ok());
 
         let config = json!({"model": "test", "temperature": 0.0});
+        assert!(validator.validate(&config).is_ok());
+    }
+
+    // 13b. Base schema accepts MCP server map entries with remote fields
+    #[test]
+    fn base_schema_accepts_mcp_servers_map() {
+        let validator = create_validator();
+        let config = json!({
+            "model": "test",
+            "advanced": {
+                "mcp_servers_map": {
+                    "slack": {
+                        "name": "slack",
+                        "transport_type": "http",
+                        "url": "https://mcp.slack.com/mcp",
+                        "headers": {
+                            "X-Client": "rustycode"
+                        },
+                        "oauth": {
+                            "client_id": "client-123",
+                            "scopes": "channels:read chat:write",
+                            "callback_port": 8080
+                        },
+                        "enabled": true
+                    }
+                }
+            }
+        });
         assert!(validator.validate(&config).is_ok());
     }
 

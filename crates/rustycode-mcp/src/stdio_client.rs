@@ -14,12 +14,37 @@ use std::process::{Child, Command, Stdio};
 use tracing::{debug, info, warn};
 
 /// MCP server configuration for stdio transport
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransportType {
+    Stdio,
+    Http,
+    Sse,
+}
+
+/// OAuth configuration for remote MCP servers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpOAuthConfig {
+    pub client_id: String,
+    #[serde(default)]
+    pub scopes: Option<String>,
+    #[serde(default)]
+    pub callback_port: Option<u16>,
+}
+
+/// MCP server configuration for stdio transport
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
     /// Server name/identifier
     pub name: String,
 
+    /// Optional transport type
+    #[serde(default, rename = "type", alias = "transport_type")]
+    pub transport_type: Option<McpTransportType>,
+
     /// Command to spawn the MCP server
+    #[serde(default)]
     pub command: String,
 
     /// Arguments to pass to the command
@@ -30,9 +55,33 @@ pub struct McpServerConfig {
     #[serde(default)]
     pub env: HashMap<String, String>,
 
+    /// Remote server URL
+    #[serde(default)]
+    pub url: Option<String>,
+
+    /// HTTP headers for remote servers
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
+
+    /// Path to script that outputs dynamic headers as JSON
+    #[serde(default, rename = "headersHelper", alias = "headers_helper")]
+    pub headers_helper: Option<String>,
+
+    /// Server description
+    #[serde(default)]
+    pub description: Option<String>,
+
+    /// OAuth configuration for remote servers
+    #[serde(default)]
+    pub oauth: Option<McpOAuthConfig>,
+
     /// Whether the server is enabled
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+
+    /// Legacy transport name
+    #[serde(default)]
+    pub transport: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -44,10 +93,17 @@ impl McpServerConfig {
     pub fn new(name: impl Into<String>, command: impl Into<String>) -> Self {
         Self {
             name: name.into(),
+            transport_type: None,
             command: command.into(),
             args: Vec::new(),
             env: HashMap::new(),
+            url: None,
+            headers: None,
+            headers_helper: None,
+            description: None,
+            oauth: None,
             enabled: true,
+            transport: None,
         }
     }
 

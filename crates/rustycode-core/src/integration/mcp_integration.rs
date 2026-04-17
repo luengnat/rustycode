@@ -66,7 +66,8 @@ impl McpIntegration {
                 server_configs.insert(name.clone(), server_config.clone());
                 info!(
                     "Loaded MCP server config: {} (command: {})",
-                    name, server_config.command
+                    name,
+                    server_config.command.as_deref().unwrap_or("<none>")
                 );
             }
         }
@@ -109,6 +110,12 @@ impl McpIntegration {
                 name: name.clone(),
                 command: server_config.command.clone(),
                 args: server_config.args.clone(),
+                transport_type: None,
+                url: server_config.url.clone(),
+                headers: server_config.headers.clone(),
+                headers_helper: server_config.headers_helper.clone(),
+                description: server_config.description.clone(),
+                oauth: None,
                 enable_tools: true,
                 enable_resources: false,
                 enable_prompts: false,
@@ -123,12 +130,13 @@ impl McpIntegration {
                 Ok(_server) => {
                     info!("MCP server '{}' started successfully", name);
 
-                    // Connect client to server
-                    let args_str: Vec<&str> =
-                        server_config.args.iter().map(|s| s.as_str()).collect();
-                    match client
-                        .connect_stdio(name.clone(), &server_config.command, &args_str)
-                        .await
+                    // Connect client to server (stdio only for now)
+                    if let Some(ref cmd) = server_config.command {
+                        let args_str: Vec<&str> =
+                            server_config.args.iter().map(|s| s.as_str()).collect();
+                        match client
+                            .connect_stdio(name.clone(), cmd, &args_str)
+                            .await
                     {
                         Ok(_) => {
                             info!("Connected to MCP server '{}'", name);
@@ -177,6 +185,9 @@ impl McpIntegration {
                         Err(e) => {
                             error!("Failed to connect to MCP server '{}': {}", name, e);
                         }
+                    }
+                    } else {
+                        info!("MCP server '{}' is remote (no stdio command), skipping stdio connect", name);
                     }
                 }
                 Err(e) => {

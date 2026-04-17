@@ -9,7 +9,7 @@ use tracing::{debug, info, trace, warn};
 
 /// Maximum allowed size for a single MCP message (1 MiB).
 /// Prevents memory exhaustion from malformed or malicious servers.
-const MAX_MESSAGE_SIZE: usize = 1 << 20;
+pub(crate) const MAX_MESSAGE_SIZE: usize = 1 << 20;
 
 /// Transport trait for MCP communication
 #[async_trait::async_trait]

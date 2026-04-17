@@ -182,6 +182,9 @@ pub struct McpServerCapabilities {
     /// Available prompts
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompts: Option<McpPromptsCapability>,
+    /// Optional extensions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 /// Tools capability
@@ -215,6 +218,7 @@ pub struct McpPromptsCapability {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitializeRequest {
     /// Protocol version
+    #[serde(rename = "protocolVersion")]
     pub protocol_version: String,
     /// Client capabilities
     pub capabilities: McpClientCapabilities,
@@ -244,6 +248,9 @@ pub struct McpClientCapabilities {
     /// Roots/listing capability
     #[serde(skip_serializing_if = "Option::is_none")]
     pub roots: Option<McpRootsCapability>,
+    /// Optional extensions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 /// Sampling capability
@@ -454,6 +461,7 @@ mod tests {
         assert!(caps.tools.is_none());
         assert!(caps.resources.is_none());
         assert!(caps.prompts.is_none());
+        assert!(caps.extensions.is_none());
     }
 
     #[test]
@@ -464,6 +472,7 @@ mod tests {
             }),
             resources: None,
             prompts: None,
+            extensions: None,
         };
         let json = serde_json::to_string(&caps).unwrap();
         assert!(json.contains("tools"));
@@ -483,6 +492,7 @@ mod tests {
                     list_changed: Some(true),
                 }),
                 prompts: None,
+                extensions: None,
             },
             server_info: McpServerInfo {
                 name: "test-server".to_string(),
@@ -598,6 +608,7 @@ mod tests {
             },
         };
         let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"protocolVersion\":\"2024-11-05\""));
         let parsed: InitializeRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.protocol_version, "2024-11-05");
         assert_eq!(parsed.client_info.name, "test");
@@ -629,6 +640,7 @@ mod tests {
                 threshold: Some(0.5),
             }),
             roots: Some(McpRootsCapability { list_changed: true }),
+            extensions: None,
         };
         let json = serde_json::to_string(&caps).unwrap();
         let parsed: McpClientCapabilities = serde_json::from_str(&json).unwrap();

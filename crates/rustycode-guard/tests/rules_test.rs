@@ -173,11 +173,11 @@ fn test_r08_blocks_binary_extensions() {
     for ext in &["exe", "dll", "so", "dylib", "bin"] {
         let input = make_input(
             "Write",
-            json!({"path": &format!("payload.{}", ext), "content": "binary"}),
+            json!({"path": &format!("payload.{ext}"), "content": "binary"}),
             Some("/workspace/project"),
         );
         let res = pre_tool::evaluate(&input);
-        assert_eq!(res.permission_decision.as_deref(), Some("deny"), "blocked .{}", ext);
+        assert_eq!(res.permission_decision.as_deref(), Some("deny"), "blocked .{ext}");
     }
 }
 

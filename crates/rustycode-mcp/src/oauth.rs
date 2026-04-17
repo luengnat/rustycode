@@ -209,6 +209,7 @@ pub struct ServerTokenStore {
 }
 
 /// OAuth manager for MCP authentication
+#[derive(Clone)]
 pub struct OAuthManager {
     /// Token stores per server
     stores: Arc<RwLock<HashMap<String, ServerTokenStore>>>,

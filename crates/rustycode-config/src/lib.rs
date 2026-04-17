@@ -817,7 +817,7 @@ mod tests {
     fn test_mcp_server_config_full() {
         let config = MCPServerConfig {
             name: "my-server".into(),
-            command: "npx".into(),
+            command: Some("npx".into()),
             args: vec!["-y".into(), "some-mcp-server".into()],
             env: {
                 let mut e = std::collections::HashMap::new();
@@ -826,6 +826,12 @@ mod tests {
             },
             enabled: false,
             transport: Some("sse".into()),
+            transport_type: Some(McpTransportType::Sse),
+            url: None,
+            headers: None,
+            headers_helper: None,
+            description: None,
+            oauth: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         let decoded: MCPServerConfig = serde_json::from_str(&json).unwrap();
@@ -834,6 +840,80 @@ mod tests {
         assert_eq!(decoded.env.get("API_KEY").unwrap(), "secret");
         assert!(!decoded.enabled);
         assert_eq!(decoded.transport.unwrap(), "sse");
+    }
+
+    #[test]
+    fn test_mcp_server_config_claude_stdio_format() {
+        let json = r#"{
+            "name": "filesystem",
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+            "env": {"API_KEY": "secret"},
+            "description": "File system access"
+        }"#;
+        let config: MCPServerConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.name, "filesystem");
+        assert_eq!(config.transport_type, Some(McpTransportType::Stdio));
+        assert_eq!(config.command.as_deref(), Some("npx"));
+        assert_eq!(config.args.len(), 3);
+        assert_eq!(config.description.as_deref(), Some("File system access"));
+    }
+
+    #[test]
+    fn test_mcp_server_config_claude_http_format() {
+        let json = r#"{
+            "name": "vercel",
+            "type": "http",
+            "url": "https://mcp.vercel.com",
+            "headers": {"Authorization": "Bearer token123"},
+            "description": "Vercel deployments"
+        }"#;
+        let config: MCPServerConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.name, "vercel");
+        assert_eq!(config.transport_type, Some(McpTransportType::Http));
+        assert_eq!(config.url.as_deref(), Some("https://mcp.vercel.com"));
+        assert_eq!(
+            config.headers.as_ref().unwrap().get("Authorization").unwrap(),
+            "Bearer token123"
+        );
+        assert!(config.command.is_none());
+    }
+
+    #[test]
+    fn test_mcp_server_config_claude_oauth_format() {
+        let json = r#"{
+            "name": "slack",
+            "type": "http",
+            "url": "https://mcp.slack.com/mcp",
+            "oauth": {
+                "clientId": "123.456",
+                "scopes": "channels:read chat:write",
+                "callbackPort": 8080
+            }
+        }"#;
+        let config: MCPServerConfig = serde_json::from_str(json).unwrap();
+        let oauth = config.oauth.unwrap();
+        assert_eq!(oauth.client_id, "123.456");
+        assert_eq!(oauth.scopes.as_deref(), Some("channels:read chat:write"));
+        assert_eq!(oauth.callback_port, Some(8080));
+    }
+
+    #[test]
+    fn test_mcp_server_config_auto_detect_stdio() {
+        let json = r#"{"name":"test","command":"npx","args":["server"]}"#;
+        let config: MCPServerConfig = serde_json::from_str(json).unwrap();
+        assert!(config.transport_type.is_none());
+        assert!(config.command.is_some());
+    }
+
+    #[test]
+    fn test_mcp_server_config_auto_detect_http() {
+        let json = r#"{"name":"test","url":"https://api.example.com/mcp"}"#;
+        let config: MCPServerConfig = serde_json::from_str(json).unwrap();
+        assert!(config.transport_type.is_none());
+        assert!(config.url.is_some());
+        assert!(config.command.is_none());
     }
 
     #[test]
@@ -953,7 +1033,7 @@ mod tests {
         let advanced: AdvancedConfig = serde_json::from_str(json).unwrap();
         assert_eq!(advanced.mcp_servers_map.len(), 1);
         let server = advanced.mcp_servers_map.get("my-server").unwrap();
-        assert_eq!(server.command, "node");
+        assert_eq!(server.command.as_deref(), Some("node"));
         assert_eq!(server.args.len(), 1);
     }
 

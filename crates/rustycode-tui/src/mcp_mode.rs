@@ -25,7 +25,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// MCP mode state
 pub struct McpMode {
@@ -241,9 +241,20 @@ impl McpMode {
                         state.current_step = "Connecting...".to_string();
                     }
 
+                    let command = match server_config.command.clone() {
+                        Some(cmd) => cmd,
+                        None => {
+                            debug!(
+                                "Skipping MCP server '{}': no command (remote transport)",
+                                server_id
+                            );
+                            continue;
+                        }
+                    };
+
                     let proxy_config = ProxyConfig {
                         server_name: server_id.clone(),
-                        command: server_config.command.clone(),
+                        command,
                         args: server_config.args.clone(),
                         tool_prefix: None,
                         cache_tools: true,

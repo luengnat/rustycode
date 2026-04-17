@@ -117,6 +117,7 @@ async fn test_server_capabilities() {
         tools: Some(McpToolsCapability::default()),
         resources: Some(McpResourcesCapability::default()),
         prompts: Some(McpPromptsCapability::default()),
+        extensions: None,
     };
 
     let json = serde_json::to_string(&caps).unwrap();

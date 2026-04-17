@@ -1,9 +1,13 @@
 //! Enterprise-grade MCP server lifecycle management
 
 use crate::client::McpClient;
+use crate::headers_helper::merge_headers;
+use crate::http_transport::HttpTransport;
+use crate::oauth::OAuthManager;
+use crate::sse_transport::SseTransport;
 use crate::server_enablement::ServerEnablementManager;
 use crate::types::McpTool;
-use crate::{McpError, McpResult};
+use crate::{McpError, McpResult, Transport};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -43,34 +47,75 @@ impl Default for ManagerConfig {
     }
 }
 
+/// MCP transport type for remote server connections
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransportType {
+    Stdio,
+    Http,
+    Sse,
+}
+
+/// OAuth configuration for remote MCP servers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpOAuthConfig {
+    pub client_id: String,
+    #[serde(default)]
+    pub scopes: Option<String>,
+    #[serde(default)]
+    pub callback_port: Option<u16>,
+}
+
 /// Server configuration for spawning
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     /// Unique server identifier
+    #[serde(alias = "server_id")]
     pub server_id: String,
     /// Server name
     pub name: String,
-    /// Command to spawn
-    pub command: String,
-    /// Arguments for command
+    /// Transport type — auto-detected if omitted
+    #[serde(default, rename = "type", alias = "transport_type")]
+    pub transport_type: Option<McpTransportType>,
+    /// Command to spawn (stdio)
+    #[serde(default, alias = "command")]
+    pub command: Option<String>,
+    /// Arguments for command (stdio)
+    #[serde(default)]
     pub args: Vec<String>,
+    /// Remote server URL (http/sse)
+    #[serde(default)]
+    pub url: Option<String>,
+    /// HTTP headers for remote servers
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
+    /// Path to script that outputs dynamic headers as JSON
+    #[serde(default, rename = "headersHelper", alias = "headers_helper")]
+    pub headers_helper: Option<String>,
+    /// Server description
+    #[serde(default)]
+    pub description: Option<String>,
+    /// OAuth configuration for remote servers
+    #[serde(default)]
+    pub oauth: Option<McpOAuthConfig>,
     /// Enabled capabilities
-    #[serde(default)]
+    #[serde(default, alias = "enable_tools")]
     pub enable_tools: bool,
-    #[serde(default)]
+    #[serde(default, alias = "enable_resources")]
     pub enable_resources: bool,
-    #[serde(default)]
+    #[serde(default, alias = "enable_prompts")]
     pub enable_prompts: bool,
     /// Whether this server is enabled (can be toggled per-session)
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// Optional: only load these tools from the server (empty = all tools)
-    #[serde(default)]
+    #[serde(default, alias = "tools_allowlist")]
     pub tools_allowlist: Vec<String>,
     /// Optional: never load these tools from the server
-    #[serde(default)]
+    #[serde(default, alias = "tools_denylist")]
     pub tools_denylist: Vec<String>,
-    /// Optional: tags for filtering servers by context (e.g., ["database", "prod"])
+    /// Optional: tags for filtering servers by context
     #[serde(default)]
     pub tags: Vec<String>,
 }
@@ -79,11 +124,72 @@ fn default_true() -> bool {
     true
 }
 
+fn resolve_transport_type(config: &ServerConfig) -> McpResult<McpTransportType> {
+    if let Some(transport_type) = &config.transport_type {
+        return Ok(transport_type.clone());
+    }
+
+    if config.command.is_some() {
+        return Ok(McpTransportType::Stdio);
+    }
+
+    if config.url.is_some() {
+        return Ok(McpTransportType::Http);
+    }
+
+    Err(McpError::InvalidRequest(format!(
+        "Server '{}' must declare either a command or a url",
+        config.server_id
+    )))
+}
+
+async fn build_transport_for_server(
+    oauth_manager: &OAuthManager,
+    config: &ServerConfig,
+) -> McpResult<Box<dyn Transport>> {
+    match resolve_transport_type(config)? {
+        McpTransportType::Stdio => {
+            let command = config.command.as_deref().ok_or_else(|| {
+                McpError::InvalidRequest(format!(
+                    "Server '{}' has no command (required for stdio transport)",
+                    config.server_id
+                ))
+            })?;
+            let args: Vec<&str> = config.args.iter().map(|s| s.as_str()).collect();
+            let transport = crate::StdioTransport::spawn(command, &args)?;
+            Ok(Box::new(transport))
+        }
+        McpTransportType::Http | McpTransportType::Sse => {
+            let url = config.url.as_deref().ok_or_else(|| {
+                McpError::InvalidRequest(format!(
+                    "Server '{}' has no url (required for remote transport)",
+                    config.server_id
+                ))
+            })?;
+
+            let static_headers = config.headers.clone().unwrap_or_default();
+            let mut headers =
+                merge_headers(&static_headers, config.headers_helper.as_deref()).await;
+
+            if oauth_manager.has_oauth_config(&config.server_id).await {
+                let token = oauth_manager.get_access_token(&config.server_id).await?;
+                headers.insert("Authorization".to_string(), format!("Bearer {}", token));
+            }
+
+            match resolve_transport_type(config)? {
+                McpTransportType::Http => Ok(Box::new(HttpTransport::new(url, headers)?)),
+                McpTransportType::Sse => Ok(Box::new(SseTransport::new(url, headers)?)),
+                McpTransportType::Stdio => unreachable!(),
+            }
+        }
+    }
+}
+
 /// MCP config file structure (`.mcp.json`)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpConfigFile {
-    /// MCP servers configuration
-    #[serde(default)]
+    /// MCP servers configuration — accepts both "mcpServers" and "servers"
+    #[serde(default, alias = "mcpServers")]
     pub servers: HashMap<String, ServerConfig>,
 }
 
@@ -192,6 +298,7 @@ impl std::fmt::Debug for McpServer {
 pub struct McpServerManager {
     servers: Arc<RwLock<HashMap<String, McpServer>>>,
     config: ManagerConfig,
+    oauth_manager: OAuthManager,
     health_check_handle: Option<tokio::task::JoinHandle<()>>,
     enablement_manager: ServerEnablementManager,
 }
@@ -202,6 +309,7 @@ impl McpServerManager {
         Self {
             servers: Arc::new(RwLock::new(HashMap::new())),
             config,
+            oauth_manager: OAuthManager::new(),
             health_check_handle: None,
             enablement_manager: ServerEnablementManager::default(),
         }
@@ -210,6 +318,15 @@ impl McpServerManager {
     /// Create with default configuration
     pub fn default_config() -> Self {
         Self::new(ManagerConfig::default())
+    }
+
+    /// Access the OAuth manager used for remote server authentication.
+    pub fn oauth_manager(&self) -> &OAuthManager {
+        &self.oauth_manager
+    }
+
+    async fn build_transport(&self, config: &ServerConfig) -> McpResult<Box<dyn Transport>> {
+        build_transport_for_server(&self.oauth_manager, config).await
     }
 
     /// Start an MCP server
@@ -241,12 +358,12 @@ impl McpServerManager {
         };
 
         let mut client = McpClient::new(client_config);
-        let args: Vec<&str> = config.args.iter().map(|s| s.as_str()).collect();
+        let transport = self.build_transport(&config).await?;
 
         // Connect with timeout
         tokio::time::timeout(
             self.config.connection_timeout,
-            client.connect_stdio(&config.server_id, &config.command, &args),
+            client.connect_with_transport(&config.server_id, transport),
         )
         .await
         .map_err(|_| McpError::Timeout)?
@@ -462,6 +579,7 @@ impl McpServerManager {
         }
 
         let servers = self.servers.clone();
+        let oauth_manager = self.oauth_manager.clone();
         let interval = self.config.health_check_interval;
         let max_restart_attempts = self.config.max_restart_attempts;
         let restart_backoff_multiplier = self.config.restart_backoff_multiplier;
@@ -533,9 +651,11 @@ impl McpServerManager {
 
                                     // Actually attempt reconnection
                                     let server = server.clone();
+                                    let oauth_manager = oauth_manager.clone();
                                     if let Err(e) = server
                                         .reconnect(
                                             &server_config,
+                                            &oauth_manager,
                                             Duration::from_secs(10),
                                             Duration::from_secs(30),
                                         )
@@ -723,6 +843,7 @@ impl McpServer {
     pub async fn reconnect(
         &self,
         config: &ServerConfig,
+        oauth_manager: &OAuthManager,
         connection_timeout: Duration,
         request_timeout: Duration,
     ) -> McpResult<()> {
@@ -735,12 +856,12 @@ impl McpServer {
         };
 
         let mut client = McpClient::new(client_config);
-        let args: Vec<&str> = config.args.iter().map(|s| s.as_str()).collect();
+        let transport = build_transport_for_server(oauth_manager, config).await?;
 
         // Connect with timeout
         tokio::time::timeout(
             connection_timeout,
-            client.connect_stdio(&config.server_id, &config.command, &args),
+            client.connect_with_transport(&config.server_id, transport),
         )
         .await
         .map_err(|_| McpError::Timeout)?
@@ -813,8 +934,14 @@ mod tests {
         let config = ServerConfig {
             server_id: "test-server".to_string(),
             name: "Test Server".to_string(),
-            command: "echo".to_string(),
+            command: Some("echo".to_string()),
             args: vec!["hello".to_string()],
+            transport_type: None,
+            url: None,
+            headers: None,
+            headers_helper: None,
+            description: None,
+            oauth: None,
             enable_tools: true,
             enable_resources: false,
             enable_prompts: false,
@@ -865,8 +992,14 @@ mod tests {
             ServerConfig {
                 server_id: "server1".to_string(),
                 name: "Server 1".to_string(),
-                command: "echo".to_string(),
+                command: Some("echo".to_string()),
                 args: vec![],
+                transport_type: None,
+                url: None,
+                headers: None,
+                headers_helper: None,
+                description: None,
+                oauth: None,
                 enable_tools: true,
                 enable_resources: false,
                 enable_prompts: false,
@@ -984,8 +1117,14 @@ mod tests {
         let config = ServerConfig {
             server_id: "test".to_string(),
             name: "Test".to_string(),
-            command: "node".to_string(),
+            command: Some("node".to_string()),
             args: vec!["server.js".to_string()],
+            transport_type: None,
+            url: None,
+            headers: None,
+            headers_helper: None,
+            description: None,
+            oauth: None,
             enable_tools: true,
             enable_resources: true,
             enable_prompts: true,
@@ -1084,5 +1223,80 @@ mod tests {
         let json = r#"{}"#;
         let config: McpConfigFile = serde_json::from_str(json).unwrap();
         assert!(config.servers.is_empty());
+    }
+
+    #[test]
+    fn test_mcp_config_file_mcp_servers_key() {
+        let json = r#"{
+            "mcpServers": {
+                "github": {
+                    "server_id": "github",
+                    "name": "GitHub",
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-github"]
+                }
+            }
+        }"#;
+        let config: McpConfigFile = serde_json::from_str(json).unwrap();
+        assert_eq!(config.servers.len(), 1);
+        assert!(config.servers.contains_key("github"));
+    }
+
+    #[test]
+    fn test_mcp_config_file_claude_http_server() {
+        let json = r#"{
+            "mcpServers": {
+                "vercel": {
+                    "server_id": "vercel",
+                    "name": "Vercel",
+                    "type": "http",
+                    "url": "https://mcp.vercel.com",
+                    "headers": {"Authorization": "Bearer token123"},
+                    "description": "Vercel deployments"
+                }
+            }
+        }"#;
+        let config: McpConfigFile = serde_json::from_str(json).unwrap();
+        let server = config.servers.get("vercel").unwrap();
+        assert_eq!(server.transport_type, Some(McpTransportType::Http));
+        assert_eq!(server.url.as_deref(), Some("https://mcp.vercel.com"));
+        assert_eq!(server.description.as_deref(), Some("Vercel deployments"));
+        assert!(server.command.is_none());
+    }
+
+    #[test]
+    fn test_mcp_config_file_mixed_transports() {
+        let json = r#"{
+            "mcpServers": {
+                "local-fs": {
+                    "server_id": "local-fs",
+                    "name": "Filesystem",
+                    "command": "npx",
+                    "args": ["-y", "server-filesystem"]
+                },
+                "remote-api": {
+                    "server_id": "remote-api",
+                    "name": "API",
+                    "type": "http",
+                    "url": "https://api.example.com/mcp",
+                    "oauth": {
+                        "clientId": "my-client",
+                        "scopes": "read write"
+                    }
+                }
+            }
+        }"#;
+        let config: McpConfigFile = serde_json::from_str(json).unwrap();
+        assert_eq!(config.servers.len(), 2);
+
+        let local = config.servers.get("local-fs").unwrap();
+        assert!(local.command.is_some());
+        assert!(local.url.is_none());
+
+        let remote = config.servers.get("remote-api").unwrap();
+        assert!(remote.command.is_none());
+        assert_eq!(remote.url.as_deref(), Some("https://api.example.com/mcp"));
+        let oauth = remote.oauth.as_ref().unwrap();
+        assert_eq!(oauth.client_id, "my-client");
     }
 }

@@ -1,7 +1,8 @@
 //! MCP client implementation
 
 use crate::protocol::JsonRpcRequest;
-use crate::transport::{StdioTransport, Transport};
+use crate::transport::Transport;
+use crate::StdioTransport;
 use crate::types::*;
 use crate::{McpError, McpResult};
 use serde_json::json;
@@ -40,7 +41,7 @@ impl Default for McpClientConfig {
 /// MCP client for connecting to servers
 pub struct McpClient {
     pub config: McpClientConfig,
-    transports: Arc<RwLock<HashMap<String, StdioTransport>>>,
+    transports: Arc<RwLock<HashMap<String, Box<dyn Transport>>>>,
     server_capabilities: Arc<RwLock<HashMap<String, McpServerCapabilities>>>,
 }
 
@@ -69,10 +70,20 @@ impl McpClient {
         let server_name = server_name.into();
         info!("Connecting to MCP server '{}' via stdio", server_name);
 
-        let mut transport = StdioTransport::spawn(command, args)?;
+        let transport = StdioTransport::spawn(command, args)?;
+        self.connect_with_transport(server_name, Box::new(transport)).await
+    }
 
+    /// Connect with a pre-constructed transport
+    pub async fn connect_with_transport(
+        &mut self,
+        server_name: impl Into<String>,
+        mut transport: Box<dyn Transport>,
+    ) -> McpResult<()> {
+        let server_name = server_name.into();
+        info!("Connecting to MCP server '{}' via custom transport", server_name);
         // Initialize the connection
-        Self::initialize_connection_static(&mut transport, &server_name, &self.config).await?;
+        Self::initialize_connection_static(transport.as_mut(), &server_name, &self.config).await?;
 
         // Store the transport
         let mut transports = self.transports.write().await;
@@ -83,7 +94,7 @@ impl McpClient {
 
     /// Initialize an MCP connection (static method to avoid borrow issues)
     async fn initialize_connection_static(
-        transport: &mut StdioTransport,
+        transport: &mut dyn Transport,
         server_name: &str,
         config: &McpClientConfig,
     ) -> McpResult<()> {

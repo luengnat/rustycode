@@ -582,9 +582,16 @@ async fn handle_mcp_call(parts: &[&str]) -> Result<Option<String>, String> {
         )));
     }
 
+    let command = server_config.command.clone().ok_or_else(|| {
+        format!(
+            "Server '{}' uses a remote transport and does not support direct tool execution via /mcp call.",
+            server_id
+        )
+    })?;
+
     let proxy_config = ProxyConfig {
         server_name: server_id.to_string(),
-        command: server_config.command.clone(),
+        command,
         args: server_config.args.clone(),
         tool_prefix: None,
         cache_tools: true,
