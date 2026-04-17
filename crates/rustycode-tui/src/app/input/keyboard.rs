@@ -61,14 +61,7 @@ impl TUI {
                 }
                 self.running = false;
             }
-            (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
-                self.showing_skill_palette = false;
-                self.skill_palette.close();
-                self.showing_command_palette = true;
-                self.command_palette.show();
-                self.command_palette.state_mut().clear_query();
-                self.dirty = true;
-            }
+            // Ctrl+K handling moved to central input loop to ensure proper overlay rendering
             // Ctrl+Shift+C: Copy selected message (moved from Ctrl+C to match industry convention)
             (KeyCode::Char('C'), KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
                 if let Err(e) = self.copy_selected_message() {
@@ -316,6 +309,7 @@ impl TUI {
                     new_mode.description()
                 ));
                 self.dirty = true;
+                self.auto_scroll();
                 return Ok(());
             }
             #[allow(unreachable_patterns)]
@@ -328,6 +322,7 @@ impl TUI {
                     new_mode.description()
                 ));
                 self.dirty = true;
+                self.auto_scroll();
                 return Ok(());
             }
             // Ctrl+Shift+Z: Undo scroll position (jump back to previous position)
@@ -497,11 +492,13 @@ impl TUI {
                 let theme = self.theme_switcher.next_theme();
                 self.toast_manager.success(format!("Theme: {}", theme.name));
                 self.dirty = true;
+                self.auto_scroll();
             }
             (KeyCode::Char('T'), KeyModifiers::ALT | KeyModifiers::SHIFT) => {
                 let theme = self.theme_switcher.prev();
                 self.toast_manager.success(format!("Theme: {}", theme.name));
                 self.dirty = true;
+                self.auto_scroll();
             }
             // Vim keybindings (when enabled and input is not focused)
             (KeyCode::Char('j'), KeyModifiers::NONE)

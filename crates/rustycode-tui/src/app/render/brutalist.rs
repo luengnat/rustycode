@@ -11,7 +11,10 @@ impl super::TUI {
     ///
     /// `input_text` must be passed in because the renderer borrows it.
     /// Get it via `self.input_handler.state.all_text()` before calling.
-    pub(crate) fn create_brutalist_renderer<'a>(&'a self, input_text: &'a str) -> BrutalistRenderer<'a> {
+    pub(crate) fn create_brutalist_renderer<'a>(
+        &'a self,
+        input_text: &'a str,
+    ) -> BrutalistRenderer<'a> {
         let mut context_usage = ContextUsage::new();
         context_usage.update(self.session_input_tokens, self.session_output_tokens);
         context_usage.set_limit(self.context_monitor.max_tokens);
@@ -23,11 +26,17 @@ impl super::TUI {
         } else {
             "ready"
         };
-        let auto_memory_status = if self.auto_memory.is_some() { "on" } else { "off" };
+        let auto_memory_status = if self.auto_memory.is_some() {
+            "on"
+        } else {
+            "off"
+        };
 
         let active_tool_count = self.active_tools.len();
         // Show all running tool names (not just the first one)
-        let active_tool_names: String = self.active_tools.keys()
+        let active_tool_names: String = self
+            .active_tools
+            .keys()
             .take(3) // Cap at 3 to avoid overflowing status bar
             .cloned()
             .collect::<Vec<_>>()
@@ -44,11 +53,13 @@ impl super::TUI {
         let stream_elapsed = self.stream_start_time.map(|t| t.elapsed());
 
         // History/reverse search state for input bar display
-        let (reverse_query, reverse_match, reverse_total) = self.input_handler.reverse_search_info();
+        let (reverse_query, reverse_match, reverse_total) =
+            self.input_handler.reverse_search_info();
         let (hist_pos, hist_total) = self.input_handler.history_position();
 
         BrutalistRendererBuilder::new(&self.messages, input_text)
             .stream_content(&self.current_stream_content)
+            .cwd(self.services.cwd().clone())
             .is_streaming(self.is_streaming)
             .scroll(self.scroll_offset_line, self.user_scrolled)
             .selection(self.selected_message, self.viewport_height)
@@ -56,7 +67,10 @@ impl super::TUI {
             .statuses(agent_status, auto_memory_status)
             .input_mode(self.input_mode)
             .rate_limit(self.rate_limit.until)
-            .streaming_state(self.chunks_received, self.animator.current_frame().progress_frame)
+            .streaming_state(
+                self.chunks_received,
+                self.animator.current_frame().progress_frame,
+            )
             .context_usage(context_usage)
             .tool_status(active_tool_count, active_tool_display)
             .session_info(
@@ -67,7 +81,11 @@ impl super::TUI {
             )
             .warnings(self.api_key_warning.clone())
             .collapsed(self.status_bar_collapsed, self.footer_collapsed)
-            .input_state(input_line_count, self.queued_message.is_some(), self.queued_message.as_deref().unwrap_or("").to_string())
+            .input_state(
+                input_line_count,
+                self.queued_message.is_some(),
+                self.queued_message.as_deref().unwrap_or("").to_string(),
+            )
             .timing(self.last_response_duration, stream_elapsed)
             .git_branch(self.git_branch.as_deref().unwrap_or(""))
             .reverse_search(reverse_query, reverse_match, reverse_total)
@@ -78,7 +96,10 @@ impl super::TUI {
                 self.search_state.current_match_index,
             )
             .session_start(Some(self.start_time))
-            .cursor_position(self.input_handler.state.cursor_col, self.input_handler.state.cursor_row)
+            .cursor_position(
+                self.input_handler.state.cursor_col,
+                self.input_handler.state.cursor_row,
+            )
             .build()
     }
 }

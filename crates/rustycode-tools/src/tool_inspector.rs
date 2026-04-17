@@ -834,21 +834,38 @@ impl OsvInspector {
             .iter()
             .any(|pat| lower.contains(pat))
     }
+}
 
-    /// Extract the package name from an install command's arguments.
+/// Strip the version suffix from an npm package specifier.
+///
+/// Handles:
+/// - `@scope/pkg@1.2.3` → `@scope/pkg`
+/// - `pkg@1.2.3` → `pkg`
+/// - `@scope/pkg` → `@scope/pkg`
+/// - `pkg` → `pkg`
+fn strip_npm_version(s: &str) -> String {
+    if s.starts_with('@') {
+        // Scoped package: find second '@' (version separator)
+        if let Some(at_pos) = s[1..].find('@') {
+            s[..at_pos + 1].to_string()
+        } else {
+            s.to_string()
+        }
+    } else if let Some(idx) = s.find('@') {
+        s[..idx].to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+impl OsvInspector {
     pub fn extract_package_from_args(&self, cmd: &str, args: &[String]) -> Option<String> {
         match cmd {
             c if c.ends_with("npx") => {
                 // npx <package> — first non-flag arg is the package
                 args.iter()
                     .find(|a| !a.starts_with('-') && !a.is_empty())
-                    .map(|s| {
-                        if let Some(idx) = s.find('@') {
-                            s.get(..idx).unwrap_or(s).to_string()
-                        } else {
-                            s.to_string()
-                        }
-                    })
+                    .map(|s| strip_npm_version(s))
             }
             c if c.ends_with("npm") => {
                 // npm install/add <package> — skip the subcommand
@@ -867,11 +884,7 @@ impl OsvInspector {
                     // the package (e.g., `npm --save-dev eslint`) or a subcommand
                     // we don't recognize — treat it as the package either way.
                     if found_subcmd || !subcmds.contains(&arg.as_str()) {
-                        return Some(if let Some(idx) = arg.find('@') {
-                            arg.get(..idx).unwrap_or(arg).to_string()
-                        } else {
-                            arg.to_string()
-                        });
+                        return Some(strip_npm_version(arg));
                     }
                 }
                 None
@@ -1021,7 +1034,7 @@ impl ToolInspector for OsvInspector {
         };
 
         // Only check package managers
-        if !Self::is_package_manager(binary) {
+        if !Self::is_package_manager(&binary) {
             return InspectionResult {
                 request_id: call.id.clone(),
                 action: InspectionAction::Allow,
@@ -1033,7 +1046,7 @@ impl ToolInspector for OsvInspector {
         }
 
         // Extract the package name
-        let Some(pkg_name) = self.extract_package_from_args(binary, &args) else {
+        let Some(pkg_name) = self.extract_package_from_args(&binary, &args) else {
             return InspectionResult {
                 request_id: call.id.clone(),
                 action: InspectionAction::Allow,

@@ -323,11 +323,13 @@ impl Tool for ReadFileTool {
         use std::io::Read;
         file.read_to_string(&mut content)?;
 
+        // Record original byte count before normalization
+        let total_bytes = content.len();
+
         // Normalize CRLF to LF for consistent processing and LLM context
         let (content, _line_ending) = crate::line_endings::normalize_and_detect(&content);
 
         let total_lines = content.lines().count();
-        let total_bytes = content.len();
         let path_display = path.display().to_string();
 
         // Check if user requested file statistics (highest priority mode)

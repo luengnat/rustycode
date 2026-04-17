@@ -137,15 +137,18 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             };
 
                             // Stream output in small chunks (by line, limited size)
-                            let out = result.output.clone();
+                            let out = rustycode_tools::truncation::truncate_bash_output(
+                                &result.output,
+                                &result.error.clone().unwrap_or_default(),
+                                result.exit_code.unwrap_or(-1)
+                            );
+                            let out_str = out.as_str();
                             let max_chunk = 1024usize;
-                            if !out.is_empty() {
-                                // Pre-allocate buffer for chunking output
+                            
+                            if !out_str.is_empty() {
                                 let mut buf = String::with_capacity(max_chunk);
-                                for line in out.lines() {
-                                    if !buf.is_empty() {
-                                        buf.push('\n');
-                                    }
+                                for line in out_str.lines() {
+                                    if !buf.is_empty() { buf.push('\n'); }
                                     buf.push_str(line);
                                     if buf.len() >= max_chunk {
                                         let chunk = serde_json::json!({
@@ -154,11 +157,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                             "chunk_type": "stdout",
                                             "text": buf,
                                         });
-                                        let _ = sender_clone
-                                            .lock()
-                                            .await
-                                            .send(Message::Text(Utf8Bytes::from(chunk.to_string())))
-                                            .await;
+                                        let _ = sender_clone.lock().await.send(Message::Text(chunk.to_string().into())).await;
                                         buf.clear();
                                     }
                                 }
@@ -169,11 +168,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                         "chunk_type": "stdout",
                                         "text": buf,
                                     });
-                                    let _ = sender_clone
-                                        .lock()
-                                        .await
-                                        .send(Message::Text(chunk.to_string().into()))
-                                        .await;
+                                    let _ = sender_clone.lock().await.send(Message::Text(chunk.to_string().into())).await;
                                 }
                             }
 
@@ -186,20 +181,14 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                         "chunk_type": "transform_chunk",
                                         "structured": data,
                                     });
-                                    let _ = sender_clone
-                                        .lock()
-                                        .await
-                                        .send(Message::Text(tchunk.to_string().into()))
-                                        .await;
+                                    let _ = sender_clone.lock().await.send(Message::Text(tchunk.to_string().into())).await;
                                 }
                             }
 
-                            // Store full result in server cache
-                            let _ = cache_clone.lock().await.insert(
-                                result.call_id.clone(),
-                                serde_json::to_value(&result)
-                                    .unwrap_or_else(|_| serde_json::json!({})),
-                            );
+                            // Store full result in server cache with robust serialization error handling
+                            if let Ok(serialized) = serde_json::to_value(&result) {
+                                let _ = cache_clone.lock().await.insert(result.call_id.clone(), serialized);
+                            }
 
                             // Final tool_done event with full ToolResult
                             let done = serde_json::json!({

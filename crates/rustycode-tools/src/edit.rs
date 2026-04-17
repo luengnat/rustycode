@@ -46,23 +46,38 @@ fn try_normalized_match(content: &str, old_text: &str, new_text: &str) -> Option
     }
 }
 
-/// Try matching where each line is trimmed of whitespace
+/// Try matching where each line is trimmed of whitespace.
+/// Returns the full file content with the matched window replaced by new_text.
 fn try_trimmed_match(content: &str, old_text: &str, new_text: &str) -> Option<String> {
     let content_lines: Vec<&str> = content.lines().collect();
     let old_lines: Vec<&str> = old_text.lines().collect();
     if old_lines.is_empty() || old_lines.len() > content_lines.len() {
         return None;
     }
-    for window in content_lines.windows(old_lines.len()) {
+    for (i, window) in content_lines.windows(old_lines.len()).enumerate() {
         if window
             .iter()
             .zip(old_lines.iter())
             .all(|(file_line, old_line)| file_line.trim() == old_line.trim())
         {
-            // Found matching window — replace it using the caller's new_text
+            // Found matching window — reconstruct the full file with replacement
             let line_ending = detect_line_ending(content);
-            let normalized = normalize_to_lf(new_text);
-            return Some(crate::line_endings::apply_line_ending(&normalized, line_ending));
+            let normalized_new = normalize_to_lf(new_text);
+            let new_lines: Vec<&str> = normalized_new.lines().collect();
+
+            let mut result_lines = Vec::with_capacity(
+                content_lines.len() - old_lines.len() + new_lines.len(),
+            );
+            // Lines before the match
+            result_lines.extend_from_slice(&content_lines[..i]);
+            // Replacement lines
+            result_lines.extend_from_slice(&new_lines);
+            // Lines after the match
+            let after = i + old_lines.len();
+            result_lines.extend_from_slice(&content_lines[after..]);
+
+            let joined = result_lines.join(line_ending.as_str());
+            return Some(joined);
         }
     }
     None
@@ -137,6 +152,13 @@ impl Tool for EditFile {
                 "File is too large for inline editing ({} bytes). Use other tools for large files.",
                 content.len()
             )));
+        }
+
+        // Reject empty old_text — it would match everywhere and produce nonsensical results
+        if input.old_text.is_empty() {
+            return Err(anyhow::anyhow!(
+                "old_text cannot be empty. Provide the text to search for and replace."
+            ));
         }
 
         // Try matching strategies in order: exact → line-ending-normalized → trimmed
@@ -464,5 +486,118 @@ mod tests {
         assert!(result.text.contains("File content"));
         assert!(result.text.contains("line one"));
         assert!(result.text.contains("Searched for"));
+    }
+
+    #[test]
+    fn edit_file_rejects_empty_old_text() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "hello world").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "",
+            "new_text": "injected"
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("empty"));
+    }
+
+    #[test]
+    fn edit_file_trimmed_match_preserves_surrounding_content() {
+        // Bug regression test: trimmed match must NOT discard lines around the match
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(
+            &test_file,
+            "line one\nline two\n    line three\nline four\nline five\n",
+        )
+        .unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "line two\nline three\nline four",
+            "new_text": "replaced two\nreplaced three\nreplaced four"
+        });
+
+        let _ = tool.execute(params, &ctx).unwrap();
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        // Must preserve lines before and after the match
+        assert!(content.contains("line one"), "should preserve line before match");
+        assert!(content.contains("line five"), "should preserve line after match");
+        assert!(content.contains("replaced two"));
+    }
+
+    #[test]
+    fn edit_file_exact_match_multiline() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "aaa\nbbb\nccc\nddd\neee\n").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "bbb\nccc\nddd",
+            "new_text": "BBB\nCCC\nDDD"
+        });
+
+        let _ = tool.execute(params, &ctx).unwrap();
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert_eq!(content, "aaa\nBBB\nCCC\nDDD\neee\n");
+    }
+
+    #[test]
+    fn edit_file_normalized_match_preserves_crlf() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "alpha\r\nbeta\r\ngamma\r\n").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "alpha\nbeta",
+            "new_text": "ALPHA\nBETA"
+        });
+
+        let result = tool.execute(params, &ctx).unwrap();
+        assert!(result.text.contains("Edited test.txt"));
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        // CRLF should be preserved
+        assert!(content.contains("ALPHA\r\nBETA"), "CRLF should be preserved in output");
+        assert!(content.contains("gamma\r\n"), "unmatched line should keep CRLF");
+    }
+
+    #[test]
+    fn edit_file_exact_match_single_line_no_newline() {
+        // File with no trailing newline should remain without one after exact match
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "hello world").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "world",
+            "new_text": "rust"
+        });
+
+        let _ = tool.execute(params, &ctx).unwrap();
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert_eq!(content, "hello rust");
+        assert!(!content.ends_with('\n'), "should not add trailing newline");
     }
 }

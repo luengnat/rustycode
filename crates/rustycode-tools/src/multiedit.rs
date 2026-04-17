@@ -321,6 +321,10 @@ fn validate_edit(edit_value: &Value, ctx: &ToolContext) -> Result<ValidatedEdit>
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("missing 'old_text' for edit operation"))?;
 
+            if old_text.is_empty() {
+                return Err(anyhow!("old_text cannot be empty"));
+            }
+
             let new_text = edit_value
                 .get("new_text")
                 .and_then(|v| v.as_str())

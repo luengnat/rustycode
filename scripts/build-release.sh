@@ -23,10 +23,12 @@ mkdir -p "$DIST_DIR"
 
 case "$PLATFORM" in
     linux-amd64)
-        echo "=== Building linux/amd64 via cargo-zigbuild (cross-compile from arm64 Mac) ==="
+        echo "=== Building linux/amd64 (static musl) via cargo-zigbuild ==="
         # TB 2.0 prebuilt images are all amd64 (x86_64).
-        # Uses cargo-zigbuild + zig for native cross-compilation (no QEMU).
-        # Requires: rustup target add x86_64-unknown-linux-gnu --toolchain nightly
+        # Uses musl for static linking — no dynamic linker dependency.
+        # This ensures the binary runs in ANY container, even fresh ones
+        # that lack /lib64/ld-linux-x86-64.so.2.
+        # Requires: rustup target add x86_64-unknown-linux-musl --toolchain nightly
         # Requires: zig, cargo-zigbuild installed
         export RUSTC="$(rustup which rustc --toolchain nightly 2>/dev/null || echo '')"
         if [ -z "$RUSTC" ]; then
@@ -35,8 +37,8 @@ case "$PLATFORM" in
         fi
         ~/.cargo/bin/cargo-zigbuild zigbuild \
             --release -p rustycode-cli --no-default-features \
-            --target x86_64-unknown-linux-gnu
-        cp "$PROJECT_ROOT/target/x86_64-unknown-linux-gnu/release/rustycode-cli" \
+            --target x86_64-unknown-linux-musl
+        cp "$PROJECT_ROOT/target/x86_64-unknown-linux-musl/release/rustycode-cli" \
            "$DIST_DIR/rustycode-linux-amd64"
         echo "  -> $DIST_DIR/rustycode-linux-amd64"
         ;;

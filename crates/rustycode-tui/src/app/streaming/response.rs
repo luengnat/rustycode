@@ -1072,12 +1072,14 @@ pub async fn stream_llm_response(config: StreamConfig) -> Result<()> {
                     content_blocks.push(ContentBlock::text(assistant_response.clone()));
                 }
 
-                let assistant_message = if !content_blocks.is_empty() {
-                    ChatMessage::assistant(MessageContent::Blocks(content_blocks.clone()))
-                } else {
-                    ChatMessage::assistant(assistant_response.clone())
-                };
-                messages.push(assistant_message);
+                // Append assistant message only if there is substantive content to send.
+                // If there are structured content blocks, push them as a Blocks-based message.
+                // Otherwise, push the plain textual assistant response only if non-empty.
+                if !content_blocks.is_empty() {
+                    messages.push(ChatMessage::assistant(MessageContent::Blocks(content_blocks.clone())));
+                } else if !assistant_response.is_empty() {
+                    messages.push(ChatMessage::assistant(assistant_response.clone()));
+                }
 
                 for tool_result in tool_executions {
                     let truncated_content = truncate_for_conversation(tool_result.result_content);

@@ -1634,6 +1634,8 @@ impl TUI {
         }
 
         self.add_system_message(full_summary);
+        // Ensure UI shows the latest summary by auto-scrolling to bottom
+        self.auto_scroll();
     }
 
     /// Print session summary to stdout after TUI exits.
@@ -1675,7 +1677,7 @@ impl TUI {
         if turn_count > 0 {
             println!(
                 "\n  Session: {} turns, {} tokens ({} in / {} out), {}, model: {}",
-                turn_count,
+                turn_count, 
                 fmt(total_tokens),
                 fmt(self.session_input_tokens),
                 fmt(self.session_output_tokens),

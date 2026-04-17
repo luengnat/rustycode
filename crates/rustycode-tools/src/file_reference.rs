@@ -121,7 +121,9 @@ fn should_process_reference(
 ) -> Option<PathBuf> {
     match sanitize_reference_path(reference, including_file_path, import_boundary) {
         Ok(path) => {
-            if visited.contains(&path) {
+            // Use canonical path for circular reference detection to handle symlinks
+            let canonical_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if visited.contains(&canonical_path) {
                 return None;
             }
             if !path.is_file() {
@@ -152,11 +154,13 @@ fn process_file_reference(
         return None;
     }
 
-    visited.insert(safe_path.to_path_buf());
+    // Use canonical path for visited tracking to handle symlinks consistently
+    let canonical = safe_path
+        .canonicalize()
+        .unwrap_or_else(|_| safe_path.to_path_buf());
+    visited.insert(canonical);
 
     let expanded_content = expand_file_references(safe_path, import_boundary, visited, depth + 1);
-
-    visited.remove(safe_path);
 
     let reference_pattern = format!("@{}", reference.to_string_lossy());
     let replacement = format!(
@@ -446,6 +450,9 @@ mod tests {
 
         let expanded = expand_references(&main, boundary);
 
+        // The circular dependency logic detects the cycle.
+        // We expect it to stop expansion gracefully.
+        // It should resolve one depth, the circular one is ignored.
         assert!(expanded.contains("Shared"));
         assert_eq!(expanded.matches("Shared").count(), 1);
     }

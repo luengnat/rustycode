@@ -42,18 +42,25 @@ pub fn detect_line_ending(content: &str) -> LineEnding {
 /// Normalize line endings to LF for internal processing.
 ///
 /// Converts all CRLF (`\r\n`) sequences to plain LF (`\n`).
+/// Also converts bare `\r` (classic Mac OS) to `\n`.
 /// This ensures consistent comparison and diff operations regardless
 /// of the platform that created the file.
 pub fn normalize_to_lf(content: &str) -> String {
-    content.replace("\r\n", "\n")
+    let content = content.replace("\r\n", "\n");
+    content.replace('\r', "\n")
 }
 
 /// Apply a specific line ending style to content.
 ///
 /// Converts all LF (`\n`) to the specified line ending.
-/// Content should already be normalized (only LF, no CRLF) before calling this.
+/// Content MUST already be normalized (only LF, no CRLF) before calling this.
+/// A debug assertion catches accidental double-conversion.
 /// This is used to restore the original line ending style after edits.
 pub fn apply_line_ending(content: &str, ending: LineEnding) -> String {
+    debug_assert!(
+        !content.contains("\r\n"),
+        "apply_line_ending called with CRLF content — normalize first"
+    );
     match ending {
         LineEnding::LF => content.to_string(),
         LineEnding::CRLF => content.replace('\n', "\r\n"),
@@ -232,5 +239,48 @@ mod tests {
     fn test_generate_diff_new_file() {
         let diff = generate_diff("", "new content\n", "new.txt", 100);
         assert!(diff.contains("+new content"));
+    }
+
+    #[test]
+    fn test_normalize_bare_cr() {
+        // Classic Mac OS line endings: bare \r without \n
+        assert_eq!(normalize_to_lf("hello\rworld"), "hello\nworld");
+        assert_eq!(normalize_to_lf("a\rb\r\nc"), "a\nb\nc");
+    }
+
+    #[test]
+    fn test_detect_bare_cr_treated_as_lf() {
+        // Bare \r (no \r\n) should detect as LF since we don't have a CR-only variant
+        assert_eq!(detect_line_ending("hello\rworld"), LineEnding::LF);
+    }
+
+    #[test]
+    fn test_generate_diff_truncation_keeps_changes() {
+        let old = (1..=100).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        // Change only 2 lines so all changes fit in limit of 5
+        let new_lines: Vec<String> = (1..=100)
+            .map(|i| if i == 50 || i == 51 { format!("CHANGED {i}") } else { format!("line {i}") })
+            .collect();
+        let new_content = new_lines.join("\n");
+        let diff = generate_diff(&old, &new_content, "big.txt", 5);
+        assert!(diff.contains("CHANGED"), "truncated diff should still contain changes: {diff}");
+    }
+
+    #[test]
+    fn test_apply_line_endings_on_normalized_content() {
+        let normalized = "line1\nline2\nline3\n";
+        let crlf = apply_line_ending(normalized, LineEnding::CRLF);
+        assert_eq!(crlf, "line1\r\nline2\r\nline3\r\n");
+        let back = normalize_to_lf(&crlf);
+        assert_eq!(back, normalized);
+    }
+
+    #[test]
+    fn test_roundtrip_bare_cr() {
+        // Bare \r gets normalized to \n, then roundtrips as LF
+        let original = "line1\rline2\rline3\r";
+        let (normalized, ending) = normalize_and_detect(original);
+        assert_eq!(ending, LineEnding::LF);
+        assert_eq!(normalized, "line1\nline2\nline3\n");
     }
 }

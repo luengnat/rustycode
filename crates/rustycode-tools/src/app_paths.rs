@@ -174,7 +174,15 @@ mod tests {
         let config_dir = AppPaths::config_dir();
         let path = AppPaths::in_config_dir("tool_permissions.yaml");
         assert!(path.to_string_lossy().ends_with("tool_permissions.yaml"));
-        assert!(path.starts_with(&config_dir));
+        // Use components comparison to handle symlinks or path normalization differences
+        let config_components: Vec<_> = config_dir.components().collect();
+        let path_components: Vec<_> = path.components().collect();
+        assert!(
+            path_components.starts_with(&config_components),
+            "path {} does not start with config_dir {}",
+            path.display(),
+            config_dir.display()
+        );
     }
 
     #[test]

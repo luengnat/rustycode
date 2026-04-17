@@ -10,7 +10,7 @@
 use super::event_loop::TUI;
 use crate::ui::message::Message;
 use anyhow::Result;
-use crossterm::event::{self, Event as CrosstermEvent, KeyCode};
+use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyModifiers};
 
 /// State for scrolling operations
 #[derive(Debug, Clone)]
@@ -81,6 +81,16 @@ impl TUI {
     pub(crate) fn handle_input(&mut self) -> Result<()> {
         match event::read() {
             Ok(CrosstermEvent::Key(key)) => {
+                // Centralized handling for Ctrl+K to open command palette before
+                // other input processing drops into the command palette handler.
+                if key.code == KeyCode::Char('k') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.showing_command_palette = true;
+                    self.showing_skill_palette = false;
+                    self.command_palette.show();
+                    self.command_palette.state_mut().clear_query();
+                    self.dirty = true;
+                    return Ok(());
+                }
                 // Handle special modal states first (priority order)
                 if self.handle_wizard_input(key)? {
                     return Ok(());

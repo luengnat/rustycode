@@ -49,31 +49,19 @@ class RustyCodeAgent(BaseInstalledAgent):
 
     async def install(self, environment: BaseEnvironment) -> None:
         """Install runtime dependencies in the container."""
-        # Install: bash (persistent shell), procps (nproc), python3 (some tasks),
-        # expect (TTY/unbuffer), coreutils (timeout command for bash tool)
-        # Kill any lingering apt/dpkg processes and clean locks to prevent
-        # verifier failures when it tries to install its own packages.
-        # Install in two phases to avoid setup timeouts under QEMU emulation.
-        # Phase 1: Quick packages (bash, procps, coreutils) — essential for agent operation
-        # Phase 2: Heavier packages (python3, expect) — nice to have
-        # Each phase has a generous timeout for QEMU environments.
+        # Only install ESSENTIAL packages to stay within harbor's setup timeout.
+        # bash (persistent shell), procps (nproc), coreutils (timeout command).
+        # python3/expect are omitted — they're large and cause QEMU timeout failures.
+        # The verifier installs its own deps; we just need basics for the agent.
+        # Clean dpkg locks to prevent verifier install failures.
         await self.exec_as_root(
             environment,
             command=(
                 "apt-get update -qq 2>/dev/null && "
-                "apt-get install -y -qq bash procps coreutils 2>/dev/null || true"
+                "apt-get install -y -qq bash procps coreutils 2>/dev/null || true; "
+                "rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock "
+                "/var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null || true"
             ),
-            timeout_sec=300,
-        )
-        await self.exec_as_root(
-            environment,
-            command=(
-                "apt-get install -y -qq python3 expect 2>/dev/null || true; "
-                "kill $(pgrep -f 'apt-get') 2>/dev/null || true; "
-                "rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null || true; "
-                "dpkg --configure -a 2>/dev/null || true"
-            ),
-            timeout_sec=300,
         )
 
     async def setup(self, environment: BaseEnvironment) -> None:
