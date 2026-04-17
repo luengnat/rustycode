@@ -877,4 +877,44 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&file_a).unwrap(), "goodbye from a");
         assert_eq!(std::fs::read_to_string(&file_b).unwrap(), "goodbye from b");
     }
+
+    #[test]
+    fn test_multiedit_atomic_no_temp_files_left() {
+        // Verify that after a successful edit, no .tmp files remain
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("data.txt");
+        std::fs::write(&test_file, "line one\nline two\nline three").unwrap();
+
+        let tool = MultiEditTool;
+        let ctx = ToolContext::new(workspace.path());
+
+        let result = tool.execute(
+            json!({
+                "edits": [{
+                    "path": "data.txt",
+                    "operation": "edit",
+                    "old_text": "line two",
+                    "new_text": "line 2"
+                }]
+            }),
+            &ctx,
+        );
+        assert!(result.is_ok());
+
+        // No .tmp files should remain
+        let tmp_files: Vec<_> = std::fs::read_dir(workspace.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .is_some_and(|ext| ext == "tmp")
+            })
+            .collect();
+        assert!(tmp_files.is_empty(), "Left temp files: {:?}", tmp_files);
+
+        // File should have the edit applied
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert_eq!(content, "line one\nline 2\nline three");
+    }
 }

@@ -357,4 +357,60 @@ mod tests {
 
         assert_eq!(result.unwrap(), "default_value");
     }
+
+    #[test]
+    fn test_expand_env_vars_simple() {
+        std::env::set_var("MY_API_KEY", "secret123");
+        let engine = SubstitutionEngine::new();
+        let result = engine.expand_env_vars("Bearer ${MY_API_KEY}");
+        assert_eq!(result, "Bearer secret123");
+    }
+
+    #[test]
+    fn test_expand_env_vars_default_used() {
+        std::env::remove_var("NONEXISTENT_VAR_XYZ");
+        let engine = SubstitutionEngine::new();
+        let result = engine.expand_env_vars("${NONEXISTENT_VAR_XYZ:-fallback}");
+        assert_eq!(result, "fallback");
+    }
+
+    #[test]
+    fn test_expand_env_vars_default_not_used_when_set() {
+        std::env::set_var("EXISTING_VAR_ABC", "actual");
+        let engine = SubstitutionEngine::new();
+        let result = engine.expand_env_vars("${EXISTING_VAR_ABC:-fallback}");
+        assert_eq!(result, "actual");
+    }
+
+    #[test]
+    fn test_expand_env_vars_missing_no_default() {
+        std::env::remove_var("TOTALLY_MISSING_VAR");
+        let engine = SubstitutionEngine::new();
+        let result = engine.expand_env_vars("key=${TOTALLY_MISSING_VAR}");
+        assert_eq!(result, "key=");
+    }
+
+    #[test]
+    fn test_expand_env_vars_multiple() {
+        std::env::set_var("HOST", "localhost");
+        std::env::set_var("PORT", "5432");
+        let engine = SubstitutionEngine::new();
+        let result = engine.expand_env_vars("postgresql://${HOST}:${PORT}/mydb");
+        assert_eq!(result, "postgresql://localhost:5432/mydb");
+    }
+
+    #[test]
+    fn test_expand_env_vars_no_vars() {
+        let engine = SubstitutionEngine::new();
+        let result = engine.expand_env_vars("plain string no vars");
+        assert_eq!(result, "plain string no vars");
+    }
+
+    #[test]
+    fn test_expand_env_vars_url_with_default() {
+        std::env::remove_var("API_BASE_URL");
+        let engine = SubstitutionEngine::new();
+        let result = engine.expand_env_vars("${API_BASE_URL:-https://api.example.com}/mcp");
+        assert_eq!(result, "https://api.example.com/mcp");
+    }
 }

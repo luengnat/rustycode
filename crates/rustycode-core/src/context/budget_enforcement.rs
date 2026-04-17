@@ -147,4 +147,77 @@ mod tests {
         // Should include high-priority items first
         assert!(!selected.is_empty());
     }
+
+    #[test]
+    fn test_enforce_budget_exact_fit() {
+        // Items that exactly fill the budget
+        let items = vec!["abc", "def", "ghi"];
+        let budget = 9; // 3+3+3
+        let selected = enforce_budget(&items, budget, |s| s.len()).unwrap();
+        assert_eq!(selected.len(), 3);
+    }
+
+    #[test]
+    fn test_enforce_budget_single_oversized() {
+        // A single item that exceeds budget
+        let items = vec!["a very long string"];
+        let budget = 5;
+        let selected = enforce_budget(&items, budget, |s| s.len()).unwrap();
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn test_enforce_budget_stops_at_first_oversized() {
+        // First item fits, second doesn't, third would fit but is never checked
+        let items = vec!["ab", "oversized-item", "cd"];
+        let budget = 10;
+        let selected = enforce_budget(&items, budget, |s| s.len()).unwrap();
+        assert_eq!(selected.len(), 1); // Only "ab"
+        assert_eq!(selected[0], &"ab");
+    }
+
+    #[test]
+    fn test_enforce_budget_zero_token_items() {
+        // Items with 0 tokens always fit within budget
+        let items = vec!["", "", ""];
+        let budget = 0;
+        let selected = enforce_budget(&items, budget, |s| s.len()).unwrap();
+        assert_eq!(selected.len(), 3);
+    }
+
+    #[test]
+    fn test_enforce_budget_prioritized_skips_oversized() {
+        // High-priority item too large, but lower-priority items still fit
+        let items = vec![
+            ("critical", "a huge amount of text that won't fit"),
+            ("high", "short"),
+            ("low", "xy"),
+        ];
+        let budget = 10;
+        let selected =
+            enforce_budget_prioritized(&items, budget, |item| item.1.len()).unwrap();
+        // "critical" is too large (40 chars) so it's skipped.
+        // "high" (5 chars) fits, "low" (2 chars) fits.
+        assert_eq!(selected.len(), 2);
+        assert_eq!(selected[0].0, "high");
+        assert_eq!(selected[1].0, "low");
+    }
+
+    #[test]
+    fn test_enforce_budget_prioritized_all_fit() {
+        let items = vec![("a", "x"), ("b", "y"), ("c", "z")];
+        let budget = 100;
+        let selected =
+            enforce_budget_prioritized(&items, budget, |item| item.1.len()).unwrap();
+        assert_eq!(selected.len(), 3);
+    }
+
+    #[test]
+    fn test_enforce_budget_no_overflow() {
+        // Very large token counts should not overflow
+        let items = vec!["x"];
+        let budget = usize::MAX;
+        let selected = enforce_budget(&items, budget, |s| s.len()).unwrap();
+        assert_eq!(selected.len(), 1);
+    }
 }
