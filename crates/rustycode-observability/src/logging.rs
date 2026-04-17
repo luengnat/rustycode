@@ -91,6 +91,8 @@ pub async fn clear_log_context() {
 }
 
 /// Initialize logging with structured output
+///
+/// Safe to call multiple times — subsequent calls after the first are no-ops.
 pub fn init_logging(level: LogLevel) -> Result<()> {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
@@ -99,10 +101,16 @@ pub fn init_logging(level: LogLevel) -> Result<()> {
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level.as_str()));
 
-    tracing_subscriber::registry()
+    // `try_init` returns Err if a subscriber is already set, avoiding a panic
+    // on repeated calls (e.g., in tests or when multiple components initialize).
+    let result = tracing_subscriber::registry()
         .with(env_filter)
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
-        .init();
+        .try_init();
+
+    if result.is_err() {
+        tracing::debug!("Logging subscriber already initialized, skipping");
+    }
 
     Ok(())
 }

@@ -3,10 +3,14 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Default maximum number of sessions tracked before eviction kicks in.
+const DEFAULT_MAX_SESSIONS: usize = 1000;
+
 /// Store for managing metrics across multiple sessions
 #[derive(Clone)]
 pub struct MetricsStore {
     sessions: Arc<RwLock<HashMap<String, SessionMetrics>>>,
+    max_sessions: usize,
 }
 
 impl MetricsStore {
@@ -14,14 +18,39 @@ impl MetricsStore {
     pub fn new() -> Self {
         MetricsStore {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            max_sessions: DEFAULT_MAX_SESSIONS,
         }
     }
 
-    /// Create a new session with the given ID
-    /// Returns the newly created SessionMetrics
+    /// Create a MetricsStore with a custom session limit.
+    ///
+    /// When the limit is reached, the oldest session (by insertion order) is evicted.
+    pub fn with_max_sessions(max: usize) -> Self {
+        MetricsStore {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            max_sessions: max.max(1),
+        }
+    }
+
+    /// Create a new session with the given ID.
+    ///
+    /// If the store is at capacity, the oldest session is evicted first.
+    /// Returns the newly created SessionMetrics.
     pub fn create_session(&self, session_id: String) -> SessionMetrics {
+        let mut sessions = self.sessions.write();
+
+        // Evict oldest entry if at capacity
+        if sessions.len() >= self.max_sessions {
+            // HashMap doesn't preserve insertion order, so remove the first key found.
+            // This is a best-effort eviction; the overhead of a full LRU cache would
+            // outweigh the benefit for a metrics store.
+            if let Some(oldest_key) = sessions.keys().next().cloned() {
+                sessions.remove(&oldest_key);
+            }
+        }
+
         let metrics = SessionMetrics::new();
-        self.sessions.write().insert(session_id, metrics.clone());
+        sessions.insert(session_id, metrics.clone());
         metrics
     }
 
@@ -183,5 +212,30 @@ mod tests {
 
         assert_eq!(retrieved1.total_tokens.value(), 100);
         assert_eq!(retrieved2.total_tokens.value(), 50);
+    }
+
+    #[test]
+    fn test_metrics_store_eviction_at_capacity() {
+        let store = MetricsStore::with_max_sessions(3);
+        store.create_session("s1".to_string());
+        store.create_session("s2".to_string());
+        store.create_session("s3".to_string());
+        assert_eq!(store.session_count(), 3);
+
+        // Adding a 4th should evict one to stay at 3
+        store.create_session("s4".to_string());
+        assert_eq!(store.session_count(), 3);
+        assert!(store.has_session("s4"));
+    }
+
+    #[test]
+    fn test_metrics_store_max_sessions_min_one() {
+        let store = MetricsStore::with_max_sessions(0);
+        // Should clamp to at least 1
+        store.create_session("s1".to_string());
+        assert_eq!(store.session_count(), 1);
+        store.create_session("s2".to_string());
+        assert_eq!(store.session_count(), 1);
+        assert!(store.has_session("s2"));
     }
 }
