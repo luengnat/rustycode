@@ -51,11 +51,16 @@ class RustyCodeAgent(BaseInstalledAgent):
         """Install runtime dependencies in the container."""
         # Install: bash (persistent shell), procps (nproc), python3 (some tasks),
         # expect (TTY/unbuffer), coreutils (timeout command for bash tool)
+        # Kill any lingering apt/dpkg processes and clean locks to prevent
+        # verifier failures when it tries to install its own packages.
         await self.exec_as_root(
             environment,
             command=(
                 "apt-get update -qq && "
-                "apt-get install -y -qq bash procps python3 expect coreutils 2>/dev/null || true"
+                "apt-get install -y -qq bash procps python3 expect coreutils 2>/dev/null || true; "
+                "kill $(pgrep -f 'apt-get') 2>/dev/null || true; "
+                "rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null || true; "
+                "dpkg --configure -a 2>/dev/null || true"
             ),
         )
 
