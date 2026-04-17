@@ -230,6 +230,7 @@ pub mod tool_executor;
 pub mod tool_selection_helper;
 pub mod tools;
 pub mod usage_estimator;
+pub mod zhipu;
 
 use anyhow::{Context, Result};
 use secrecy::SecretString;
@@ -288,6 +289,7 @@ pub use rate_limiter::{RateLimitConfig, RateLimitType, RateLimiter, RateLimiterB
 pub use registry::ProviderRegistryBuilder;
 pub use retry::{is_retryable_error, retry_with_backoff, RetryConfig};
 pub use together::TogetherProvider;
+pub use zhipu::ZhipuProvider;
 pub use token_tracker::{
     cost_per_million_tokens, cost_per_million_tokens_io, estimate_cost, ModelUsage, TokenTracker,
     TrackedRequest, UsageSummary,

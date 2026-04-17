@@ -397,9 +397,13 @@ impl LLMProvider for ZhipuProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secrecy::SecretString;
     #[test]
     fn test_zhipu_provider_creation() {
-        let config = ProviderConfig::default();
+        let config = ProviderConfig {
+            api_key: Some(SecretString::new("test-key".into())),
+            ..Default::default()
+        };
         let provider = ZhipuProvider::new(config);
         assert!(provider.is_ok());
     }
