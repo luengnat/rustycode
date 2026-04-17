@@ -299,7 +299,10 @@ impl Tool for ReadFileTool {
         }
 
         if allow_binary {
-            let bytes = fs::read(&path)?;
+            let mut f = open_file_symlink_safe(&path)?;
+            let mut bytes = Vec::new();
+            use std::io::Read;
+            f.read_to_end(&mut bytes)?;
             let total_bytes = bytes.len();
             let preview = truncate_bytes_to_boundary(&bytes, WEB_FETCH_MAX_CHARS);
             let encoded = STANDARD.encode(preview);
@@ -636,10 +639,17 @@ impl Tool for WriteFileTool {
         }
 
         // Read existing content for diff generation (if file exists)
+        // Use symlink-safe read to prevent TOCTOU: an attacker could replace
+        // the file with a symlink between validate_write_path and this read
         let old_content = if binary_bytes.is_some() {
             Vec::new()
+        } else if let Ok(mut f) = open_file_symlink_safe(&path) {
+            use std::io::Read;
+            let mut buf = String::new();
+            f.read_to_string(&mut buf).unwrap_or(0);
+            buf.into_bytes()
         } else {
-            fs::read_to_string(&path).unwrap_or_default().into_bytes()
+            Vec::new()
         };
 
         // Create parent directories if needed (atomic - no TOCTOU)

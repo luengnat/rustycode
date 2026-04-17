@@ -306,8 +306,8 @@ pub fn is_likely_command(cmd: &str) -> bool {
 /// assert!(sanitize_command("rm -rf /; echo bad").is_none());
 /// ```
 pub fn sanitize_command(cmd: &str) -> Option<String> {
-    // Shell injection patterns
-    let shell_injection = regex::Regex::new(r"[;|`]|\$\(").unwrap();
+    // Shell injection patterns: ; | ` && > < newline $(  ${}
+    let shell_injection = regex::Regex::new(r"[;|`><\n]|&&|\$\(|\$\{").unwrap();
 
     if shell_injection.is_match(cmd) {
         return None;
@@ -667,6 +667,12 @@ mod tests {
         assert!(sanitize_command("rm -rf /; echo bad").is_none());
         assert!(sanitize_command("cat file | grep test").is_none());
         assert!(sanitize_command("echo $(whoami)").is_none());
+        // Additional injection patterns
+        assert!(sanitize_command("echo bad && cat /etc/passwd").is_none());
+        assert!(sanitize_command("cat /etc/passwd > stolen.txt").is_none());
+        assert!(sanitize_command("cat < /etc/passwd").is_none());
+        assert!(sanitize_command("echo ${IFS}injection").is_none());
+        assert!(sanitize_command("echo bad\nevil_command").is_none());
     }
 
     #[test]

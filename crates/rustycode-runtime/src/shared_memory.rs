@@ -297,7 +297,9 @@ impl SharedWorkingMemory {
         };
 
         // Check size limits
-        let entry_size = serde_json::to_vec(&entry).unwrap().len();
+        let entry_size = serde_json::to_vec(&entry)
+            .map_err(|e| crate::workflow::WorkflowError::Validation(format!("entry serialization failed: {}", e)))?
+            .len();
         if entry_size > self.max_entry_size {
             return Err(crate::workflow::WorkflowError::Validation(format!(
                 "Entry size {} exceeds maximum {}",

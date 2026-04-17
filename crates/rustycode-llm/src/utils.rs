@@ -21,7 +21,7 @@ use std::sync::Arc;
 ///     &provider,
 ///     "What is the capital of France?",
 ///     Some("You are a helpful geography assistant."),
-///     "claude-3-5-sonnet-20241022"
+///     "claude-sonnet-4-6"
 /// ).await?;
 /// ```
 pub async fn llm_call(
@@ -348,7 +348,7 @@ pub fn extract_reasoning_effort(model_name: &str) -> (String, Option<ReasoningEf
 /// assert!(is_reasoning_model("o1-preview"));
 /// assert!(is_reasoning_model("gpt-5-turbo"));
 /// assert!(!is_reasoning_model("gpt-4o"));
-/// assert!(!is_reasoning_model("claude-3-5-sonnet"));
+/// assert!(!is_reasoning_model("claude-sonnet-4-6"));
 /// ```
 pub fn is_reasoning_model(model_name: &str) -> bool {
     model_name.starts_with("o1")
@@ -484,8 +484,8 @@ Add authentication"#;
         assert_eq!(base, "gpt-4o");
         assert_eq!(effort, None);
 
-        let (base, effort) = extract_reasoning_effort("claude-3-5-sonnet");
-        assert_eq!(base, "claude-3-5-sonnet");
+        let (base, effort) = extract_reasoning_effort("claude-sonnet-4-6");
+        assert_eq!(base, "claude-sonnet-4-6");
         assert_eq!(effort, None);
     }
 
@@ -506,7 +506,7 @@ Add authentication"#;
         assert!(is_reasoning_model("gpt-5-turbo"));
         assert!(!is_reasoning_model("gpt-4o"));
         assert!(!is_reasoning_model("gpt-4-turbo"));
-        assert!(!is_reasoning_model("claude-3-5-sonnet"));
+        assert!(!is_reasoning_model("claude-sonnet-4-6"));
         assert!(!is_reasoning_model("mistral-large"));
     }
 

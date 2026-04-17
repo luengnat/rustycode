@@ -76,7 +76,11 @@ fn try_trimmed_match(content: &str, old_text: &str, new_text: &str) -> Option<St
             let after = i + old_lines.len();
             result_lines.extend_from_slice(&content_lines[after..]);
 
-            let joined = result_lines.join(line_ending.as_str());
+            let mut joined = result_lines.join(line_ending.as_str());
+            // Preserve trailing newline if original had one
+            if content.ends_with('\n') || content.ends_with("\r\n") {
+                joined.push_str(line_ending.as_str());
+            }
             return Some(joined);
         }
     }
@@ -599,5 +603,142 @@ mod tests {
         let content = std::fs::read_to_string(&test_file).unwrap();
         assert_eq!(content, "hello rust");
         assert!(!content.ends_with('\n'), "should not add trailing newline");
+    }
+
+    /// Integration test: read normalizes CRLF→LF, edit handles CRLF files correctly
+    #[test]
+    fn edit_file_after_read_normalization() {
+        // Simulate what happens in production: read_file gives the LLM LF-normalized
+        // content, the LLM sends old_text with LF, but the actual file has CRLF.
+        // edit_file's normalized match strategy handles this.
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "line one\r\nline two\r\nline three\r\n").unwrap();
+
+        // LLM sees (from read_file): "line one\nline two\nline three"
+        // LLM sends old_text with LF, edit_file should handle CRLF
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "line two",
+            "new_text": "LINE TWO"
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        // CRLF should be preserved in unchanged lines
+        assert!(content.contains("line one\r\n"), "CRLF preserved before edit");
+        assert!(content.contains("LINE TWO"), "replacement applied");
+        assert!(content.contains("line three\r\n"), "CRLF preserved after edit");
+    }
+
+    /// Integration test: trimmed match works for indented code
+    #[test]
+    fn edit_file_trimmed_match_for_indented_code() {
+        // LLM often normalizes indentation. Trimmed match handles this.
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.rs");
+        std::fs::write(
+            &test_file,
+            "fn main() {\n    let x = 1;\n    println!(\"{}\", x);\n}\n",
+        )
+        .unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        // LLM sends without indentation
+        let params = serde_json::json!({
+            "path": "test.rs",
+            "old_text": "let x = 1;\nprintln!(\"{}\", x);",
+            "new_text": "let x = 2;\nprintln!(\"{}\", x);"
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert!(content.contains("let x = 2;"), "replacement applied");
+        assert!(content.contains("fn main()"), "surrounding code preserved");
+        assert!(content.contains("}"), "closing brace preserved");
+    }
+
+    /// Integration test: edit only replaces first occurrence
+    #[test]
+    fn edit_file_single_replacement_only() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "aaa\nbbb\naaa\nccc\naaa\n").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "aaa",
+            "new_text": "XXX"
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert_eq!(content, "XXX\nbbb\naaa\nccc\naaa\n", "only first occurrence replaced");
+    }
+
+    /// Regression test: trimmed match must preserve trailing newlines
+    #[test]
+    fn edit_file_trimmed_match_preserves_trailing_newline() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "if true {\n    old();\n}\n").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "if true {\nold();\n}",
+            "new_text": "if true {\nnew();\n}"
+        });
+
+        let _ = tool.execute(params, &ctx).unwrap();
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert!(
+            content.ends_with('\n'),
+            "trailing newline must be preserved, got: {:?}",
+            content
+        );
+        assert!(content.contains("new();"));
+    }
+
+    /// Regression test: trimmed match must preserve CRLF trailing newlines
+    #[test]
+    fn edit_file_trimmed_match_preserves_crlf_trailing_newline() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "if true {\r\n    old();\r\n}\r\n").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "if true {\nold();\n}",
+            "new_text": "if true {\nnew();\n}"
+        });
+
+        let _ = tool.execute(params, &ctx).unwrap();
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert!(
+            content.ends_with("\r\n"),
+            "CRLF trailing newline must be preserved, got: {:?}",
+            content
+        );
+        assert!(content.contains("new();"));
     }
 }

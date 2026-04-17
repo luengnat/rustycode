@@ -40,6 +40,9 @@ struct AnthropicRequest {
     /// Enable prompt caching for cache hits (reduces costs by 90%)
     #[serde(skip_serializing_if = "Option::is_none")]
     cache_control: Option<CacheControl>,
+    /// Output configuration for structured outputs and effort control
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_config: Option<crate::provider_v2::OutputConfig>,
 }
 
 #[derive(Deserialize)]
@@ -58,7 +61,6 @@ struct AnthropicResponse {
     #[allow(dead_code)] // Kept for future use
     role: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)] // Kept for future use
     stop_reason: Option<String>,
     #[serde(default)]
     #[allow(dead_code)] // Kept for future use
@@ -303,6 +305,7 @@ impl AnthropicProvider {
             cache_control: Some(CacheControl {
                 cache_type: "ephemeral",
             }),
+            output_config: request.output_config,
         };
 
         tracing::info!("Sending request with model: {}", request.model);
@@ -368,10 +371,11 @@ impl AnthropicProvider {
             ))
         })?;
 
-        // Extract both text and tool_use content blocks
+        // Extract text, tool_use, and refusal content blocks
         let mut content_parts: Vec<String> = Vec::new();
         let mut tool_calls: Vec<serde_json::Value> = Vec::new();
         let mut all_citations: Vec<crate::provider_v2::Citation> = Vec::new();
+        let mut refused = false;
 
         for block in &anthropic_response.content {
             if block.content_type == "text" && !block.text.is_empty() {
@@ -395,6 +399,16 @@ impl AnthropicProvider {
                     "arguments": block.input
                 });
                 tool_calls.push(tool_call);
+            } else if block.content_type == "refusal" {
+                // Handle refusal content blocks (Claude 4 models)
+                refused = true;
+                if !block.text.is_empty() {
+                    tracing::warn!("Model refused: {}", block.text);
+                    content_parts.push(format!("[REFUSAL] {}", block.text));
+                } else {
+                    tracing::warn!("Model refused (no reason provided)");
+                    content_parts.push("[REFUSAL]".to_string());
+                }
             }
         }
 
@@ -427,7 +441,16 @@ impl AnthropicProvider {
             content: content_parts.join("\n"),
             model: anthropic_response.model,
             usage: Some(usage),
-            stop_reason: Some("end_turn".to_string()),
+            stop_reason: anthropic_response.stop_reason.or_else(|| {
+                // Infer stop_reason from content if not explicitly provided
+                if refused {
+                    Some("refusal".to_string())
+                } else if !tool_calls.is_empty() {
+                    Some("tool_use".to_string())
+                } else {
+                    Some("end_turn".to_string())
+                }
+            }),
             citations: if all_citations.is_empty() {
                 None
             } else {
@@ -951,16 +974,16 @@ impl LLMProvider for AnthropicProvider {
             // Claude 4.7
             "claude-opus-4-7-20260401".to_string(),
             // Claude 4.5 (with extended thinking)
-            "claude-opus-4-20250514".to_string(),
-            "claude-sonnet-4-20250514".to_string(),
+            "claude-opus-4-6".to_string(),
+            "claude-sonnet-4-6".to_string(),
             // Claude 4.0
             "claude-opus-4-20250214".to_string(),
             "claude-sonnet-4-20250214".to_string(),
             // Claude 3.7
             "claude-3-7-sonnet-20250219".to_string(),
             // Claude 3.5
-            "claude-3-5-sonnet-20241022".to_string(),
-            "claude-3-5-haiku-20241022".to_string(),
+            "claude-sonnet-4-6".to_string(),
+            "claude-haiku-4-5-20251001".to_string(),
         ])
     }
 
@@ -1070,6 +1093,7 @@ impl AnthropicProvider {
             cache_control: Some(CacheControl {
                 cache_type: "ephemeral",
             }),
+            output_config: request.output_config,
         };
 
         // Build the request, adding advisor beta header if configured
@@ -1485,26 +1509,26 @@ mod tests {
     #[test]
     fn test_requires_api_key() {
         let config = make_config(None);
-        assert!(AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string()).is_err());
+assert!(AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).is_err());
     }
 
     #[test]
     fn test_accepts_valid_api_key() {
         let config = make_config(Some("test-key"));
-        assert!(AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string()).is_ok());
+assert!(AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).is_ok());
     }
 
     #[test]
     fn test_rejects_empty_api_key() {
         let config = make_config(Some(""));
-        assert!(AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string()).is_err());
+assert!(AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).is_err());
     }
 
     #[test]
     fn test_provider_name() {
         let config = make_config(Some("test-key"));
         let provider =
-            AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string()).unwrap();
+AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
         assert_eq!(provider.name(), "anthropic");
     }
 
@@ -1715,7 +1739,7 @@ mod tests {
     fn test_anthropic_endpoint_default() {
         let config = make_config(Some("test-key"));
         let provider =
-            AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string()).unwrap();
+AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
         assert_eq!(provider.endpoint(), "https://api.anthropic.com/v1/messages");
     }
 
@@ -1724,7 +1748,7 @@ mod tests {
         let mut config = make_config(Some("test-key"));
         config.base_url = Some("https://my-proxy.example.com".to_string());
         let provider =
-            AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string()).unwrap();
+AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
         assert_eq!(
             provider.endpoint(),
             "https://my-proxy.example.com/v1/messages"
@@ -1787,6 +1811,7 @@ mod tests {
             cache_control: Some(CacheControl {
                 cache_type: "ephemeral",
             }),
+            output_config: None,
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"model\":\"claude-sonnet-4-20250514\""));
@@ -2085,5 +2110,112 @@ mod tests {
         assert_eq!(result.len(), 1);
         let text = extract_anthropic_text(&result[0].content).unwrap();
         assert_eq!(text, long_text);
+    }
+
+    // ── Stop reason and refusal handling tests ──────────────────────────────
+
+    #[test]
+    fn test_anthropic_response_stop_reason_tool_use() {
+        let json = r#"{
+            "content": [
+                {"type": "tool_use", "text": "", "id": "tu_1", "name": "read_file", "input": {"path": "main.rs"}}
+            ],
+            "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+            "model": "claude-sonnet-4-6",
+            "stop_reason": "tool_use"
+        }"#;
+        let response: AnthropicResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.stop_reason.as_deref(), Some("tool_use"));
+    }
+
+    #[test]
+    fn test_anthropic_response_stop_reason_refusal() {
+        let json = r#"{
+            "content": [
+                {"type": "text", "text": "I cannot", "id": "", "name": "", "input": null}
+            ],
+            "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+            "model": "claude-sonnet-4-6",
+            "stop_reason": "refusal"
+        }"#;
+        let response: AnthropicResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.stop_reason.as_deref(), Some("refusal"));
+    }
+
+    #[test]
+    fn test_anthropic_response_stop_reason_max_tokens() {
+        let json = r#"{
+            "content": [
+                {"type": "text", "text": "The answer is...", "id": "", "name": "", "input": null}
+            ],
+            "usage": {"input_tokens": 10, "output_tokens": 4096, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+            "model": "claude-sonnet-4-6",
+            "stop_reason": "max_tokens"
+        }"#;
+        let response: AnthropicResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.stop_reason.as_deref(), Some("max_tokens"));
+    }
+
+    #[test]
+    fn test_anthropic_response_stop_reason_end_turn() {
+        let json = r#"{
+            "content": [
+                {"type": "text", "text": "Done!", "id": "", "name": "", "input": null}
+            ],
+            "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+            "model": "claude-sonnet-4-6",
+            "stop_reason": "end_turn"
+        }"#;
+        let response: AnthropicResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.stop_reason.as_deref(), Some("end_turn"));
+    }
+
+    #[test]
+    fn test_anthropic_request_serializes_output_config() {
+        let request = AnthropicRequest {
+            model: "claude-sonnet-4-6".to_string(),
+            messages: vec![],
+            max_tokens: 4096,
+            temperature: 0.7,
+            system: None,
+            stream: Some(false),
+            tools: None,
+            effort: None,
+            thinking: None,
+            cache_control: None,
+            output_config: Some(crate::provider_v2::OutputConfig::with_effort(
+                crate::provider_v2::EffortLevel::High,
+            )),
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"output_config\""));
+        assert!(json.contains("\"effort\":\"high\""));
+    }
+
+    #[test]
+    fn test_anthropic_request_serializes_json_schema_output() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "answer": {"type": "string"}
+            },
+            "required": ["answer"]
+        });
+        let request = AnthropicRequest {
+            model: "claude-sonnet-4-6".to_string(),
+            messages: vec![],
+            max_tokens: 4096,
+            temperature: 0.7,
+            system: None,
+            stream: Some(false),
+            tools: None,
+            effort: None,
+            thinking: None,
+            cache_control: None,
+            output_config: Some(crate::provider_v2::OutputConfig::with_json_schema(schema)),
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"output_config\""));
+        assert!(json.contains("\"json_schema\""));
     }
 }

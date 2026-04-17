@@ -123,19 +123,43 @@ impl BackupManager {
             .next()
             .ok_or_else(|| anyhow!("No backups found for {}", filename))?;
 
-        // Restore from backup
-        fs::copy(&most_recent, path)
-            .map_err(|e| anyhow!("Failed to restore from backup: {}", e))?;
+        // Restore from backup using symlink-safe I/O to prevent TOCTOU
+        let mut src = open_file_symlink_safe(&most_recent)
+            .map_err(|e| anyhow!("Failed to open backup: {}", e))?;
+        let mut content = Vec::new();
+        use std::io::Read;
+        src.read_to_end(&mut content)
+            .map_err(|e| anyhow!("Failed to read backup: {}", e))?;
+
+        let mut dst = create_file_symlink_safe(path)
+            .map_err(|e| anyhow!("Failed to open file for restore: {}", e))?;
+        use std::io::Write;
+        dst.write_all(&content)
+            .map_err(|e| anyhow!("Failed to write restored content: {}", e))?;
+        dst.sync_all()
+            .map_err(|e| anyhow!("Failed to sync restored file: {}", e))?;
 
         Ok(())
     }
 
     /// List all backups for a file, sorted by timestamp (newest first)
     fn list_backups(&self, filename: &str) -> Result<Vec<PathBuf>> {
-        let _pattern = format!("{}.*.backup", filename);
+        // Backup format: {filename}.{timestamp}.backup
+        // Must match exactly: filename + "." + digits + ".backup"
+        let expected_prefix = format!("{}.", filename);
+        let suffix = ".backup";
         let mut backups: Vec<_> = fs::read_dir(&self.backup_dir)?
             .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_name().to_string_lossy().starts_with(filename))
+            .filter(|entry| {
+                let file_name = entry.file_name();
+                let name = file_name.to_string_lossy();
+                if !name.starts_with(&expected_prefix) || !name.ends_with(suffix) {
+                    return false;
+                }
+                // Extract the middle part (should be just the timestamp digits)
+                let middle = &name[expected_prefix.len()..name.len() - suffix.len()];
+                middle.chars().all(|c| c.is_ascii_digit())
+            })
             .map(|entry| entry.path())
             .collect();
 
@@ -489,6 +513,9 @@ impl ClaudeTextEditor {
         use std::io::Read;
         file.read_to_string(&mut old_content)?;
 
+        // Detect original line ending before splitting
+        let line_ending = if old_content.contains("\r\n") { "\r\n" } else { "\n" };
+
         let mut lines: Vec<&str> = old_content.lines().collect();
         let total_lines = lines.len();
 
@@ -510,8 +537,12 @@ impl ClaudeTextEditor {
         }
         lines.splice(insert_idx..insert_idx, insert_lines.iter().copied());
 
-        // Write back using symlink-safe operation
-        let new_content = lines.join("\n");
+        // Write back using symlink-safe operation, preserving original line endings
+        let mut new_content = lines.join(line_ending);
+        // Preserve trailing newline if original had one
+        if old_content.ends_with('\n') || old_content.ends_with("\r\n") {
+            new_content.push_str(line_ending);
+        }
         let mut file = create_file_symlink_safe(&path)?;
         use std::io::Write;
         file.write_all(new_content.as_bytes())?;
@@ -970,5 +1001,131 @@ mod tests {
         // Verify undo restored original content
         let content = fs::read_to_string(&test_file).unwrap();
         assert_eq!(content, "original content");
+    }
+
+    #[test]
+    fn test_insert_preserves_crlf() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        fs::write(&test_file, "line1\r\nline2\r\nline3\r\n").unwrap();
+
+        let tool = ClaudeTextEditor;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "command": "insert",
+            "path": "test.txt",
+            "line": 2,
+            "content": "inserted"
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+
+        let content = fs::read_to_string(&test_file).unwrap();
+        assert!(content.contains("line1\r\n"), "CRLF before insert");
+        assert!(content.contains("inserted\r\n"), "inserted line should have CRLF");
+        assert!(content.contains("line2\r\n"), "CRLF after insert");
+        assert!(content.ends_with("\r\n"), "trailing CRLF preserved");
+    }
+
+    #[test]
+    fn test_insert_preserves_trailing_newline() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        fs::write(&test_file, "line1\nline2\nline3\n").unwrap();
+
+        let tool = ClaudeTextEditor;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "command": "insert",
+            "path": "test.txt",
+            "line": 2,
+            "content": "inserted"
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+
+        let content = fs::read_to_string(&test_file).unwrap();
+        assert!(content.ends_with('\n'), "trailing newline preserved");
+        assert!(content.contains("inserted"));
+    }
+
+    #[test]
+    fn test_str_replace_rejects_empty_old_str() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        fs::write(&test_file, "hello world").unwrap();
+
+        let tool = ClaudeTextEditor;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "command": "str_replace",
+            "path": "test.txt",
+            "old_str": "",
+            "new_str": "injected"
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+        assert!(result.unwrap().text.contains("Error"));
+
+        let content = fs::read_to_string(&test_file).unwrap();
+        assert_eq!(content, "hello world");
+    }
+
+    #[test]
+    fn test_backup_list_only_matches_exact_filename() {
+        let workspace = tempdir().unwrap();
+        let backup_dir = workspace.path().join(BACKUP_DIR);
+        fs::create_dir_all(&backup_dir).unwrap();
+
+        let mgr = BackupManager::new(workspace.path());
+
+        // Create backups for "test.txt" and "test.txt.bak"
+        let t1 = backup_dir.join("test.txt.1000.backup");
+        let t2 = backup_dir.join("test.txt.2000.backup");
+        let t3 = backup_dir.join("test.txt.bak.3000.backup");
+        fs::write(&t1, "v1").unwrap();
+        fs::write(&t2, "v2").unwrap();
+        fs::write(&t3, "bak-v1").unwrap();
+
+        // Listing backups for "test.txt" should NOT include "test.txt.bak" entries
+        let backups = mgr.list_backups("test.txt").unwrap();
+        assert_eq!(backups.len(), 2, "should only match exact filename prefix");
+
+        let names: Vec<String> = backups
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert!(names.iter().all(|n| n.starts_with("test.txt.") && !n.contains("bak")));
+    }
+
+    #[test]
+    fn test_str_replace_multiple_occurrences_replaces_all() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        fs::write(&test_file, "foo bar foo baz foo").unwrap();
+
+        let tool = ClaudeTextEditor;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "command": "str_replace",
+            "path": "test.txt",
+            "old_str": "foo",
+            "new_str": "qux"
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.text.contains("3 occurrence"));
+
+        let content = fs::read_to_string(&test_file).unwrap();
+        assert_eq!(content, "qux bar qux baz qux");
     }
 }

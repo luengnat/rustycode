@@ -379,6 +379,10 @@ fn resolve_to_parent_dir(token: &str, working_dir: &Path) -> Option<PathBuf> {
     resolved.parent().map(|d| d.to_path_buf())
 }
 
+fn is_strict_descendant(path: &Path, root: &Path) -> bool {
+    path.starts_with(root) && path != root
+}
+
 /// Load hints from a specific directory.
 ///
 /// Walks from the directory up to (but not including) the working directory,
@@ -392,7 +396,7 @@ fn load_hints_from_directory(
     if !directory.is_dir() || !directory.is_absolute() {
         return None;
     }
-    if !directory.starts_with(working_dir) || directory == working_dir {
+    if !is_strict_descendant(directory, working_dir) {
         return None;
     }
 
@@ -403,7 +407,7 @@ fn load_hints_from_directory(
     // Collect directories from working_dir down to the target directory
     let mut directories: Vec<PathBuf> = directory
         .ancestors()
-        .take_while(|d| d.starts_with(working_dir) && *d != working_dir)
+        .take_while(|d| is_strict_descendant(d, working_dir))
         .map(|d| d.to_path_buf())
         .collect();
     directories.reverse();
@@ -835,5 +839,12 @@ mod tests {
         let names = default_hints_filenames();
         assert!(names.contains(&DEFAULT_HINTS_FILENAME.to_string()));
         assert!(names.contains(&CLAUDE_MD_FILENAME.to_string()));
+    }
+
+    #[test]
+    fn test_strict_descendant_rejects_prefix_siblings() {
+        let root = Path::new("/tmp/work");
+        assert!(!is_strict_descendant(Path::new("/tmp/worktree"), root));
+        assert!(is_strict_descendant(Path::new("/tmp/work/sub"), root));
     }
 }

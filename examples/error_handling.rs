@@ -31,9 +31,9 @@ async fn error_handling_example() -> Result<()> {
         retry_config: None,
     };
 
-    let provider = AnthropicProvider::new(config, "claude-3-5-sonnet-latest".to_string())?;
+    let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string())?;
     let request = CompletionRequest::new(
-        "claude-3-opus-20240229".to_string(),
+        "claude-opus-4-6".to_string(),
         vec![ChatMessage::user("Hello!".to_string())],
     );
 

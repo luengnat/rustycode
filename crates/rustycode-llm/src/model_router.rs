@@ -68,10 +68,10 @@ impl ModelChoice {
     pub fn model_id(&self) -> &'static str {
         match self {
             ModelChoice::Haiku => "claude-haiku-4-5-20251001",
-            ModelChoice::Sonnet => "claude-sonnet-4-20250514",
-            ModelChoice::Opus => "claude-opus-4-20250514",
+            ModelChoice::Sonnet => "claude-sonnet-4-6",
+            ModelChoice::Opus => "claude-opus-4-6",
             #[allow(unreachable_patterns)]
-            _ => "claude-sonnet-4-20250514",
+            _ => "claude-sonnet-4-6",
         }
     }
 
@@ -379,8 +379,8 @@ mod tests {
     #[test]
     fn test_model_choice_model_id() {
         assert_eq!(ModelChoice::Haiku.model_id(), "claude-haiku-4-5-20251001");
-        assert_eq!(ModelChoice::Sonnet.model_id(), "claude-sonnet-4-20250514");
-        assert_eq!(ModelChoice::Opus.model_id(), "claude-opus-4-20250514");
+        assert_eq!(ModelChoice::Sonnet.model_id(), "claude-sonnet-4-6");
+        assert_eq!(ModelChoice::Opus.model_id(), "claude-opus-4-6");
     }
 
     #[test]

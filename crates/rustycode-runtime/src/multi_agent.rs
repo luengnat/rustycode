@@ -599,7 +599,7 @@ impl MultiAgentOrchestrator {
 
             let task = tokio::spawn(async move {
                 // Acquire permit to limit parallelism
-                let _permit = permit.acquire().await.unwrap();
+                let _permit = permit.acquire().await.map_err(|e| anyhow::anyhow!("semaphore closed: {}", e))?;
 
                 Self::run_single_agent(&*provider, role, prompt).await
             });

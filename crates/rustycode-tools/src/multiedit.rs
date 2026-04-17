@@ -1,8 +1,13 @@
+use crate::security::{create_file_symlink_safe, open_file_symlink_safe, validate_write_path};
 use crate::{Checkpoint, Tool, ToolContext, ToolOutput, ToolPermission};
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use std::fs;
+use std::io::{Read, Write};
 use std::path::PathBuf;
+
+/// Maximum file size for edit operations (1 MB)
+const MAX_EDIT_SIZE: usize = 1024 * 1024;
 
 /// MultiEdit tool - Edit multiple files atomically
 ///
@@ -295,11 +300,8 @@ fn validate_edit(edit_value: &Value, ctx: &ToolContext) -> Result<ValidatedEdit>
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("missing 'operation'"))?;
 
-    let full_path = if PathBuf::from(path).is_absolute() {
-        PathBuf::from(path)
-    } else {
-        ctx.cwd.join(path)
-    };
+    // Validate path through security layer (blocks path traversal, sensitive files)
+    let validated_path = validate_write_path(path, &ctx.cwd, 0)?;
 
     let edit_operation = match operation {
         "create" => {
@@ -309,8 +311,8 @@ fn validate_edit(edit_value: &Value, ctx: &ToolContext) -> Result<ValidatedEdit>
                 .ok_or_else(|| anyhow!("missing 'content' for create operation"))?;
 
             // Check if file already exists
-            if full_path.exists() {
-                return Err(anyhow!("file already exists: {}", full_path.display()));
+            if validated_path.exists() {
+                return Err(anyhow!("file already exists: {}", validated_path.display()));
             }
 
             EditOperation::Create
@@ -331,18 +333,36 @@ fn validate_edit(edit_value: &Value, ctx: &ToolContext) -> Result<ValidatedEdit>
                 .ok_or_else(|| anyhow!("missing 'new_text' for edit operation"))?;
 
             // Check if file exists
-            if !full_path.exists() {
-                return Err(anyhow!("file not found: {}", full_path.display()));
+            if !validated_path.exists() {
+                return Err(anyhow!("file not found: {}", validated_path.display()));
             }
 
-            // Check if old_text exists in file
-            let content = fs::read_to_string(&full_path)
-                .with_context(|| format!("failed to read file: {}", full_path.display()))?;
+            // Read file using symlink-safe operation
+            let mut file = open_file_symlink_safe(&validated_path)
+                .with_context(|| format!("failed to open file: {}", validated_path.display()))?;
+            let mut content = String::new();
+            file.read_to_string(&mut content).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::InvalidData {
+                    anyhow!("binary or non-UTF-8 file: {}", validated_path.display())
+                } else {
+                    anyhow!("failed to read file {}: {}", validated_path.display(), e)
+                }
+            })?;
+
+            // Check file size
+            if content.len() > MAX_EDIT_SIZE {
+                return Err(anyhow!(
+                    "file too large for editing ({} bytes, max {}): {}",
+                    content.len(),
+                    MAX_EDIT_SIZE,
+                    validated_path.display()
+                ));
+            }
 
             if !content.contains(old_text) {
                 return Err(anyhow!(
                     "old_text not found in file: {}",
-                    full_path.display()
+                    validated_path.display()
                 ));
             }
 
@@ -353,8 +373,8 @@ fn validate_edit(edit_value: &Value, ctx: &ToolContext) -> Result<ValidatedEdit>
         }
         "delete" => {
             // Check if file exists
-            if !full_path.exists() {
-                return Err(anyhow!("file not found: {}", full_path.display()));
+            if !validated_path.exists() {
+                return Err(anyhow!("file not found: {}", validated_path.display()));
             }
 
             EditOperation::Delete
@@ -372,7 +392,7 @@ fn validate_edit(edit_value: &Value, ctx: &ToolContext) -> Result<ValidatedEdit>
     };
 
     Ok(ValidatedEdit {
-        path: full_path,
+        path: validated_path,
         operation: edit_operation,
         content,
     })
@@ -423,8 +443,13 @@ fn apply_create(edit: &ValidatedEdit, dry_run: bool) -> Result<String> {
             .with_context(|| format!("failed to create directory: {}", parent.display()))?;
     }
 
-    fs::write(&edit.path, content)
+    // Use symlink-safe file creation
+    let mut file = create_file_symlink_safe(&edit.path)
+        .with_context(|| format!("failed to create file: {}", edit.path.display()))?;
+    file.write_all(content.as_bytes())
         .with_context(|| format!("failed to write file: {}", edit.path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync file: {}", edit.path.display()))?;
 
     Ok(format!(
         "Created: {} ({} bytes)",
@@ -449,18 +474,29 @@ fn apply_edit(
         ));
     }
 
-    let content = fs::read_to_string(&edit.path)
+    // Read using symlink-safe operation
+    let mut file = open_file_symlink_safe(&edit.path)
+        .with_context(|| format!("failed to open file: {}", edit.path.display()))?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)
         .with_context(|| format!("failed to read file: {}", edit.path.display()))?;
 
-    let new_content = content.replace(old_text, new_text);
+    // Replace only the first occurrence — same behavior as edit_file
+    let new_content = content.replacen(old_text, new_text, 1);
 
-    fs::write(&edit.path, new_content)
+    // Write using symlink-safe operation
+    let mut out_file = create_file_symlink_safe(&edit.path)
+        .with_context(|| format!("failed to create file: {}", edit.path.display()))?;
+    out_file
+        .write_all(new_content.as_bytes())
         .with_context(|| format!("failed to write file: {}", edit.path.display()))?;
+    out_file
+        .sync_all()
+        .with_context(|| format!("failed to sync file: {}", edit.path.display()))?;
 
     Ok(format!(
-        "Edited: {} (replaced {} occurrences)",
+        "Edited: {} (replaced 1 occurrence)",
         edit.path.display(),
-        content.matches(old_text).count()
     ))
 }
 
@@ -479,6 +515,7 @@ fn apply_delete(edit: &ValidatedEdit, dry_run: bool) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_multiedit_tool_metadata() {
@@ -552,7 +589,8 @@ mod tests {
 
     #[test]
     fn test_validate_edit_create_missing_content() {
-        let ctx = ToolContext::new("/tmp");
+        let workspace = tempdir().unwrap();
+        let ctx = ToolContext::new(workspace.path());
         let edit = json!({
             "path": "test.rs",
             "operation": "create"
@@ -565,7 +603,8 @@ mod tests {
 
     #[test]
     fn test_validate_edit_edit_missing_old_text() {
-        let ctx = ToolContext::new("/tmp");
+        let workspace = tempdir().unwrap();
+        let ctx = ToolContext::new(workspace.path());
         let edit = json!({
             "path": "test.rs",
             "operation": "edit",
@@ -579,7 +618,8 @@ mod tests {
 
     #[test]
     fn test_validate_edit_invalid_operation() {
-        let ctx = ToolContext::new("/tmp");
+        let workspace = tempdir().unwrap();
+        let ctx = ToolContext::new(workspace.path());
         let edit = json!({
             "path": "test.rs",
             "operation": "invalid"
@@ -591,5 +631,230 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("invalid operation"));
+    }
+
+    #[test]
+    fn test_multiedit_blocks_path_traversal() {
+        let workspace = tempdir().unwrap();
+        let ctx = ToolContext::new(workspace.path());
+
+        let result = validate_edit(
+            &json!({
+                "path": "../../../etc/passwd",
+                "operation": "edit",
+                "old_text": "root",
+                "new_text": "hacked"
+            }),
+            &ctx,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_multiedit_edit_replaces_only_first_occurrence() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "foo bar foo baz foo").unwrap();
+
+        let tool = MultiEditTool;
+        let ctx = ToolContext::new(workspace.path());
+
+        let result = tool.execute(
+            json!({
+                "edits": [{
+                    "path": "test.txt",
+                    "operation": "edit",
+                    "old_text": "foo",
+                    "new_text": "QUX"
+                }]
+            }),
+            &ctx,
+        );
+        assert!(result.is_ok());
+
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert_eq!(content, "QUX bar foo baz foo");
+    }
+
+    #[test]
+    fn test_multiedit_create_file() {
+        let workspace = tempdir().unwrap();
+        let tool = MultiEditTool;
+        let ctx = ToolContext::new(workspace.path());
+
+        let result = tool.execute(
+            json!({
+                "edits": [{
+                    "path": "new_file.txt",
+                    "operation": "create",
+                    "content": "hello world"
+                }]
+            }),
+            &ctx,
+        );
+        assert!(result.is_ok());
+
+        let content =
+            std::fs::read_to_string(workspace.path().join("new_file.txt")).unwrap();
+        assert_eq!(content, "hello world");
+    }
+
+    #[test]
+    fn test_multiedit_delete_file() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("to_delete.txt");
+        std::fs::write(&test_file, "bye bye").unwrap();
+
+        let tool = MultiEditTool;
+        let ctx = ToolContext::new(workspace.path());
+
+        let result = tool.execute(
+            json!({
+                "edits": [{
+                    "path": "to_delete.txt",
+                    "operation": "delete"
+                }]
+            }),
+            &ctx,
+        );
+        assert!(result.is_ok());
+        assert!(!test_file.exists());
+    }
+
+    #[test]
+    fn test_multiedit_rejects_empty_old_text() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "hello world").unwrap();
+
+        let ctx = ToolContext::new(workspace.path());
+        let result = validate_edit(
+            &json!({
+                "path": "test.txt",
+                "operation": "edit",
+                "old_text": "",
+                "new_text": "injected"
+            }),
+            &ctx,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("empty"));
+    }
+
+    #[test]
+    fn test_multiedit_rejects_binary_file() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.bin");
+        std::fs::write(&test_file, [0xff, 0xfe, 0xfd]).unwrap();
+
+        let ctx = ToolContext::new(workspace.path());
+        let result = validate_edit(
+            &json!({
+                "path": "test.bin",
+                "operation": "edit",
+                "old_text": "a",
+                "new_text": "b"
+            }),
+            &ctx,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("UTF-8"));
+    }
+
+    #[test]
+    fn test_multiedit_conflict_detection() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "aaa bbb ccc").unwrap();
+
+        let tool = MultiEditTool;
+        let ctx = ToolContext::new(workspace.path());
+
+        let result = tool.execute(
+            json!({
+                "edits": [
+                    {
+                        "path": "test.txt",
+                        "operation": "edit",
+                        "old_text": "aaa",
+                        "new_text": "xxx"
+                    },
+                    {
+                        "path": "test.txt",
+                        "operation": "edit",
+                        "old_text": "bbb",
+                        "new_text": "yyy"
+                    }
+                ]
+            }),
+            &ctx,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("conflicting"));
+    }
+
+    #[test]
+    fn test_multiedit_dry_run() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "original content").unwrap();
+
+        let tool = MultiEditTool;
+        let ctx = ToolContext::new(workspace.path());
+
+        let result = tool.execute(
+            json!({
+                "edits": [{
+                    "path": "test.txt",
+                    "operation": "edit",
+                    "old_text": "original",
+                    "new_text": "modified"
+                }],
+                "dry_run": true
+            }),
+            &ctx,
+        );
+        assert!(result.is_ok());
+        assert!(result.unwrap().text.contains("Dry Run"));
+
+        // File should be unchanged
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert_eq!(content, "original content");
+    }
+
+    #[test]
+    fn test_multiedit_multiple_files() {
+        let workspace = tempdir().unwrap();
+        let file_a = workspace.path().join("a.txt");
+        let file_b = workspace.path().join("b.txt");
+        std::fs::write(&file_a, "hello from a").unwrap();
+        std::fs::write(&file_b, "hello from b").unwrap();
+
+        let tool = MultiEditTool;
+        let ctx = ToolContext::new(workspace.path());
+
+        let result = tool.execute(
+            json!({
+                "edits": [
+                    {
+                        "path": "a.txt",
+                        "operation": "edit",
+                        "old_text": "hello",
+                        "new_text": "goodbye"
+                    },
+                    {
+                        "path": "b.txt",
+                        "operation": "edit",
+                        "old_text": "hello",
+                        "new_text": "goodbye"
+                    }
+                ]
+            }),
+            &ctx,
+        );
+        assert!(result.is_ok());
+
+        assert_eq!(std::fs::read_to_string(&file_a).unwrap(), "goodbye from a");
+        assert_eq!(std::fs::read_to_string(&file_b).unwrap(), "goodbye from b");
     }
 }

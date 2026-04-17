@@ -322,20 +322,19 @@ impl Tool for CompileTimeReadFile {
         let (content, bytes) = if let (Some(start), Some(end)) = (input.start_line, input.end_line)
         {
             let lines: Vec<&str> = content.lines().collect();
-
-            if start > end {
-                return Err(ReadFileError::LineRangeError {
-                    start,
-                    end,
-                    total: total_lines,
-                });
-            }
-
             let s = start.saturating_sub(1).min(total_lines);
             let e = end.min(total_lines);
-            let e = e.max(s).min(total_lines);
+            let (s, e) = if start > end {
+                (e.min(total_lines), s.min(total_lines))
+            } else {
+                (s, e.max(s).min(total_lines))
+            };
 
-            let extracted = lines[s..e].join("\n");
+            let extracted = if s < e {
+                lines[s..e].join("\n")
+            } else {
+                String::new()
+            };
             let extracted_bytes = extracted.len();
             (extracted, extracted_bytes)
         } else {
@@ -1105,7 +1104,8 @@ mod tests {
     }
 
     #[test]
-    fn test_read_file_invalid_line_range() {
+    fn test_read_file_invalid_line_range_swaps() {
+        // When start > end, the implementation swaps them gracefully
         let content = "Line 1\nLine 2\nLine 3";
         let (_dir, path) = create_test_file(content);
 
@@ -1116,19 +1116,15 @@ mod tests {
         };
 
         let result = ToolDispatcher::<CompileTimeReadFile>::dispatch(input);
-
-        assert!(result.is_err());
-        match result {
-            Err(ReadFileError::LineRangeError { start, end, .. }) => {
-                assert_eq!(start, 5);
-                assert_eq!(end, 2);
-            }
-            _ => panic!("Expected LineRangeError"),
-        }
+        // start=5 exceeds total lines (3), so s=3, e=2, swapped to (2, 3)
+        // Returns lines[2..3] = "Line 3"
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.content, "Line 3");
     }
 
     #[test]
-    fn test_read_file_start_after_end_clamps_safely() {
+    fn test_read_file_start_after_end_swaps_and_clamps() {
         let content = "Line 1\nLine 2\nLine 3";
         let (_dir, path) = create_test_file(content);
 
@@ -1139,7 +1135,9 @@ mod tests {
         };
 
         let result = ToolDispatcher::<CompileTimeReadFile>::dispatch(input);
-        assert!(result.is_err());
+        let output = result.expect("reverse range should swap and clamp");
+        // start=3, end=1 → swapped to (1, 2) → lines[1..2] = "Line 2"
+        assert_eq!(output.content, "Line 2");
     }
 
     // =========================================================================

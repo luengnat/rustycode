@@ -3,11 +3,11 @@
 //! This tool enables applying .patch, .diff, or unified diff files
 //! to the codebase using git apply.
 
+use crate::security::{open_file_symlink_safe, validate_read_path, validate_write_path};
 use crate::{Tool, ToolContext, ToolOutput, ToolPermission};
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
-use std::fs;
-use std::path::PathBuf;
+use std::io::Read;
 use std::process::Command;
 
 /// ApplyPatch tool - Apply git patches
@@ -106,19 +106,11 @@ impl Tool for ApplyPatchTool {
             .and_then(|v| v.as_str())
             .unwrap_or(".");
 
-        // Resolve patch file path
-        let patch_path = if PathBuf::from(patch_file_str).is_absolute() {
-            PathBuf::from(patch_file_str)
-        } else {
-            ctx.cwd.join(patch_file_str)
-        };
+        // Resolve and validate patch file path
+        let patch_path = validate_read_path(patch_file_str, &ctx.cwd)?;
 
-        // Resolve directory path
-        let target_dir = if PathBuf::from(directory).is_absolute() {
-            PathBuf::from(directory)
-        } else {
-            ctx.cwd.join(directory)
-        };
+        // Resolve and validate directory path
+        let target_dir = validate_write_path(directory, &ctx.cwd, 0)?;
 
         // Validate patch file exists
         if !patch_path.exists() {
@@ -131,8 +123,11 @@ impl Tool for ApplyPatchTool {
             return Err(anyhow!("not a git repository: {}", target_dir.display()));
         }
 
-        // Read patch file to get basic info
-        let patch_content = fs::read_to_string(&patch_path)
+        // Read patch file to get basic info (symlink-safe)
+        let mut file = open_file_symlink_safe(&patch_path)
+            .with_context(|| format!("failed to open patch file: {}", patch_path.display()))?;
+        let mut patch_content = String::new();
+        file.read_to_string(&mut patch_content)
             .with_context(|| format!("failed to read patch file: {}", patch_path.display()))?;
 
         // Count files in patch
@@ -282,27 +277,32 @@ mod tests {
 
     #[test]
     fn test_apply_patch_missing_patch_file() {
+        let workspace = tempfile::tempdir().unwrap();
         let tool = ApplyPatchTool;
-        let ctx = ToolContext::new("/tmp");
+        let ctx = ToolContext::new(workspace.path());
 
         let result = tool.execute(json!({"patch_file": "nonexistent.patch"}), &ctx);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found"));
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not found") || err.contains("path"), "expected path or not found error, got: {err}");
     }
 
     #[test]
     fn test_apply_patch_non_git_directory() {
+        let workspace = tempfile::tempdir().unwrap();
         let tool = ApplyPatchTool;
-        let ctx = ToolContext::new("/tmp");
+        let ctx = ToolContext::new(workspace.path());
 
-        // /tmp is unlikely to be a git repo
+        // Not a git repo
         let result = tool.execute(json!({"patch_file": "test.patch"}), &ctx);
 
         assert!(result.is_err());
-        // Should fail either because patch doesn't exist or not a git repo
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("not found") || error_msg.contains("not a git repository"));
+        assert!(
+            error_msg.contains("not found") || error_msg.contains("not a git repository") || error_msg.contains("path"),
+            "expected path or git error, got: {error_msg}"
+        );
     }
 
     #[test]
@@ -354,6 +354,41 @@ mod tests {
         );
 
         // Should fail due to validation (patch doesn't exist)
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_apply_patch_blocks_path_traversal() {
+        let workspace = tempfile::tempdir().unwrap();
+        let ctx = ToolContext::new(workspace.path());
+        let tool = ApplyPatchTool;
+
+        let result = tool.execute(
+            json!({
+                "patch_file": "../../../etc/passwd"
+            }),
+            &ctx,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_apply_patch_blocks_directory_traversal() {
+        let workspace = tempfile::tempdir().unwrap();
+        let ctx = ToolContext::new(workspace.path());
+        let tool = ApplyPatchTool;
+
+        // Create a dummy patch file so it doesn't fail on "not found"
+        let patch = workspace.path().join("test.patch");
+        std::fs::write(&patch, "dummy").unwrap();
+
+        let result = tool.execute(
+            json!({
+                "patch_file": "test.patch",
+                "directory": "../../../"
+            }),
+            &ctx,
+        );
         assert!(result.is_err());
     }
 }

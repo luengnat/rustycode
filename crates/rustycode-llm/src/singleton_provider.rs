@@ -120,7 +120,7 @@ mod tests {
 
         // Initialize
         let _config = ProviderConfig::default();
-        let _model = "claude-3-5-sonnet-20241022".to_string();
+        let _model = "claude-sonnet-4-6".to_string();
 
         // Note: This will fail in tests without proper config, but we can test the structure
         // In production, this would be initialized at app startup

@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
 async fn multi_provider_query() -> Result<()> {
     println!("=== Multi-Provider Query ===\n");
 
-    let prompt = "What is the capital of France?";
+        let prompt = "What is the capital of France?";
 
     // Configure multiple providers
     let mut providers: HashMap<&str, Box<dyn LLMProvider>> = HashMap::new();
@@ -46,7 +46,7 @@ async fn multi_provider_query() -> Result<()> {
             "anthropic",
             Box::new(AnthropicProvider::new(
                 config,
-                "claude-3-5-sonnet-latest".to_string(),
+                "claude-sonnet-4-6".to_string(),
             )?),
         );
     }
@@ -72,7 +72,7 @@ async fn multi_provider_query() -> Result<()> {
     let mut responses = HashMap::new();
     for (name, provider) in &providers {
         let model = match *name {
-            "anthropic" => "claude-3-opus-20240229",
+            "anthropic" => "claude-opus-4-6",
             "openai" => "gpt-4",
             _ => continue,
         };
@@ -114,7 +114,7 @@ async fn provider_fallback() -> Result<()> {
     let prompt = "Tell me a short joke.";
 
     // Try providers in order of preference
-    let providers = vec![("anthropic", "claude-3-opus-20240229"), ("openai", "gpt-4")];
+    let providers = vec![("anthropic", "claude-opus-4-6"), ("openai", "gpt-4")];
 
     for (provider_name, model) in providers {
         println!("Trying {}...", provider_name);

@@ -1,3 +1,4 @@
+use crate::security::{create_file_symlink_safe, open_file_symlink_safe};
 use crate::{Tool, ToolContext, ToolOutput, ToolPermission};
 use anyhow::{anyhow, Context, Result};
 use lsp_types::{CompletionContext, CompletionTriggerKind, DiagnosticSeverity, Position, Url};
@@ -6,6 +7,7 @@ use rustycode_shared_runtime as shared_runtime;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::future::Future;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -42,6 +44,27 @@ fn resolve_file_path(ctx: &ToolContext, params: &Value) -> Result<PathBuf> {
     let resolved = if p.is_absolute() { p } else { ctx.cwd.join(p) };
     ensure_path_within_workspace(ctx, &resolved)?;
     Ok(resolved)
+}
+
+/// Symlink-safe file write: opens with O_NOFOLLOW, writes, syncs.
+fn safe_write_file(path: &Path, content: &[u8]) -> Result<()> {
+    let mut file = create_file_symlink_safe(path)
+        .with_context(|| format!("failed to create file {}", path.display()))?;
+    file.write_all(content)
+        .with_context(|| format!("failed to write file {}", path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync file {}", path.display()))?;
+    Ok(())
+}
+
+/// Symlink-safe file read: opens with O_NOFOLLOW, reads to string.
+fn safe_read_file_to_string(path: &Path) -> Result<String> {
+    let mut file = open_file_symlink_safe(path)
+        .with_context(|| format!("failed to open file {}", path.display()))?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .with_context(|| format!("failed to read file {}", path.display()))?;
+    Ok(content)
 }
 
 fn ensure_path_within_workspace(ctx: &ToolContext, path: &Path) -> Result<()> {
@@ -107,9 +130,8 @@ fn read_file_blocking(file_path: &Path) -> Result<String> {
         });
         result.with_context(|| format!("failed to read file {}", path.display()))
     } else {
-        // No runtime, use direct I/O
-        std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read file {}", path.display()))
+        // No runtime, use symlink-safe direct I/O
+        safe_read_file_to_string(&path)
     }
 }
 
@@ -158,7 +180,7 @@ fn get_lsp_config_for_project(cwd: &Path) -> Option<LspConfig> {
     }
 
     // Try to load and parse the config file
-    if let Ok(config_content) = std::fs::read_to_string(&config_path) {
+    if let Ok(config_content) = safe_read_file_to_string(&config_path) {
         if let Ok(config_json) = serde_json::from_str::<serde_json::Value>(&config_content) {
             // Extract lsp_config from advanced.lsp_config or advanced.project_tools.lsp_config
             if let Some(advanced) = config_json.get("advanced").and_then(|v| v.as_object()) {
@@ -1364,7 +1386,7 @@ impl Tool for LspReplaceSymbolBodyTool {
         let target_symbol = crate::symbol::find_unique(&symbols, &sym_path)?;
 
         let new_text = crate::symbol::replace_range(&text, &target_symbol.range, body)?;
-        std::fs::write(&file_path, &new_text).context("failed to write file")?;
+        safe_write_file(&file_path, new_text.as_bytes())?;
 
         Ok(ToolOutput::with_structured(
             serde_json::to_string_pretty(&json!({
@@ -1467,7 +1489,7 @@ impl Tool for LspInsertBeforeSymbolTool {
 
         let insertion_line = target_symbol.range.start.line;
         let new_text = crate::symbol::insert_at_line(&text, insertion_line, body)?;
-        std::fs::write(&file_path, &new_text).context("failed to write file")?;
+        safe_write_file(&file_path, new_text.as_bytes())?;
 
         Ok(ToolOutput::with_structured(
             serde_json::to_string_pretty(&json!({
@@ -1570,7 +1592,7 @@ impl Tool for LspInsertAfterSymbolTool {
 
         let insertion_line = target_symbol.range.end.line + 1;
         let new_text = crate::symbol::insert_at_line(&text, insertion_line, body)?;
-        std::fs::write(&file_path, &new_text).context("failed to write file")?;
+        safe_write_file(&file_path, new_text.as_bytes())?;
 
         Ok(ToolOutput::with_structured(
             serde_json::to_string_pretty(&json!({
@@ -1693,7 +1715,7 @@ impl Tool for LspSafeDeleteSymbolTool {
 
         // No references, safe to delete
         let new_text = crate::symbol::replace_range(&text, &target_symbol.range, "")?;
-        std::fs::write(&file_path, &new_text).context("failed to write file")?;
+        safe_write_file(&file_path, new_text.as_bytes())?;
 
         Ok(ToolOutput::with_structured(
             serde_json::to_string_pretty(&json!({
@@ -1815,7 +1837,7 @@ impl Tool for LspRenameSymbolTool {
                     .to_file_path()
                     .unwrap_or_else(|_| PathBuf::from(file_uri.path()));
 
-                let mut file_text = std::fs::read_to_string(&file_path_from_uri)
+                let mut file_text = safe_read_file_to_string(&file_path_from_uri)
                     .context("failed to read file for rename")?;
 
                 // Apply edits in reverse order to preserve positions
@@ -1824,7 +1846,7 @@ impl Tool for LspRenameSymbolTool {
                         crate::symbol::replace_range(&file_text, &edit.range, &edit.new_text)?;
                 }
 
-                std::fs::write(&file_path_from_uri, &file_text)
+                safe_write_file(&file_path_from_uri, file_text.as_bytes())
                     .context("failed to write renamed file")?;
                 affected_files.push(file_path_from_uri.to_string_lossy().to_string());
             }
@@ -2115,11 +2137,13 @@ impl Tool for LspExtractSymbolTool {
             symbol_body.clone()
         };
 
-        std::fs::write(&target_file, &target_content).context("failed to write target file")?;
+        safe_write_file(&target_file, target_content.as_bytes())
+            .context("failed to write target file")?;
 
         // Remove from original file
         let new_original = crate::symbol::replace_range(&text, &target_symbol.range, "")?;
-        std::fs::write(&file_path, &new_original).context("failed to update original file")?;
+        safe_write_file(&file_path, new_original.as_bytes())
+            .context("failed to update original file")?;
 
         let import_stmt = format!(
             "mod {}; use {}::*;",
@@ -2349,7 +2373,7 @@ impl Tool for LspInlineSymbolTool {
         }
 
         // Write the file back
-        std::fs::write(&file_path, &text)
+        safe_write_file(&file_path, text.as_bytes())
             .with_context(|| format!("failed to write file {}", file_path.display()))?;
 
         Ok(ToolOutput::with_structured(

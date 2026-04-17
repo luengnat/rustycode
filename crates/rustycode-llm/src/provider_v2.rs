@@ -79,13 +79,18 @@ impl ThinkingConfig {
 
 /// Output configuration for Claude API
 ///
-/// Controls response generation behavior including reasoning effort.
+/// Controls response generation behavior including reasoning effort
+/// and structured output format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputConfig {
     /// Reasoning effort level (low/medium/high/max)
     /// Controls how much reasoning effort the model expends
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<EffortLevel>,
+    /// Structured output format configuration
+    /// When set, the model will respond with JSON conforming to the schema
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<OutputFormat>,
 }
 
 impl OutputConfig {
@@ -93,8 +98,47 @@ impl OutputConfig {
     pub fn with_effort(effort: EffortLevel) -> Self {
         Self {
             effort: Some(effort),
+            format: None,
         }
     }
+
+    /// Create a new output config with JSON schema format
+    pub fn with_json_schema(schema: serde_json::Value) -> Self {
+        Self {
+            effort: None,
+            format: Some(OutputFormat::json_schema(schema)),
+        }
+    }
+}
+
+/// Output format configuration for structured responses
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputFormat {
+    /// The type of structured output format
+    #[serde(rename = "type")]
+    pub format_type: OutputFormatType,
+    /// JSON Schema for structured output validation
+    /// Only used when format_type is JsonSchema
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub json_schema: Option<serde_json::Value>,
+}
+
+impl OutputFormat {
+    /// Create a JSON schema output format
+    pub fn json_schema(schema: serde_json::Value) -> Self {
+        Self {
+            format_type: OutputFormatType::JsonSchema,
+            json_schema: Some(schema),
+        }
+    }
+}
+
+/// Type of structured output format
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputFormatType {
+    /// JSON schema structured output
+    JsonSchema,
 }
 
 /// Display mode for thinking blocks
@@ -267,6 +311,7 @@ impl CompletionRequest {
         // Create or update output_config with the effort level
         self.output_config = Some(OutputConfig {
             effort: Some(effort),
+            format: None,
         });
         self
     }
@@ -1319,7 +1364,7 @@ mod tests {
 
     #[test]
     fn test_output_config_serialization_no_effort() {
-        let config = OutputConfig { effort: None };
+        let config = OutputConfig { effort: None, format: None };
         let serialized = serde_json::to_string(&config).unwrap();
         let value: Value = serde_json::from_str(&serialized).unwrap();
         // When effort is None, the entire object might serialize differently
@@ -1370,6 +1415,52 @@ mod tests {
             request.output_config.as_ref().unwrap().effort,
             Some(EffortLevel::High)
         );
+    }
+
+    #[test]
+    fn test_output_config_with_json_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"}
+            },
+            "required": ["name", "age"]
+        });
+        let config = OutputConfig::with_json_schema(schema.clone());
+
+        assert!(config.effort.is_none());
+        assert!(config.format.is_some());
+        let format = config.format.as_ref().unwrap();
+        assert_eq!(format.format_type, OutputFormatType::JsonSchema);
+        assert_eq!(format.json_schema.as_ref(), Some(&schema));
+    }
+
+    #[test]
+    fn test_output_config_json_schema_serialization() {
+        let schema = serde_json::json!({"type": "object", "properties": {"x": {"type": "number"}}});
+        let config = OutputConfig::with_json_schema(schema);
+        let serialized = serde_json::to_string(&config).unwrap();
+        let value: Value = serde_json::from_str(&serialized).unwrap();
+
+        assert!(value.get("format").is_some());
+        let format = &value["format"];
+        assert_eq!(format["type"], "json_schema");
+        assert!(format.get("json_schema").is_some());
+    }
+
+    #[test]
+    fn test_output_config_effort_and_format_together() {
+        let schema = serde_json::json!({"type": "object"});
+        let config = OutputConfig {
+            effort: Some(EffortLevel::High),
+            format: Some(OutputFormat::json_schema(schema)),
+        };
+        let serialized = serde_json::to_string(&config).unwrap();
+        let value: Value = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(value["effort"], "high");
+        assert!(value.get("format").is_some());
     }
 
     #[test]

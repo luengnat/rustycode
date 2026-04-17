@@ -1,3 +1,4 @@
+use crate::security::validate_read_path;
 use crate::{Tool, ToolContext, ToolOutput, ToolPermission};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
@@ -116,6 +117,8 @@ impl Tool for GitDiffTool {
         }
         args.push("--");
         if let Some(path) = params.get("path").and_then(Value::as_str) {
+            // Validate path is within workspace
+            let _ = validate_read_path(path, &ctx.cwd)?;
             args.push(path);
         }
 
@@ -212,6 +215,10 @@ impl Tool for GitCommitTool {
 
         let staged_files = if let Some(files) = params.get("files").and_then(Value::as_array) {
             let paths: Vec<&str> = files.iter().filter_map(|v| v.as_str()).collect();
+            // Validate all file paths are within workspace
+            for p in &paths {
+                let _ = validate_read_path(p, &ctx.cwd)?;
+            }
             if !paths.is_empty() {
                 let mut add_args = vec!["add", "--"];
                 add_args.extend_from_slice(&paths);
@@ -963,5 +970,34 @@ mod tests {
 
         let structured = result.structured.unwrap();
         assert_eq!(structured["branch"], "test-branch");
+    }
+
+    #[test]
+    fn test_git_diff_blocks_path_traversal() {
+        let repo = create_test_repo();
+        let ctx = create_context(&repo.path().to_path_buf());
+        let tool = GitDiffTool;
+
+        let result = tool.execute(
+            json!({"path": "../../../etc/passwd"}),
+            &ctx,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_git_commit_blocks_path_traversal() {
+        let repo = create_test_repo();
+        let ctx = create_context(&repo.path().to_path_buf());
+        let tool = GitCommitTool;
+
+        let result = tool.execute(
+            json!({
+                "message": "Bad commit",
+                "files": ["../../../etc/passwd"]
+            }),
+            &ctx,
+        );
+        assert!(result.is_err());
     }
 }

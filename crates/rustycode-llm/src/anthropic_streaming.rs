@@ -136,7 +136,7 @@ mod tests {
                 r#type: "message_start".to_string(),
                 role: "assistant".to_string(),
                 content: vec![],
-                model: "claude-3-5-sonnet".to_string(),
+                model: "claude-sonnet-4-6".to_string(),
                 stop_reason: None,
                 usage: Some(MessageUsage {
                     input_tokens: 100,
@@ -147,7 +147,7 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         let back: MessageStart = serde_json::from_str(&json).unwrap();
         assert_eq!(back.message.id, "msg_123");
-        assert_eq!(back.message.model, "claude-3-5-sonnet");
+        assert_eq!(back.message.model, "claude-sonnet-4-6");
         assert!(back.message.usage.is_some());
     }
 
@@ -308,7 +308,7 @@ mod tests {
                 r#type: "message_start".to_string(),
                 role: "assistant".to_string(),
                 content: vec![serde_json::json!("hello")],
-                model: "claude-3-haiku".to_string(),
+                model: "claude-haiku-4-5-20251001".to_string(),
                 stop_reason: None,
                 usage: None,
             },

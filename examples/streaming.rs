@@ -32,11 +32,11 @@ async fn streaming_example() -> Result<()> {
         retry_config: None,
     };
 
-    let provider = AnthropicProvider::new(config, "claude-3-opus-20240229".to_string())?;
+    let provider = AnthropicProvider::new(config, "claude-opus-4-6".to_string())?;
 
     // Create a streaming request
     let request = CompletionRequest::new(
-        "claude-3-opus-20240229".to_string(),
+        "claude-opus-4-6".to_string(),
         vec![ChatMessage::user(
             "Count from 1 to 10, then tell me a joke.".to_string(),
         )],

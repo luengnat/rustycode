@@ -76,6 +76,7 @@ pub const BLOCKED_PATH_COMPONENTS: &[&str] = &[
 /// 3. Checks for symlinks
 /// 4. Ensures path is within workspace
 /// 5. Validates file extensions
+///
 /// Normalize a file path for cross-platform compatibility.
 ///
 /// Handles:

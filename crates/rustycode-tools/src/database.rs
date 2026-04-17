@@ -14,12 +14,24 @@
 
 #![allow(dead_code)]
 
+use crate::security::validate_read_path;
 use crate::{Checkpoint, Tool, ToolContext, ToolOutput, ToolPermission};
 use anyhow::{anyhow, bail, Result};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+/// Dangerous SQL patterns compiled once (avoids recompilation on every validate_query call)
+static DANGEROUS_PATTERNS: &[(&str, &str)] = &[
+    (r"(?i)\bDROP\s+DATABASE\b", "DROP DATABASE is not allowed"),
+    (r"(?i)\bTRUNCATE\b", "TRUNCATE is not allowed"),
+    (r"(?i)\bALTER\s+DATABASE\b", "ALTER DATABASE is not allowed"),
+    (r"(?i)\bGRANT\b", "GRANT is not allowed"),
+    (r"(?i)\bREVOKE\b", "REVOKE is not allowed"),
+    (r"(?i)\bCREATE\s+USER\b", "CREATE USER is not allowed"),
+    (r"(?i)\bDROP\s+USER\b", "DROP USER is not allowed"),
+];
 
 // ============================================================================
 // DATABASE TYPES
@@ -291,17 +303,7 @@ pub fn validate_query(sql: &str) -> Result<()> {
     }
 
     // Check for potentially dangerous patterns
-    let dangerous_patterns = [
-        (r"(?i)\bDROP\s+DATABASE\b", "DROP DATABASE is not allowed"),
-        (r"(?i)\bTRUNCATE\b", "TRUNCATE is not allowed"),
-        (r"(?i)\bALTER\s+DATABASE\b", "ALTER DATABASE is not allowed"),
-        (r"(?i)\bGRANT\b", "GRANT is not allowed"),
-        (r"(?i)\bREVOKE\b", "REVOKE is not allowed"),
-        (r"(?i)\bCREATE\s+USER\b", "CREATE USER is not allowed"),
-        (r"(?i)\bDROP\s+USER\b", "DROP USER is not allowed"),
-    ];
-
-    for (pattern, message) in &dangerous_patterns {
+    for (pattern, message) in DANGEROUS_PATTERNS {
         let regex = Regex::new(pattern).map_err(|e| anyhow!("Invalid regex: {}", e))?;
         if regex.is_match(trimmed) {
             bail!("{}", message);
@@ -317,9 +319,11 @@ pub fn validate_query(sql: &str) -> Result<()> {
         );
     }
 
-    // Check for nested transactions
-    if trimmed.to_lowercase().contains("begin") && trimmed.to_lowercase().contains("begin") {
-        // This is a basic check - actual nesting would need more sophisticated parsing
+    // Check for nested transactions (BEGIN within a BEGIN block)
+    let lower = trimmed.to_lowercase();
+    let begin_count = lower.matches("begin").count();
+    if begin_count > 1 {
+        bail!("Nested transactions (multiple BEGIN statements) are not allowed");
     }
 
     Ok(())
@@ -556,16 +560,22 @@ impl Tool for QueryTool {
         // Execute based on database type
         let result = match conn_info.db_type {
             DatabaseType::SQLite => {
-                let db_path = Path::new(&conn_info.connection);
+                let db_path = validate_read_path(&conn_info.connection, &ctx.cwd)
+                    .map_err(|e| anyhow!("Invalid database path: {}", e))?;
                 if !db_path.exists() {
                     bail!("SQLite database not found: {}", db_path.display());
                 }
-                execute_sqlite_query(query, db_path, timeout, ctx)?
+                execute_sqlite_query(query, &db_path, timeout, ctx)?
             }
             DatabaseType::PostgreSQL | DatabaseType::MySQL => {
+                let db_name = match conn_info.db_type {
+                    DatabaseType::PostgreSQL => "PostgreSQL",
+                    DatabaseType::MySQL => "MySQL",
+                    _ => unreachable!(),
+                };
                 bail!(
                     "{} support not yet implemented. Please use SQLite.",
-                    conn_info.db_type as u8
+                    db_name
                 );
             }
         };
@@ -686,9 +696,10 @@ impl Tool for SchemaTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("Missing 'path' parameter"))?;
 
-        let path = Path::new(db_path);
-        if !path.exists() {
-            bail!("SQLite database not found: {}", path.display());
+        let validated_path = validate_read_path(db_path, &ctx.cwd)
+            .map_err(|e| anyhow!("Invalid database path: {}", e))?;
+        if !validated_path.exists() {
+            bail!("SQLite database not found: {}", validated_path.display());
         }
 
         // Get optional table name
@@ -705,7 +716,7 @@ impl Tool for SchemaTool {
 
         if let Some(table) = table_name {
             // Get schema for specific table
-            let schemas = get_sqlite_schema(path, Some(table), timeout, ctx)?;
+            let schemas = get_sqlite_schema(&validated_path, Some(table), timeout, ctx)?;
 
             if let Some(schema) = schemas.first() {
                 output.push_str(&format!("## Table: {}\n\n", schema.name));
@@ -742,7 +753,7 @@ impl Tool for SchemaTool {
             }
         } else {
             // List all tables
-            let tables = list_sqlite_tables(path, timeout, ctx)?;
+            let tables = list_sqlite_tables(&validated_path, timeout, ctx)?;
             output.push_str(&format!("## Tables ({} total)\n\n", tables.len()));
             for table in &tables {
                 output.push_str(&format!("- {}\n", table));
@@ -804,16 +815,17 @@ impl Tool for TransactionTool {
         })
     }
 
-    fn execute(&self, params: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         // Get database path
         let db_path = params
             .get("path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("Missing 'path' parameter"))?;
 
-        let path = Path::new(db_path);
-        if !path.exists() {
-            bail!("SQLite database not found: {}", path.display());
+        let validated_path = validate_read_path(db_path, &ctx.cwd)
+            .map_err(|e| anyhow!("Invalid database path: {}", e))?;
+        if !validated_path.exists() {
+            bail!("SQLite database not found: {}", validated_path.display());
         }
 
         // Get action
@@ -1028,5 +1040,91 @@ mod tests {
         let json = row.to_json();
         assert_eq!(json["col1"], "value1");
         assert_eq!(json["col2"], "value2");
+    }
+
+    #[test]
+    fn test_validate_query_nested_begin() {
+        // Nested BEGIN should be rejected
+        assert!(validate_query("BEGIN; BEGIN TRANSACTION").is_err());
+    }
+
+    #[test]
+    fn test_validate_query_single_begin_ok() {
+        assert!(validate_query("BEGIN TRANSACTION").is_ok());
+    }
+
+    #[test]
+    fn test_classify_query_case_insensitive() {
+        assert_eq!(classify_query("select * from users"), QueryType::Select);
+        assert_eq!(classify_query("INSERT into t values (1)"), QueryType::Insert);
+        assert_eq!(classify_query("update t set x=1"), QueryType::Update);
+        assert_eq!(classify_query("delete from t"), QueryType::Delete);
+    }
+
+    #[test]
+    fn test_query_tool_blocks_path_traversal() {
+        use tempfile::tempdir;
+
+        let workspace = tempdir().unwrap();
+        let ctx = ToolContext::new(workspace.path());
+        let tool = QueryTool;
+
+        let result = tool.execute(
+            json!({
+                "type": "sqlite",
+                "path": "../../../etc/passwd",
+                "query": "SELECT * FROM users"
+            }),
+            &ctx,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_schema_tool_blocks_path_traversal() {
+        use tempfile::tempdir;
+
+        let workspace = tempdir().unwrap();
+        let ctx = ToolContext::new(workspace.path());
+        let tool = SchemaTool;
+
+        let result = tool.execute(
+            json!({
+                "type": "sqlite",
+                "path": "../../../etc/passwd"
+            }),
+            &ctx,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_transaction_tool_blocks_path_traversal() {
+        use tempfile::tempdir;
+
+        let workspace = tempdir().unwrap();
+        let ctx = ToolContext::new(workspace.path());
+        let tool = TransactionTool;
+
+        let result = tool.execute(
+            json!({
+                "type": "sqlite",
+                "path": "../../../etc/passwd",
+                "action": "begin"
+            }),
+            &ctx,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_query_blocks_multiple_statements() {
+        assert!(validate_query("SELECT 1; DROP TABLE users").is_err());
+    }
+
+    #[test]
+    fn test_classify_query_other() {
+        assert_eq!(classify_query("EXPLAIN SELECT * FROM users"), QueryType::Other);
+        assert_eq!(classify_query("VACUUM"), QueryType::Other);
     }
 }

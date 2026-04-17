@@ -844,10 +844,10 @@ impl OsvInspector {
 /// - `@scope/pkg` → `@scope/pkg`
 /// - `pkg` → `pkg`
 fn strip_npm_version(s: &str) -> String {
-    if s.starts_with('@') {
+    if let Some(stripped) = s.strip_prefix('@') {
         // Scoped package: find second '@' (version separator)
-        if let Some(at_pos) = s[1..].find('@') {
-            s[..at_pos + 1].to_string()
+        if let Some(at_pos) = stripped.find('@') {
+            format!("@{}", &stripped[..at_pos])
         } else {
             s.to_string()
         }
@@ -958,11 +958,12 @@ impl OsvInspector {
     }
 
     /// Parse a command string to extract (binary_name, args).
-    fn parse_command(command: &str) -> Option<(&str, Vec<String>)> {
-        let tokens: Vec<&str> = command.split_whitespace().collect();
-        let binary = tokens.first()?;
-        let args: Vec<String> = tokens.iter().skip(1).map(|s| s.to_string()).collect();
-        Some((*binary, args))
+    fn parse_command(command: &str) -> Option<(String, Vec<String>)> {
+        let tokens = shell_words::split(command).ok()?;
+        let mut tokens = tokens.into_iter();
+        let binary = tokens.next()?;
+        let args: Vec<String> = tokens.collect();
+        Some((binary, args))
     }
 
     /// Check if a binary is a package manager that should be inspected.
@@ -2013,6 +2014,58 @@ mod tests {
         assert_eq!(
             inspector.extract_package_from_args("pip", &pip_args),
             Some("requests".to_string())
+        );
+    }
+
+    #[test]
+    fn test_strip_npm_version_handles_scoped_package() {
+        assert_eq!(strip_npm_version("@scope/pkg@1.2.3"), "@scope/pkg");
+        assert_eq!(strip_npm_version("@scope/pkg"), "@scope/pkg");
+        assert_eq!(strip_npm_version("pkg@1.2.3"), "pkg");
+        assert_eq!(strip_npm_version("pkg"), "pkg");
+    }
+
+    #[test]
+    fn test_strip_npm_version_edge_cases() {
+        // Deep scoped package
+        assert_eq!(strip_npm_version("@org/team-pkg@^3.0.0"), "@org/team-pkg");
+        // No scope, version with prerelease tag
+        assert_eq!(strip_npm_version("typescript@5.0.0-beta.1"), "typescript");
+        // Scoped with multiple @ in version (e.g., @latest)
+        assert_eq!(strip_npm_version("@scope/pkg@latest"), "@scope/pkg");
+        // Just @scope without package name (edge case)
+        assert_eq!(strip_npm_version("@scope"), "@scope");
+        // Empty string
+        assert_eq!(strip_npm_version(""), "");
+    }
+
+    #[test]
+    fn test_strip_npm_version_npx_scoped() {
+        // npx should also handle scoped packages
+        let inspector = OsvInspector::new();
+        let args: Vec<String> = vec!["@scope/create-app@1.0.0".to_string()];
+        assert_eq!(
+            inspector.extract_package_from_args("npx", &args),
+            Some("@scope/create-app".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_command_preserves_quoted_arguments() {
+        let (binary, args) = OsvInspector::parse_command(
+            r#"npm install eslint --prefix "/tmp/my project""#,
+        )
+        .expect("command should parse");
+
+        assert_eq!(binary, "npm");
+        assert_eq!(
+            args,
+            vec![
+                "install".to_string(),
+                "eslint".to_string(),
+                "--prefix".to_string(),
+                "/tmp/my project".to_string()
+            ]
         );
     }
 }

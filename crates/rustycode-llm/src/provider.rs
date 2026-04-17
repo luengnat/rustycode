@@ -334,7 +334,7 @@ mod tests {
     fn test_provider_config_debug_with_none_api_key() {
         let config = ProviderConfig {
             provider_type: ProviderType::Anthropic,
-            model: "claude-3-opus-20240229".to_string(),
+            model: "claude-opus-4-6".to_string(),
             temperature: 0.5,
             context_size: 200000,
             max_tokens: Some(4096),
@@ -350,6 +350,6 @@ mod tests {
         // Should still work when api_key is None
         assert!(debug_str.contains("ProviderConfig"));
         assert!(debug_str.contains("Anthropic"));
-        assert!(debug_str.contains("claude-3-opus"));
+        assert!(debug_str.contains("claude-opus-4-6"));
     }
 }

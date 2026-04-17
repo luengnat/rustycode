@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create Anthropic provider with Claude 3.5 Sonnet
-    let provider = AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string())?;
+    let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string())?;
 
     println!("✅ Provider created: Anthropic Claude 3.5 Sonnet\n");
 
@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
     ];
 
-    let request = CompletionRequest::new("claude-3-5-sonnet-20241022".to_string(), messages)
+    let request = CompletionRequest::new("claude-sonnet-4-6".to_string(), messages)
         .with_streaming(false)
         .with_max_tokens(1024);
 
@@ -167,7 +167,7 @@ mod e2e_tests {
             retry_config: None,
         };
 
-        let provider = AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string())
+        let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string())
             .expect("Failed to create provider");
 
         let messages = vec![

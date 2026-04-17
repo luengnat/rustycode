@@ -6,7 +6,6 @@ use crate::provider_v2::{
     CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError, StreamChunk,
     Usage,
 };
-use crate::retry::extract_retry_after_ms;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
@@ -53,6 +52,7 @@ struct ZhipuChoice {
 
 #[derive(Deserialize)]
 struct ZhipuResponseMessage {
+    #[allow(dead_code)]
     role: String,
     content: Option<String>,
     #[serde(default)]
