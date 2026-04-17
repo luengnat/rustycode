@@ -1135,19 +1135,20 @@ fn extract_java_regex(_path: &Path, content: &str, symbols: &mut Vec<SymbolInfo>
             ("enum ", SymbolKind::Enum),
         ] {
             if let Some(pos) = trimmed.find(keyword) {
-                let after = &trimmed[pos + keyword.len()..];
-                let name = after
-                    .split(|c: char| c.is_whitespace() || c == '{' || c == '<')
-                    .next()
-                    .unwrap_or("");
-                if !name.is_empty() {
-                    symbols.push(SymbolInfo {
-                        name: name.to_string(),
-                        kind: *kind,
-                        signature: trimmed.trim_end_matches('{').trim().to_string(),
-                        line: i + 1,
-                        docs: None,
-                    });
+                if let Some(after) = trimmed.get(pos + keyword.len()..) {
+                    let name = after
+                        .split(|c: char| c.is_whitespace() || c == '{' || c == '<')
+                        .next()
+                        .unwrap_or("");
+                    if !name.is_empty() {
+                        symbols.push(SymbolInfo {
+                            name: name.to_string(),
+                            kind: *kind,
+                            signature: trimmed.trim_end_matches('{').trim().to_string(),
+                            line: i + 1,
+                            docs: None,
+                        });
+                    }
                 }
             }
         }
@@ -1287,14 +1288,14 @@ fn format_map(
                 // Even the first file exceeds budget — add a truncated version
                 let trunc_len = budget_chars.saturating_sub(20); // leave room for truncation marker
                 if trunc_len > 0 {
-                    output.push_str(&file_block[..trunc_len.min(file_block.len())]);
+                    output.push_str(truncate_str_safe(&file_block, trunc_len));
                     output.push_str("\n... (truncated)\n");
                 }
             } else {
                 // Try to add a truncated version of this file
                 let remaining = budget_chars.saturating_sub(output.len()).saturating_sub(20);
                 if remaining > 30 {
-                    output.push_str(&file_block[..remaining.min(file_block.len())]);
+                    output.push_str(truncate_str_safe(&file_block, remaining));
                     output.push_str("\n... (truncated)\n");
                 }
             }
@@ -1321,16 +1322,7 @@ fn format_file_entry(rel_path: &Path, summary: &FileSummary) -> String {
             // Keep the signature concise: truncate at first newline and limit length
             let sig_line = symbol.signature.lines().next().unwrap_or(&symbol.name);
             if sig_line.len() > 120 {
-                let truncated = match sig_line.is_char_boundary(117) {
-                    true => &sig_line[..117],
-                    false => {
-                        let mut b = 117;
-                        while b > 0 && !sig_line.is_char_boundary(b) {
-                            b -= 1;
-                        }
-                        &sig_line[..b]
-                    }
-                };
+                let truncated = truncate_str_safe(sig_line, 117);
                 format!("{}...", truncated)
             } else {
                 sig_line.to_string()
@@ -1348,7 +1340,7 @@ fn node_text(node: &Node, source: &str) -> Option<String> {
     let start = node.start_byte();
     let end = node.end_byte();
     if start <= end && end <= source.len() {
-        Some(source[start..end].to_string())
+        source.get(start..end).map(|s| s.to_string())
     } else {
         None
     }
@@ -1840,6 +1832,14 @@ class UserService {
             "Should find App class via regex fallback, got: {:?}",
             names
         );
+    }
+
+    #[test]
+    fn test_truncate_str_safe_keeps_utf8_valid() {
+        let s = "é".repeat(20);
+        let truncated = truncate_str_safe(&s, 7);
+        assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
+        assert!(truncated.len() <= 7);
     }
 
     #[test]

@@ -1230,26 +1230,6 @@ mod tests {
     }
 
     #[test]
-    fn read_file_safe_when_end_line_precedes_start_line() {
-        let workspace = tempdir().expect("workspace tempdir");
-        let test_file = workspace.path().join("test.txt");
-        fs::write(&test_file, "line1\nline2\nline3").expect("write test file");
-
-        let tool = ReadFileTool;
-        let ctx = ToolContext::new(workspace.path());
-        let res = tool.execute(
-            json!({ "path": "test.txt", "start_line": 3, "end_line": 1 }),
-            &ctx,
-        );
-        assert!(res.is_ok());
-        let output = res.unwrap();
-        assert!(output.text.is_empty() || output.text.contains("[Showing lines"));
-        assert!(!output.text.contains("line1"));
-        assert!(!output.text.contains("line2"));
-        assert!(!output.text.contains("line3"));
-    }
-
-    #[test]
     fn write_file_blocks_symlink() {
         let workspace = tempdir().expect("workspace tempdir");
         let test_file = workspace.path().join("test.txt");

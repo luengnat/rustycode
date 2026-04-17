@@ -192,10 +192,12 @@ impl MarkdownStream {
 
         // Check for code block opening
         let last_line = self.state.buffer.lines().last().unwrap_or("");
-        if last_line.starts_with("```") && !last_line[3..].contains('`') {
-            let fence_len = last_line.chars().take_while(|c| *c == '`').count();
-            if fence_len >= 3 {
-                return false;
+        if let Some(rest) = last_line.strip_prefix("```") {
+            if !rest.contains('`') {
+                let fence_len = last_line.chars().take_while(|c| *c == '`').count();
+                if fence_len >= 3 {
+                    return false;
+                }
             }
         }
 
@@ -214,7 +216,12 @@ impl MarkdownStream {
         for line in self.state.buffer.lines() {
             // Detect code fences
             let fence_len = line.chars().take_while(|c| *c == '`').count();
-            if fence_len >= 3 && !line[fence_len..].contains('`') {
+            if fence_len >= 3 {
+                let rest = line.get(fence_len..).unwrap_or("");
+                if rest.contains('`') {
+                    continue;
+                }
+
                 if self.state.in_code_block {
                     // Closing fence — must match the opening fence length
                     if fence_len >= self.state.code_fence_len {
@@ -226,10 +233,13 @@ impl MarkdownStream {
                     // Opening fence
                     self.state.in_code_block = true;
                     self.state.code_fence_len = fence_len;
-                    self.state.code_block_language = if line.len() > fence_len {
-                        Some(line[fence_len..].trim().to_string())
-                    } else {
-                        None
+                    self.state.code_block_language = {
+                        let lang = rest.trim();
+                        if lang.is_empty() {
+                            None
+                        } else {
+                            Some(lang.to_string())
+                        }
                     };
                 }
             } else if self.state.in_code_block {
@@ -279,6 +289,19 @@ mod tests {
 
         stream.push("```");
         assert!(!stream.is_incomplete());
+    }
+
+    #[test]
+    fn test_code_block_language_detection_handles_blank_fence() {
+        let mut stream = MarkdownStream::new();
+        let chunk = stream.push("```\n");
+        assert_eq!(
+            chunk.element_type,
+            MarkdownElement::CodeBlock {
+                language: None,
+                closed: false
+            }
+        );
     }
 
     #[test]

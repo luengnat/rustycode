@@ -844,7 +844,7 @@ impl OsvInspector {
                     .find(|a| !a.starts_with('-') && !a.is_empty())
                     .map(|s| {
                         if let Some(idx) = s.find('@') {
-                            s[..idx].to_string()
+                            s.get(..idx).unwrap_or(s).to_string()
                         } else {
                             s.to_string()
                         }
@@ -868,7 +868,7 @@ impl OsvInspector {
                     // we don't recognize — treat it as the package either way.
                     if found_subcmd || !subcmds.contains(&arg.as_str()) {
                         return Some(if let Some(idx) = arg.find('@') {
-                            arg[..idx].to_string()
+                            arg.get(..idx).unwrap_or(arg).to_string()
                         } else {
                             arg.to_string()
                         });
@@ -891,7 +891,7 @@ impl OsvInspector {
                     }
                     if found_subcmd || !subcmds.contains(&arg.as_str()) {
                         return Some(if let Some(idx) = arg.find("==") {
-                            arg[..idx].to_string()
+                            arg.get(..idx).unwrap_or(arg).to_string()
                         } else {
                             arg.to_string()
                         });
@@ -905,7 +905,7 @@ impl OsvInspector {
                     .find(|a| !a.starts_with('-') && !a.is_empty())
                     .map(|s| {
                         if let Some(idx) = s.find("==") {
-                            s[..idx].to_string()
+                            s.get(..idx).unwrap_or(s).to_string()
                         } else {
                             s.to_string()
                         }
@@ -922,7 +922,7 @@ impl OsvInspector {
                         for a in &args[i + 2..] {
                             if !a.starts_with('-') && !a.is_empty() {
                                 return Some(if let Some(idx) = a.find("==") {
-                                    a[..idx].to_string()
+                                    a.get(..idx).unwrap_or(a).to_string()
                                 } else {
                                     a.to_string()
                                 });
@@ -1984,5 +1984,22 @@ mod tests {
         let args2: Vec<String> = vec!["--force".to_string(), "numpy".to_string()];
         let pkg2 = inspector.extract_package_from_args("pip", &args2);
         assert_eq!(pkg2, Some("numpy".to_string()));
+    }
+
+    #[test]
+    fn test_osv_extract_packages_without_panic_on_scopes() {
+        let inspector = OsvInspector::new();
+
+        let npm_args: Vec<String> = vec!["@scope/pkg@1.2.3".to_string()];
+        assert_eq!(
+            inspector.extract_package_from_args("npm", &npm_args),
+            Some("@scope/pkg".to_string())
+        );
+
+        let pip_args: Vec<String> = vec!["requests==2.32.3".to_string()];
+        assert_eq!(
+            inspector.extract_package_from_args("pip", &pip_args),
+            Some("requests".to_string())
+        );
     }
 }

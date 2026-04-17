@@ -55,7 +55,7 @@ fn compact_git_status(stdout: &str, _stderr: &str) -> TransformedOutput {
         }
         // simple heuristics: take last path fragment
         let item = if let Some(idx) = t.rfind('/') {
-            t[idx + 1..].to_string()
+            t.get(idx + 1..).unwrap_or(t).to_string()
         } else {
             t.to_string()
         };
@@ -231,14 +231,12 @@ fn compact_git_log(stdout: &str, _stderr: &str) -> TransformedOutput {
         .take(10)
         .filter_map(|line| {
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                Some(format!(
-                    "{} {}",
-                    &parts[0..=7].join(" "),
-                    parts[7..].join(" ")
-                ))
-            } else {
+            if parts.is_empty() {
                 None
+            } else if parts.len() <= 8 {
+                Some(parts.join(" "))
+            } else {
+                Some(format!("{} {}", parts[..8].join(" "), parts[8..].join(" ")))
             }
         })
         .collect();

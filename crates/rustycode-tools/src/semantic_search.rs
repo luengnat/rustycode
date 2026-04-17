@@ -371,6 +371,8 @@ impl CodeIndexer {
             // Use semantic chunks
             chunks.extend(semantic_chunks.into_iter().map(
                 |(start, end, symbol_name, symbol_type)| {
+                    let start = start.min(lines.len());
+                    let end = end.max(start).min(lines.len());
                     let content = lines[start..end].join("\n");
                     CodeChunk {
                         file_path: path.to_path_buf(),
@@ -474,10 +476,10 @@ fn extract_rust_symbol(line: &str) -> Option<(String, String)> {
 
     // Function definition: look for "fn name(" pattern
     if let Some(fn_pos) = trimmed.find("fn ") {
-        let after_fn = &trimmed[fn_pos + 3..];
+        let after_fn = trimmed.get(fn_pos + 3..)?;
         // Get the identifier before '('
         if let Some(paren_pos) = after_fn.find('(') {
-            let name = after_fn[..paren_pos].trim();
+            let name = after_fn.get(..paren_pos)?.trim();
             if !name.is_empty() && !name.contains(' ') {
                 return Some((name.to_string(), "function".to_string()));
             }
@@ -536,7 +538,7 @@ fn extract_java_symbol(line: &str) -> Option<(String, String)> {
     // Class definition - check early since it's a clear pattern
     if trimmed.contains("class ") {
         if let Some(class_pos) = trimmed.find("class ") {
-            let after_class = &trimmed[class_pos + 6..];
+            let after_class = trimmed.get(class_pos + 6..)?;
             let name = after_class
                 .split_whitespace()
                 .next()?
@@ -552,7 +554,7 @@ fn extract_java_symbol(line: &str) -> Option<(String, String)> {
     // Interface definition
     if trimmed.contains("interface ") {
         if let Some(iface_pos) = trimmed.find("interface ") {
-            let after_iface = &trimmed[iface_pos + 10..];
+            let after_iface = trimmed.get(iface_pos + 10..)?;
             let name = after_iface
                 .split_whitespace()
                 .next()?
@@ -569,7 +571,7 @@ fn extract_java_symbol(line: &str) -> Option<(String, String)> {
     // Patterns: "public void foo(", "private String bar(", "int baz(", "void test("
     // Find the opening parenthesis
     let paren_pos = trimmed.find('(')?;
-    let before_paren = &trimmed[..paren_pos].trim();
+    let before_paren = trimmed.get(..paren_pos)?.trim();
 
     // Split by whitespace and get the last part (method name)
     let parts: Vec<&str> = before_paren.split_whitespace().collect();
@@ -624,9 +626,9 @@ fn extract_go_symbol(line: &str) -> Option<(String, String)> {
         if after_func.trim_start().starts_with('(') {
             // Method with receiver
             if let Some(paren_end) = after_func.find(')') {
-                let after_receiver = &after_func[paren_end + 1..].trim();
+                let after_receiver = after_func.get(paren_end + 1..)?.trim();
                 if let Some(paren_pos) = after_receiver.find('(') {
-                    let name = after_receiver[..paren_pos].trim();
+                    let name = after_receiver.get(..paren_pos)?.trim();
                     if !name.is_empty() {
                         return Some((name.to_string(), "method".to_string()));
                     }
@@ -635,7 +637,7 @@ fn extract_go_symbol(line: &str) -> Option<(String, String)> {
         } else {
             // Regular function
             if let Some(paren_pos) = after_func.find('(') {
-                let name = after_func[..paren_pos].trim();
+                let name = after_func.get(..paren_pos)?.trim();
                 if !name.is_empty() {
                     return Some((name.to_string(), "function".to_string()));
                 }
@@ -689,13 +691,13 @@ fn extract_javascript_symbol(line: &str) -> Option<(String, String)> {
     // Arrow function: const/let/var name = (...) => or name = async () =>
     if trimmed.starts_with("const ") || trimmed.starts_with("let ") || trimmed.starts_with("var ") {
         let eq_pos = trimmed.find('=')?;
-        let before_eq = &trimmed[..eq_pos].trim();
+        let before_eq = trimmed.get(..eq_pos)?.trim();
         // Remove type annotation for TypeScript: const name: Type = ...
         let name_part = before_eq.split(':').next()?;
         // Remove const/let/var keyword
         let name = name_part.split_whitespace().last()?.trim();
 
-        let after_eq = &trimmed[eq_pos + 1..].trim();
+        let after_eq = trimmed.get(eq_pos + 1..)?.trim();
         if after_eq.starts_with("async") || after_eq.contains("=>") || after_eq.starts_with('(') {
             let sym_type = if after_eq.starts_with("async") {
                 "async_function"

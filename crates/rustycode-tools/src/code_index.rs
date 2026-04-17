@@ -627,6 +627,8 @@ impl CodeIndex {
         if let Some(lines) = self.file_cache.get(file) {
             let start = line.saturating_sub(context_lines + 1);
             let end = (line + context_lines).min(lines.len());
+            let start = start.min(lines.len());
+            let end = end.max(start).min(lines.len());
             lines[start..end].join("\n")
         } else {
             String::new()
@@ -700,7 +702,7 @@ fn extract_rust_symbols(file_path: &Path, content: &str) -> Vec<Symbol> {
                 || prefix.ends_with("async")
                 || prefix.ends_with("pub async")
             {
-                if let Some(name) = extract_fn_name(&trimmed[pos..]) {
+                if let Some(name) = trimmed.get(pos..).and_then(extract_fn_name) {
                     let sig = extract_to_brace_or_semicolon(trimmed);
                     symbols.push(Symbol {
                         name,
@@ -867,21 +869,22 @@ fn extract_go_symbols(file_path: &Path, content: &str) -> Vec<Symbol> {
         let trimmed = line.trim();
 
         if trimmed.starts_with("func ") {
-            let name = extract_go_func_name(trimmed);
-            let kind = if trimmed.contains(")") && trimmed.split(')').count() > 2 {
-                SymbolKind::Method
-            } else {
-                SymbolKind::Function
-            };
-            symbols.push(Symbol {
-                name,
-                kind,
-                file_path: file_path.to_path_buf(),
-                line: i + 1,
-                signature: Some(extract_to_brace_or_semicolon(trimmed)),
-                doc_comment: None,
-                parent: None,
-            });
+            if let Some(name) = extract_go_func_name(trimmed) {
+                let kind = if trimmed.contains(")") && trimmed.split(')').count() > 2 {
+                    SymbolKind::Method
+                } else {
+                    SymbolKind::Function
+                };
+                symbols.push(Symbol {
+                    name,
+                    kind,
+                    file_path: file_path.to_path_buf(),
+                    line: i + 1,
+                    signature: Some(extract_to_brace_or_semicolon(trimmed)),
+                    doc_comment: None,
+                    parent: None,
+                });
+            }
         }
 
         if trimmed.starts_with("type ") && trimmed.contains(" struct") {
@@ -940,21 +943,23 @@ fn extract_js_symbols(file_path: &Path, content: &str) -> Vec<Symbol> {
         // const/let/var with arrow function
         for kw in &["const ", "let ", "var "] {
             if trimmed.starts_with(kw) && trimmed.contains("=>") {
-                let name = trimmed[kw.len()..]
-                    .split(|c: char| !c.is_alphanumeric() && c != '_')
-                    .next()
-                    .unwrap_or("")
-                    .to_string();
-                if !name.is_empty() {
-                    symbols.push(Symbol {
-                        name,
-                        kind: SymbolKind::Variable,
-                        file_path: file_path.to_path_buf(),
-                        line: i + 1,
-                        signature: Some(extract_to_brace_or_semicolon(trimmed)),
-                        doc_comment: None,
-                        parent: None,
-                    });
+                if let Some(after_kw) = trimmed.get(kw.len()..) {
+                    let name = after_kw
+                        .split(|c: char| !c.is_alphanumeric() && c != '_')
+                        .next()
+                        .unwrap_or("")
+                        .to_string();
+                    if !name.is_empty() {
+                        symbols.push(Symbol {
+                            name,
+                            kind: SymbolKind::Variable,
+                            file_path: file_path.to_path_buf(),
+                            line: i + 1,
+                            signature: Some(extract_to_brace_or_semicolon(trimmed)),
+                            doc_comment: None,
+                            parent: None,
+                        });
+                    }
                 }
             }
         }
@@ -978,16 +983,18 @@ fn extract_js_symbols(file_path: &Path, content: &str) -> Vec<Symbol> {
         // export function/class
         if trimmed.starts_with("export function ") || trimmed.starts_with("export async function ")
         {
-            if let Some(name) = extract_fn_name(&trimmed["export ".len()..]) {
-                symbols.push(Symbol {
-                    name,
-                    kind: SymbolKind::Function,
-                    file_path: file_path.to_path_buf(),
-                    line: i + 1,
-                    signature: Some(extract_to_brace_or_semicolon(trimmed)),
-                    doc_comment: None,
-                    parent: None,
-                });
+            if let Some(after_export) = trimmed.get("export ".len()..) {
+                if let Some(name) = extract_fn_name(after_export) {
+                    symbols.push(Symbol {
+                        name,
+                        kind: SymbolKind::Function,
+                        file_path: file_path.to_path_buf(),
+                        line: i + 1,
+                        signature: Some(extract_to_brace_or_semicolon(trimmed)),
+                        doc_comment: None,
+                        parent: None,
+                    });
+                }
             }
         }
     }
@@ -1009,22 +1016,23 @@ fn extract_java_symbols(file_path: &Path, content: &str) -> Vec<Symbol> {
         ] {
             if trimmed.contains(keyword) {
                 if let Some(pos) = trimmed.find(keyword) {
-                    let after = &trimmed[pos + keyword.len()..];
-                    let name = after
-                        .split(|c: char| c.is_whitespace() || c == '{' || c == '<')
-                        .next()
-                        .unwrap_or("")
-                        .to_string();
-                    if !name.is_empty() {
-                        symbols.push(Symbol {
-                            name,
-                            kind: *kind,
-                            file_path: file_path.to_path_buf(),
-                            line: i + 1,
-                            signature: Some(extract_to_brace_or_semicolon(trimmed)),
-                            doc_comment: None,
-                            parent: None,
-                        });
+                    if let Some(after) = trimmed.get(pos + keyword.len()..) {
+                        let name = after
+                            .split(|c: char| c.is_whitespace() || c == '{' || c == '<')
+                            .next()
+                            .unwrap_or("")
+                            .to_string();
+                        if !name.is_empty() {
+                            symbols.push(Symbol {
+                                name,
+                                kind: *kind,
+                                file_path: file_path.to_path_buf(),
+                                line: i + 1,
+                                signature: Some(extract_to_brace_or_semicolon(trimmed)),
+                                doc_comment: None,
+                                parent: None,
+                            });
+                        }
                     }
                 }
             }
@@ -1142,7 +1150,7 @@ fn extract_dependencies(file_path: &Path, content: &str) -> Vec<PathBuf> {
 
 fn extract_name_after_keyword(line: &str, keyword: &str) -> Option<String> {
     let pos = line.find(keyword)?;
-    let after = &line[pos + keyword.len()..];
+    let after = line.get(pos + keyword.len()..)?;
     let name = after
         .trim_start()
         .split(|c: char| c.is_whitespace() || c == '{' || c == ':' || c == '<' || c == '(')
@@ -1184,27 +1192,31 @@ fn extract_fn_name(fn_decl: &str) -> Option<String> {
     }
 }
 
-fn extract_go_func_name(line: &str) -> String {
+fn extract_go_func_name(line: &str) -> Option<String> {
     // func Name() or func (recv) Name()
-    let after_func = &line["func ".len()..];
+    let after_func = line.get("func ".len()..)?;
     if after_func.starts_with('(') {
         // Method: func (r *Recv) Name()
         if let Some(close) = after_func.find(") ") {
-            let after_recv = &after_func[close + 2..];
-            after_recv
+            let after_recv = after_func.get(close + 2..)?;
+            Some(
+                after_recv
+                    .split(|c: char| c == '(' || c.is_whitespace())
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
+            )
+        } else {
+            None
+        }
+    } else {
+        Some(
+            after_func
                 .split(|c: char| c == '(' || c.is_whitespace())
                 .next()
                 .unwrap_or("")
-                .to_string()
-        } else {
-            String::new()
-        }
-    } else {
-        after_func
-            .split(|c: char| c == '(' || c.is_whitespace())
-            .next()
-            .unwrap_or("")
-            .to_string()
+                .to_string(),
+        )
     }
 }
 
@@ -1220,9 +1232,9 @@ fn extract_java_method_name(line: &str) -> Option<String> {
 
 fn extract_to_brace_or_semicolon(line: &str) -> String {
     if let Some(pos) = line.find('{') {
-        line[..pos].trim().to_string()
+        line.get(..pos).unwrap_or(line).trim().to_string()
     } else if let Some(pos) = line.find(';') {
-        line[..pos].trim().to_string()
+        line.get(..pos).unwrap_or(line).trim().to_string()
     } else {
         line.trim().to_string()
     }

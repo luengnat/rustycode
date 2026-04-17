@@ -288,10 +288,14 @@ pub fn truncate_bytes(content: &str, max_bytes: usize, source_name: &str) -> Tru
     }
 
     // Find a safe truncation point (newline close to max_bytes)
-    let truncation_point = if let Some(pos) = content[..max_bytes].rfind('\n') {
+    let mut safe_boundary = max_bytes.min(content.len());
+    while safe_boundary > 0 && !content.is_char_boundary(safe_boundary) {
+        safe_boundary -= 1;
+    }
+    let truncation_point = if let Some(pos) = content[..safe_boundary].rfind('\n') {
         pos
     } else {
-        max_bytes
+        safe_boundary
     };
 
     let truncated_content = &content[..truncation_point];
@@ -682,6 +686,13 @@ mod tests {
 
         assert!(result.truncated);
         assert!(result.output.contains("(Output truncated at 50KB"));
+    }
+
+    #[test]
+    fn test_truncate_bytes_keeps_utf8_valid() {
+        let content = "é".repeat(20);
+        let result = truncate_bytes(&content, 7, "test");
+        assert!(std::str::from_utf8(result.output.as_bytes()).is_ok());
     }
 
     #[test]

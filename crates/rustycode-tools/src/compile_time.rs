@@ -333,6 +333,7 @@ impl Tool for CompileTimeReadFile {
 
             let s = start.saturating_sub(1).min(total_lines);
             let e = end.min(total_lines);
+            let e = e.max(s).min(total_lines);
 
             let extracted = lines[s..e].join("\n");
             let extracted_bytes = extracted.len();
@@ -1124,6 +1125,21 @@ mod tests {
             }
             _ => panic!("Expected LineRangeError"),
         }
+    }
+
+    #[test]
+    fn test_read_file_start_after_end_clamps_safely() {
+        let content = "Line 1\nLine 2\nLine 3";
+        let (_dir, path) = create_test_file(content);
+
+        let input = ReadFileInput {
+            path,
+            start_line: Some(3),
+            end_line: Some(1),
+        };
+
+        let result = ToolDispatcher::<CompileTimeReadFile>::dispatch(input);
+        assert!(result.is_err());
     }
 
     // =========================================================================

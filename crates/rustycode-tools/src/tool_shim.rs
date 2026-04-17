@@ -326,7 +326,7 @@ impl ToolCallExtractor {
         }
 
         let mut map = serde_json::Map::new();
-        for pair in args_str.split(',') {
+        for pair in Self::split_function_args(args_str) {
             let pair = pair.trim();
             if let Some(eq_pos) = pair.find('=') {
                 let key = pair[..eq_pos].trim().to_string();
@@ -342,6 +342,44 @@ impl ToolCallExtractor {
             }
         }
         Some(Value::Object(map))
+    }
+
+    /// Split function-call arguments on commas that are not inside quotes/brackets.
+    fn split_function_args(args_str: &str) -> Vec<&str> {
+        let mut parts = Vec::new();
+        let mut start = 0usize;
+        let mut depth = 0i32;
+        let mut in_single = false;
+        let mut in_double = false;
+        let mut escape = false;
+
+        for (idx, ch) in args_str.char_indices() {
+            if escape {
+                escape = false;
+                continue;
+            }
+
+            match ch {
+                '\\' if in_single || in_double => {
+                    escape = true;
+                }
+                '\'' if !in_double => in_single = !in_single,
+                '"' if !in_single => in_double = !in_double,
+                '(' | '[' | '{' if !in_single && !in_double => depth += 1,
+                ')' | ']' | '}' if !in_single && !in_double && depth > 0 => depth -= 1,
+                ',' if !in_single && !in_double && depth == 0 => {
+                    parts.push(&args_str[start..idx]);
+                    start = idx + ch.len_utf8();
+                }
+                _ => {}
+            }
+        }
+
+        if start <= args_str.len() {
+            parts.push(&args_str[start..]);
+        }
+
+        parts
     }
 
     /// Check if a tool name is in the known tools list.
@@ -714,5 +752,17 @@ Then read a file.
         assert!(!is_valid_function_name("tool@v2"));
         assert!(!is_valid_function_name("my.tool"));
         assert!(!is_valid_function_name(""));
+    }
+
+    #[test]
+    fn test_parse_function_args_handles_commas_in_quotes() {
+        let args = ToolCallExtractor::parse_function_args(
+            r#"command="echo a,b", path="/tmp/x", note='hello, world'"#,
+        )
+        .unwrap();
+
+        assert_eq!(args["command"], "echo a,b");
+        assert_eq!(args["path"], "/tmp/x");
+        assert_eq!(args["note"], "hello, world");
     }
 }

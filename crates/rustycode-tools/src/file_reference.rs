@@ -119,12 +119,11 @@ fn should_process_reference(
     import_boundary: &Path,
     visited: &HashSet<PathBuf>,
 ) -> Option<PathBuf> {
-    if visited.contains(reference) {
-        return None;
-    }
-
     match sanitize_reference_path(reference, including_file_path, import_boundary) {
         Ok(path) => {
+            if visited.contains(&path) {
+                return None;
+            }
             if !path.is_file() {
                 return None;
             }
@@ -153,11 +152,11 @@ fn process_file_reference(
         return None;
     }
 
-    visited.insert(reference.to_path_buf());
+    visited.insert(safe_path.to_path_buf());
 
     let expanded_content = expand_file_references(safe_path, import_boundary, visited, depth + 1);
 
-    visited.remove(reference);
+    visited.remove(safe_path);
 
     let reference_pattern = format!("@{}", reference.to_string_lossy());
     let replacement = format!(
@@ -434,6 +433,21 @@ mod tests {
         assert!(expanded.contains("Safe content"));
         assert!(expanded.contains("@../etc/passwd")); // left as-is (not expanded)
         assert!(!expanded.contains("root:")); // shouldn't have /etc/passwd content
+    }
+
+    #[test]
+    fn test_expand_circular_reference_detects_canonical_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let boundary = temp.path();
+
+        create_file(boundary, "shared.md", "Shared\n");
+        create_file(boundary, "alias.md", "@./shared.md\n@shared.md");
+        let main = create_file(boundary, "main.md", "@alias.md");
+
+        let expanded = expand_references(&main, boundary);
+
+        assert!(expanded.contains("Shared"));
+        assert_eq!(expanded.matches("Shared").count(), 1);
     }
 
     #[test]

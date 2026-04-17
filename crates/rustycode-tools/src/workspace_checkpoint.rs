@@ -23,7 +23,8 @@ pub struct CheckpointId(pub String);
 
 impl CheckpointId {
     pub fn new() -> Self {
-        Self(Uuid::new_v4().to_string()[..8].to_string())
+        let id = Uuid::new_v4().simple().to_string();
+        Self(id[..8].to_string())
     }
 }
 
