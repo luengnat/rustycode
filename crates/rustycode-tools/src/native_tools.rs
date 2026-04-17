@@ -3,11 +3,11 @@
 //! Replaces shell-dependent operations (`ls`, `grep`, `cat`) with native
 //! Rust implementations to avoid dependencies on host environment binaries.
 
+use anyhow::{Context, Result};
+use regex::Regex;
 use std::fs;
 use std::path::Path;
 use walkdir::WalkDir;
-use regex::Regex;
-use anyhow::{Result, Context};
 
 /// Native `cat` implementation
 pub fn native_cat(path: &Path) -> Result<String> {
@@ -17,7 +17,11 @@ pub fn native_cat(path: &Path) -> Result<String> {
 /// Native `ls` implementation
 pub fn native_ls(path: &Path) -> Result<Vec<String>> {
     let mut files = Vec::new();
-    for entry in WalkDir::new(path).max_depth(1).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(path)
+        .max_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         files.push(entry.path().to_string_lossy().into_owned());
     }
     Ok(files)
@@ -27,10 +31,11 @@ pub fn native_ls(path: &Path) -> Result<Vec<String>> {
 pub fn native_grep(path: &Path, pattern: &str) -> Result<String> {
     let re = Regex::new(pattern).context("Invalid regex pattern")?;
     let content = native_cat(path)?;
-    let matches: Vec<String> = content.lines()
+    let matches: Vec<String> = content
+        .lines()
         .filter(|line| re.is_match(line))
         .map(|line| line.to_string())
         .collect();
-    
+
     Ok(matches.join("\n"))
 }

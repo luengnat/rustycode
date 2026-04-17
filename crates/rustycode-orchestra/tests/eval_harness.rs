@@ -67,7 +67,7 @@ mod tests {
             expected_result: "ok".to_string(),
             task_type: "bash".to_string(),
         });
-        
+
         let reports = harness.run_evals(PathBuf::from(".")).await;
         assert_eq!(reports.len(), 1);
         assert!(reports[0].success);

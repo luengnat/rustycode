@@ -33,7 +33,7 @@ fn detect_shell() -> (&'static str, Option<&'static str>, bool) {
 
     #[cfg(not(windows))]
     {
-        for (shell, flag) in [("bash", None), ("zsh", None), ("sh", None)] {
+        for (shell, flag) in [("bash", Some("-i")), ("zsh", Some("-i")), ("sh", None)] {
             if which_sh(shell) {
                 return (shell, flag, false);
             }
@@ -362,6 +362,20 @@ impl BashSession {
             exit_code_line = output_lines.pop().unwrap_or_default();
         }
 
+        // Filter shell prompt echoes from interactive mode output.
+        // Interactive shells echo stdin commands to stdout, producing lines like:
+        //   "bash-3.2$ timeout 120 ls" or "zsh$ echo $?"
+        // These are wrapper artifacts, not actual command output.
+        output_lines.retain(|line| {
+            let trimmed = line.trim();
+            !trimmed.contains("$ timeout ")
+                && !trimmed.contains("$ echo $?")
+                && !trimmed.contains("$ echo '---END---'")
+                && !trimmed.contains("$ echo $LASTEXITCODE")
+                && !trimmed.starts_with("bash: no job control")
+                && !trimmed.starts_with("The default interactive shell")
+        });
+
         let stdout = output_lines.join("\n");
 
         // Parse exit code
@@ -463,6 +477,16 @@ impl BashSession {
             }
 
             if !line.trim().is_empty() {
+                let trimmed = line.trim();
+                if trimmed.contains("$ timeout ")
+                    || trimmed.contains("$ echo $?")
+                    || trimmed.contains("$ echo '---END---'")
+                    || trimmed.contains("$ echo $LASTEXITCODE")
+                    || trimmed.starts_with("bash: no job control")
+                    || trimmed.starts_with("The default interactive shell")
+                {
+                    continue;
+                }
                 let chunk = StreamChunk::new(format!("{}\n", line));
                 sender
                     .send(chunk)

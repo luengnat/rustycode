@@ -2063,3 +2063,4 @@ mod tests {
         assert_eq!(tool.permission(), CatalogPermission::Read);
     }
 }
+pub mod native_tools;

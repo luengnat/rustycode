@@ -7,7 +7,9 @@ pub struct AgentMonitor {
 
 impl AgentMonitor {
     pub fn new(threshold: usize) -> Self {
-        Self { repetition_check_threshold: threshold }
+        Self {
+            repetition_check_threshold: threshold,
+        }
     }
 }
 
@@ -23,7 +25,7 @@ pub fn detect_and_truncate_repeated_blocks(text: &str) -> Option<String> {
         .collect();
 
     if paragraphs.len() < 6 {
-        return None; 
+        return None;
     }
 
     for block_size in 3..=8.min(paragraphs.len() / 2) {
@@ -67,12 +69,20 @@ pub fn detect_and_truncate_repeated_blocks(text: &str) -> Option<String> {
 fn blocks_match(a: &str, b: &str) -> bool {
     let a_normalized: String = a.chars().filter(|c| !c.is_whitespace()).collect();
     let b_normalized: String = b.chars().filter(|c| !c.is_whitespace()).collect();
-    if a_normalized.len() < 50 { return false; }
-    if a_normalized == b_normalized { return true; }
+    if a_normalized.len() < 50 {
+        return false;
+    }
+    if a_normalized == b_normalized {
+        return true;
+    }
     let min_len = a_normalized.len().min(b_normalized.len());
-    if min_len < 50 { return false; }
+    if min_len < 50 {
+        return false;
+    }
     let check_len = (min_len as f64 * 0.8) as usize;
-    if check_len < 50 { return false; }
+    if check_len < 50 {
+        return false;
+    }
     let matching: usize = a_normalized[..check_len]
         .chars()
         .zip(b_normalized[..check_len].chars())

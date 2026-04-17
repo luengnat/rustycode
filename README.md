@@ -16,3 +16,8 @@ irm https://raw.githubusercontent.com/luengnat/rustycode/main/scripts/install.ps
 
 ## Quick Start
 After installation, the binary is available at `~/.local/bin/rustycode` (or `%USERPROFILE%\.local\bin\rustycode.exe` on Windows).
+
+### Build Requirements
+Ensure you have the following system dependencies installed:
+- **Linux**: `protobuf-compiler`, `libssl-dev`, `pkg-config`
+- **macOS**: `protobuf` (via Homebrew)

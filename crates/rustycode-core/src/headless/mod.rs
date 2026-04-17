@@ -223,7 +223,8 @@ fn execute_headless_tool(
             }
 
             // build_ext success hint — remind to pip install -e . so the package is importable
-            if cmd_lower.contains("build_ext") && !out_lower.contains("error")
+            if cmd_lower.contains("build_ext")
+                && !out_lower.contains("error")
                 && !out_lower.contains("failed")
             {
                 output.push_str(
@@ -234,7 +235,8 @@ fn execute_headless_tool(
             }
 
             // git checkout warning — don't revert your own changes
-            if cmd_lower.contains("git checkout") && cmd_lower.contains(".")
+            if cmd_lower.contains("git checkout")
+                && cmd_lower.contains(".")
                 && !cmd_lower.contains("git checkout -b")
             {
                 output.push_str(
@@ -245,9 +247,13 @@ fn execute_headless_tool(
             }
 
             // Server startup hint — remind to verify server is responding
-            if (cmd_lower.contains("nohup") || cmd_lower.contains("&") || cmd_lower.contains("http.server")
-                || cmd_lower.contains("python -m http") || cmd_lower.contains("flask run")
-                || cmd_lower.contains("uvicorn") || cmd_lower.contains("gunicorn"))
+            if (cmd_lower.contains("nohup")
+                || cmd_lower.contains("&")
+                || cmd_lower.contains("http.server")
+                || cmd_lower.contains("python -m http")
+                || cmd_lower.contains("flask run")
+                || cmd_lower.contains("uvicorn")
+                || cmd_lower.contains("gunicorn"))
                 && !out_lower.contains("error")
             {
                 output.push_str(
@@ -2351,8 +2357,8 @@ pub async fn run_headless_task_with_iteration(
                     || result_lower.contains("no such file")
                     || result_lower.contains("cannot execute")
                     || result_lower.contains("not executable");
-                let has_success_indicators =
-                    result_lower.contains("passed") && !result_lower.contains("failed")
+                let has_success_indicators = result_lower.contains("passed")
+                    && !result_lower.contains("failed")
                     || result_lower.contains("all tests passed")
                     || result_lower.contains("ok")
                     || result_lower.contains("success")
@@ -3706,7 +3712,8 @@ mod tests {
             }
             if name == "bash" {
                 let cmd = json.to_lowercase();
-                if cmd.contains("sed -i") || cmd.contains("awk -i") || cmd.contains("awk --inplace") {
+                if cmd.contains("sed -i") || cmd.contains("awk -i") || cmd.contains("awk --inplace")
+                {
                     return true;
                 }
                 if cmd.contains("> ")

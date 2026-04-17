@@ -89,9 +89,7 @@ impl SessionManager {
             warn!("Failed to create session storage directory: {}", e);
         }
 
-        Self {
-            storage_dir,
-        }
+        Self { storage_dir }
     }
 
     /// Get file path for a session
@@ -110,12 +108,17 @@ impl SessionManager {
 
         // Write to temp file first, then rename for atomicity
         let temp_path = file_path.with_extension("json.tmp");
-        fs::write(&temp_path, &json)
-            .map_err(|e| anyhow::anyhow!("Failed to write session temp file {:?}: {}", temp_path, e))?;
+        fs::write(&temp_path, &json).map_err(|e| {
+            anyhow::anyhow!("Failed to write session temp file {:?}: {}", temp_path, e)
+        })?;
         fs::rename(&temp_path, &file_path).map_err(|e| {
             // Clean up temp file on rename failure
             let _ = fs::remove_file(&temp_path);
-            anyhow::anyhow!("Failed to rename session temp file to {:?}: {}", file_path, e)
+            anyhow::anyhow!(
+                "Failed to rename session temp file to {:?}: {}",
+                file_path,
+                e
+            )
         })?;
 
         info!("Saved session {} to {:?}", session_id, file_path);

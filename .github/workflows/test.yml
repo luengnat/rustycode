@@ -34,7 +34,7 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libssl-dev pkg-config
 
       - name: Cache build artifacts
         uses: Swatinem/rust-cache@v2
@@ -61,7 +61,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libssl-dev pkg-config
 
       - name: Cache build artifacts
         uses: Swatinem/rust-cache@v2
