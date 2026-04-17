@@ -194,12 +194,10 @@ pub async fn ensure_gemma_e4b_model(config: &LiteRtLmInstallConfig) -> Result<Pa
     if !model_path.exists() {
         let fallback = find_file(&model_dir, &config.model_filename)
             .ok_or_else(|| anyhow::anyhow!("LiteRT-LM model was not found after download"))?;
-        if fallback != model_path {
-            if tokio::fs::rename(&fallback, &model_path).await.is_err() {
-                tokio::fs::copy(&fallback, &model_path)
-                    .await
-                    .context("failed to copy LiteRT-LM model into cache")?;
-            }
+        if fallback != model_path && tokio::fs::rename(&fallback, &model_path).await.is_err() {
+            tokio::fs::copy(&fallback, &model_path)
+                .await
+                .context("failed to copy LiteRT-LM model into cache")?;
         }
         return Ok(model_path);
     }
