@@ -100,8 +100,11 @@ impl SmartApprove {
                 "rm ",
                 "rm -",
                 "rmdir",
+                "sudo ",
+                "chmod ",
+                "chown ",
                 "git push",
-                "git push",
+                "git push --force",
                 "git reset",
                 "git checkout --",
                 "git clean",
@@ -583,6 +586,30 @@ mod tests {
         assert_eq!(
             classifier().classify("bash", Some("")),
             OperationClass::Unknown
+        );
+    }
+
+    #[test]
+    fn test_bash_sudo_is_destructive() {
+        assert_eq!(
+            classifier().classify("bash", Some("sudo apt install foo")),
+            OperationClass::Destructive
+        );
+    }
+
+    #[test]
+    fn test_bash_chmod_is_destructive() {
+        assert_eq!(
+            classifier().classify("bash", Some("chmod 777 /etc/passwd")),
+            OperationClass::Destructive
+        );
+    }
+
+    #[test]
+    fn test_bash_chown_is_destructive() {
+        assert_eq!(
+            classifier().classify("bash", Some("chown root:root /etc/shadow")),
+            OperationClass::Destructive
         );
     }
 
