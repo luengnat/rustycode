@@ -257,7 +257,16 @@ pub fn position_to_byte_index(text: &str, pos: Position) -> Result<usize> {
                 char_count
             ));
         }
-        byte_idx += line.len() + 1; // +1 for newline
+        // Advance past the line and its ending (\n or \r\n).
+        // `line.len()` is the content length (no line ending). We must add
+        // the actual number of bytes used by the line ending in the source text.
+        byte_idx += line.len();
+        let rest = &text.as_bytes()[byte_idx..];
+        if rest.starts_with(b"\r\n") {
+            byte_idx += 2;
+        } else if rest.first() == Some(&b'\n') {
+            byte_idx += 1;
+        }
         line_num += 1;
     }
 
@@ -841,6 +850,30 @@ mod tests {
         };
         let idx = position_to_byte_index(text, pos).unwrap();
         assert_eq!(idx, 8); // 5 chars + newline + 2 = 8
+    }
+
+    #[test]
+    fn test_position_to_byte_index_crlf() {
+        // CRLF line endings: \r\n is 2 bytes per newline
+        let text = "hello\r\nworld";
+        let pos = Position {
+            line: 1,
+            character: 2,
+        };
+        let idx = position_to_byte_index(text, pos).unwrap();
+        assert_eq!(idx, 9); // 5 chars + 2 byte CRLF + 2 = 9
+    }
+
+    #[test]
+    fn test_position_to_byte_index_crlf_third_line() {
+        let text = "one\r\ntwo\r\nthree";
+        let pos = Position {
+            line: 2,
+            character: 3,
+        };
+        let idx = position_to_byte_index(text, pos).unwrap();
+        // "one" (3) + CRLF (2) + "two" (3) + CRLF (2) + 3 chars = 13
+        assert_eq!(idx, 13);
     }
 
     #[test]

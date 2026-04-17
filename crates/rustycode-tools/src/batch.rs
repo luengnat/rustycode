@@ -244,10 +244,8 @@ impl Tool for BatchTool {
                     tool_name,
                     error_msg
                 ));
-
-                if !continue_on_error {
-                    break;
-                }
+                // Note: all calls execute in parallel, so continue_on_error
+                // only controls whether to report all failures or truncate output.
             }
         }
 
