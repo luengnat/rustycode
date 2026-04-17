@@ -93,9 +93,20 @@ impl ConfigLoader {
                 Ok(config_value) => {
                     merged = self.deep_merge(merged, config_value);
                 }
-                Err(_) => {
-                    // File doesn't exist or can't be read - skip silently
-                    // This is expected for optional config files
+                Err(e) => {
+                    // Silently skip "file not found" (expected for optional configs),
+                    // but log other errors (parse errors, permission denied, etc.)
+                    let err_str = e.to_lowercase();
+                    if !err_str.contains("no such file")
+                        && !err_str.contains("not found")
+                        && !err_str.contains("does not exist")
+                    {
+                        tracing::debug!(
+                            "Config file {} skipped due to error: {}",
+                            config_path.display(),
+                            e
+                        );
+                    }
                 }
             }
         }
