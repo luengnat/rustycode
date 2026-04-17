@@ -414,88 +414,115 @@ impl BashSession {
     fn execute_stream(
         &self,
         command: &str,
-        _timeout_secs: u64,
+        timeout_secs: u64,
         sender: StreamSender,
     ) -> Result<(i32, Option<String>)> {
-        let mut child_guard = self.child.lock().unwrap_or_else(|e| e.into_inner());
-        let child = child_guard
-            .as_mut()
-            .ok_or_else(|| anyhow!("shell session not available"))?;
+        // Write command to shell stdin (short-lived lock — dropped before reading)
+        {
+            let mut child_guard = self.child.lock().unwrap_or_else(|e| e.into_inner());
+            let child = child_guard
+                .as_mut()
+                .ok_or_else(|| anyhow!("shell session not available"))?;
 
-        // Send command to shell
-        if let Some(stdin) = child.stdin.as_mut() {
-            writeln!(stdin, "{}", command)
-                .map_err(|e| anyhow!("failed to write command: {}", e))?;
+            if let Some(stdin) = child.stdin.as_mut() {
+                let wrapped_command = if timeout_secs > 0 && !self.is_powershell {
+                    format!("timeout {} {}", timeout_secs, command)
+                } else {
+                    command.to_string()
+                };
 
-            // Write exit code query (platform-specific)
-            if self.is_powershell {
-                writeln!(stdin, "Write-Output $LASTEXITCODE")
-                    .map_err(|e| anyhow!("failed to write exit code query: {}", e))?;
-            } else {
-                writeln!(stdin, "echo $?")
-                    .map_err(|e| anyhow!("failed to write exit code query: {}", e))?;
-            }
+                writeln!(stdin, "{}", wrapped_command)
+                    .map_err(|e| anyhow!("failed to write command: {}", e))?;
 
-            // Write a delimiter to mark end of output
-            writeln!(stdin, "echo '---END---'")
-                .map_err(|e| anyhow!("failed to write delimiter: {}", e))?;
-
-            stdin
-                .flush()
-                .map_err(|e| anyhow!("failed to flush stdin: {}", e))?;
-        } else {
-            return Err(anyhow!("shell stdin not available"));
-        }
-
-        // Read stdout via channel thread (same as execute()).
-        // stderr is handled by the persistent drain thread → self.stderr_buffer.
-        let stdout_handle = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow!("shell stdout not available"))?;
-
-        // Spawn stdout reader thread that sends lines via channel
-        let (stdout_tx, stdout_rx) = std::sync::mpsc::channel::<String>();
-        thread::spawn(move || {
-            let mut reader = BufReader::new(stdout_handle);
-            let mut buf = Vec::new();
-            loop {
-                buf.clear();
-                match reader.read_until(b'\n', &mut buf) {
-                    Ok(0) => break, // EOF
-                    Ok(_) => {
-                        let line = String::from_utf8_lossy(&buf);
-                        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                        if stdout_tx.send(trimmed.to_string()).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
+                // Write exit code query (platform-specific)
+                if self.is_powershell {
+                    writeln!(stdin, "Write-Output $LASTEXITCODE")
+                        .map_err(|e| anyhow!("failed to write exit code query: {}", e))?;
+                } else {
+                    writeln!(stdin, "echo $?")
+                        .map_err(|e| anyhow!("failed to write exit code query: {}", e))?;
                 }
+
+                // Write a delimiter to mark end of output
+                writeln!(stdin, "echo '---END---'")
+                    .map_err(|e| anyhow!("failed to write delimiter: {}", e))?;
+
+                stdin
+                    .flush()
+                    .map_err(|e| anyhow!("failed to flush stdin: {}", e))?;
+            } else {
+                return Err(anyhow!("shell stdin not available"));
             }
-        });
+        } // child_guard dropped here — must not hold child lock while reading stdout
+
+        // Read stdout from the persistent reader thread via shared channel.
+        // The reader thread was spawned at session creation (new()) and continuously
+        // reads from the child's stdout pipe, sending lines through this channel.
+        // We must NOT call child.stdout.take() here — stdout was already taken in new().
+        let stdout_rx = self.stdout_rx.lock().unwrap_or_else(|e| e.into_inner());
 
         let mut exit_code_line = String::new();
+        let mut read_timed_out = false;
+
+        // Allow extra time beyond the command timeout for the delimiter/exit-code lines
+        let read_deadline = Instant::now() + Duration::from_secs(timeout_secs.saturating_add(10));
 
         // Stream output line by line from the channel
-        while let Ok(line) = stdout_rx.recv() {
-            if line.contains("---END---") {
+        loop {
+            let remaining = read_deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                read_timed_out = true;
                 break;
             }
 
-            if !line.trim().is_empty() {
-                if is_shell_boilerplate(line.trim()) {
-                    continue;
-                }
-                let chunk = StreamChunk::new(format!("{}\n", line));
-                sender
-                    .send(chunk)
-                    .map_err(|e| anyhow!("failed to send chunk: {}", e))?;
-            }
+            match stdout_rx.recv_timeout(remaining) {
+                Ok(line) => {
+                    if line.contains("---END---") {
+                        break;
+                    }
 
-            if line.trim().chars().all(|c| c.is_numeric() || c == '-') {
-                exit_code_line = line;
+                    if !line.trim().is_empty() {
+                        if is_shell_boilerplate(line.trim()) {
+                            continue;
+                        }
+                        let chunk = StreamChunk::new(format!("{}\n", line));
+                        sender
+                            .send(chunk)
+                            .map_err(|e| anyhow!("failed to send chunk: {}", e))?;
+                    }
+
+                    if line.trim().chars().all(|c| c.is_numeric() || c == '-') {
+                        exit_code_line = line;
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    read_timed_out = true;
+                    break;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    break; // EOF
+                }
             }
+        }
+
+        // Handle timeout: send SIGINT (Ctrl+C) and drain remaining output
+        if read_timed_out {
+            if let Ok(mut child_guard) = self.child.lock() {
+                if let Some(child) = child_guard.as_mut() {
+                    if let Some(stdin) = child.stdin.as_mut() {
+                        let _ = stdin.write_all(b"\x03\n");
+                        let _ = stdin.flush();
+                        thread::sleep(Duration::from_millis(100));
+                        let _ = writeln!(stdin, "echo '---END---'");
+                        let _ = stdin.flush();
+                    }
+                }
+            }
+            // Drain remaining lines from the channel
+            while stdout_rx.try_recv().is_ok() {}
+
+            let _ = sender.send(StreamChunk::done());
+            return Ok((124, Some("command timed out - output may be incomplete".to_string())));
         }
 
         // Read accumulated stderr from the persistent drain thread
@@ -2066,5 +2093,34 @@ mod tests {
     #[test]
     fn which_sh_rejects_nonexistent() {
         assert!(!which_sh("definitely_not_a_real_shell_12345"));
+    }
+
+    /// Regression test: execute_stream() uses stdout_rx channel (not child.stdout.take())
+    #[test]
+    fn session_execute_stream_uses_stdout_rx_channel() {
+        let temp = tempdir().unwrap();
+        let session = BashSession::new(temp.path().to_path_buf()).unwrap();
+        let (sender, receiver) = crate::streaming::create_stream_channel();
+        let result = session.execute_stream("echo hello_stream", 10, sender);
+        assert!(result.is_ok(), "execute_stream failed: {:?}", result);
+        let (exit_code, error) = result.unwrap();
+        assert_eq!(exit_code, 0, "expected exit code 0");
+        // Shell boilerplate in stderr may trigger the error field; the key invariant
+        // is that execute_stream succeeded and returned output (not a panic).
+        let _ = error; // may be Some due to interactive shell stderr noise
+        let output: String = receiver.try_iter().filter(|c| !c.is_done && c.error.is_none()).map(|c| c.text.clone()).collect();
+        assert!(output.contains("hello_stream"), "expected 'hello_stream', got: {:?}", output);
+    }
+
+    #[test]
+    fn session_execute_stream_timeout_returns_124() {
+        let temp = tempdir().unwrap();
+        let session = BashSession::new(temp.path().to_path_buf()).unwrap();
+        let (sender, _receiver) = crate::streaming::create_stream_channel();
+        let result = session.execute_stream("sleep 10", 1, sender);
+        assert!(result.is_ok());
+        let (exit_code, error) = result.unwrap();
+        assert_eq!(exit_code, 124);
+        assert!(error.is_none());
     }
 }

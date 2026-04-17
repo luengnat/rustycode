@@ -203,6 +203,7 @@ impl TruncatedOutput {
                 "total": total_count,
                 "shown": total_count,
                 "truncated": false,
+                "total_lines": total_count,
             }),
         }
     }
@@ -236,7 +237,7 @@ pub fn truncate_lines(
     let lines: Vec<&str> = content.lines().collect();
 
     if lines.len() <= max_lines {
-        return TruncatedOutput::full(content.to_string(), lines.len());
+        return TruncatedOutput::full(content.to_string(), total_lines.max(lines.len()));
     }
 
     let truncated = true;
@@ -259,11 +260,11 @@ pub fn truncate_lines(
     TruncatedOutput {
         output,
         truncated,
-        total_count: lines.len(),
+        total_count: total_lines.max(lines.len()),
         shown_count,
         metadata: json!({
             "source": source_name,
-            "total_lines": lines.len(),
+            "total_lines": total_lines.max(lines.len()),
             "shown_lines": shown_count,
             "truncated": true,
             "omitted_lines": omitted_count,
@@ -605,6 +606,16 @@ mod tests {
 
         assert!(result.truncated);
         assert_eq!(result.total_count, 100);
+    }
+
+    #[test]
+    fn test_truncate_lines_uses_caller_total_lines() {
+        let content = "line1\nline2";
+        let result = truncate_lines(content, 10, "test.txt", 200);
+
+        assert!(!result.truncated);
+        assert_eq!(result.total_count, 200);
+        assert_eq!(result.metadata["total_lines"], 200);
     }
 
     #[test]
