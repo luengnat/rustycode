@@ -202,7 +202,10 @@ impl TeamStatusRenderer {
         // Agent rows
         let roles = ["Architect", "Builder", "Skeptic", "Judge", "Scalpel"];
         for role in &roles {
-            let agent = self.agents.get(*role).unwrap();
+            let agent = match self.agents.get(*role) {
+                Some(a) => a,
+                None => continue,
+            };
             let (icon, color) = match agent.state {
                 AgentDisplayState::Waiting => ("◌", "\x1b[90m"), // dim
                 AgentDisplayState::Active => ("⟳", "\x1b[32m"),  // green

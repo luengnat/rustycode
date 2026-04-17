@@ -442,10 +442,25 @@ impl AsyncRuntime {
 
         join_set.spawn(async move {
             // Acquire semaphore permit to enforce concurrency limit
-            let _permit = semaphore
-                .acquire()
-                .await
-                .expect("Semaphore should not be closed while tasks are running");
+            let _permit = match semaphore.acquire().await {
+                Ok(p) => p,
+                Err(_) => {
+                    tracing::warn!("Semaphore closed, cancelling tool call {}", call_id);
+                    return (
+                        ToolResult {
+                            call_id: call_id.clone(),
+                            output: "cancelled: semaphore closed".to_string(),
+                            error: Some("semaphore closed".to_string()),
+                            success: false,
+                            exit_code: None,
+                            data: None,
+                        },
+                        Duration::ZERO,
+                        false,
+                        call,
+                    );
+                }
+            };
 
             let task_start = std::time::Instant::now();
             let call_id_clone = call_id.clone();

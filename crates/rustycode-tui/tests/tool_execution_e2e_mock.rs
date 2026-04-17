@@ -36,6 +36,7 @@ async fn test_tool_execution_pipeline_with_mock() {
         usage: None,
         stop_reason: Some("tool_use".to_string()),
         citations: None,
+        thinking_blocks: None,
     };
 
     let mock = MockProvider::new(vec![Ok(tool_response)], None);
@@ -104,6 +105,7 @@ async fn test_multi_tool_execution_flow() {
             usage: None,
             stop_reason: Some("tool_use".to_string()),
             citations: None,
+            thinking_blocks: None,
         }),
         // Second response: Agent analyzes the file
         Ok(CompletionResponse {
@@ -112,6 +114,7 @@ async fn test_multi_tool_execution_flow() {
             usage: None,
             stop_reason: Some("end_turn".to_string()),
             citations: None,
+            thinking_blocks: None,
         }),
     ];
 

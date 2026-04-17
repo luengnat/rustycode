@@ -116,11 +116,10 @@ impl ConversationService {
         const SIMILARITY_THRESHOLD: f32 = 0.6;
         const TOP_N: usize = 10;
 
-        if self.vector_memory.is_none() {
+        let Some(vector_memory) = self.vector_memory.as_ref() else {
             return Vec::new();
-        }
-
-        let vector_memory = self.vector_memory.as_ref().unwrap().clone();
+        };
+        let vector_memory = vector_memory.clone();
         let query = query.to_string();
 
         // Search all memory types
@@ -137,7 +136,7 @@ impl ConversationService {
             .collect();
 
         // Sort by similarity (highest first)
-        all_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
+        all_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
         all_results.truncate(TOP_N);
 
         // Record metrics

@@ -484,6 +484,7 @@ impl LLMProvider for OpenRouterProvider {
             }),
             stop_reason: choice.finish_reason,
             citations: None,
+            thinking_blocks: None,
         })
     }
 
@@ -594,9 +595,11 @@ impl LLMProvider for OpenRouterProvider {
                                     if let Some(content) = delta.get("content") {
                                         if let Some(content_str) = content.as_str() {
                                             if !content_str.is_empty() {
-                                                events.push(Ok(crate::provider_v2::SSEEvent::Text {
-                                                    text: content_str.to_string(),
-                                                }));
+                                                events.push(Ok(
+                                                    crate::provider_v2::SSEEvent::Text {
+                                                        text: content_str.to_string(),
+                                                    },
+                                                ));
                                             }
                                         }
                                     }
@@ -613,10 +616,12 @@ impl LLMProvider for OpenRouterProvider {
                                             input_tokens,
                                             output_tokens,
                                             total_tokens: input_tokens + output_tokens,
-                                            cache_read_input_tokens: u.get("prompt_tokens_details")
+                                            cache_read_input_tokens: u
+                                                .get("prompt_tokens_details")
                                                 .and_then(|d| d.get("cached_tokens"))
                                                 .and_then(|t| t.as_u64())
-                                                .unwrap_or(0) as u32,
+                                                .unwrap_or(0)
+                                                as u32,
                                             cache_creation_input_tokens: 0,
                                         })
                                     });

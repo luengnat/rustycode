@@ -1,4 +1,5 @@
 //! Search and replace tool
+use crate::file_formatter;
 use crate::security::{
     create_file_symlink_safe, open_file_symlink_safe, validate_read_path, validate_regex_pattern,
     validate_write_path,
@@ -83,16 +84,15 @@ impl Tool for SearchReplace {
             .map_err(|e| anyhow::anyhow!("Failed to open file: {}", e))?;
         let mut content = String::new();
         use std::io::Read;
-        file.read_to_string(&mut content)
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::InvalidData {
-                    anyhow::anyhow!(
-                        "Binary or non-UTF-8 file detected; search_replace only supports text files"
-                    )
-                } else {
-                    anyhow::anyhow!("Failed to read file: {}", e)
-                }
-            })?;
+        file.read_to_string(&mut content).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::InvalidData {
+                anyhow::anyhow!(
+                    "Binary or non-UTF-8 file detected; search_replace only supports text files"
+                )
+            } else {
+                anyhow::anyhow!("Failed to read file: {}", e)
+            }
+        })?;
 
         // Perform replacement
         let (new_content, replacements_made) = if use_regex {
@@ -135,11 +135,17 @@ impl Tool for SearchReplace {
         file.sync_all()
             .map_err(|e| anyhow::anyhow!("Failed to sync file: {}", e))?;
 
-        Ok(ToolOutput::text(format!(
+        let mut output = format!(
             "Successfully performed {} replacement(s) in {}",
             replacements_made,
             input.path.display()
-        )))
+        );
+
+        if let Some(formatter_diff) = file_formatter::format_file(&validated_path, &ctx.cwd) {
+            output.push_str(&formatter_diff);
+        }
+
+        Ok(ToolOutput::text(output))
     }
 }
 
@@ -282,9 +288,6 @@ mod tests {
 
         let result = tool.execute(params, &ctx);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("non-UTF-8 file"));
+        assert!(result.unwrap_err().to_string().contains("non-UTF-8 file"));
     }
 }

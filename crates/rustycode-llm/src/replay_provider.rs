@@ -254,6 +254,7 @@ impl LLMProvider for ReplayProvider {
                     usage: record.output.usage.clone(),
                     stop_reason: record.output.stop_reason.clone(),
                     citations: None,
+                    thinking_blocks: None,
                 }),
                 None => Err(ProviderError::Unknown(format!(
                     "No recorded response found for input hash: {}",
@@ -294,6 +295,7 @@ impl LLMProvider for ReplayProvider {
                 usage: final_usage.clone(),
                 stop_reason: final_stop_reason.clone(),
                 citations: None,
+                thinking_blocks: None,
             };
 
             // Save the recording

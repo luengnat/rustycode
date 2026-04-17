@@ -447,21 +447,23 @@ fn prune_old_logs(debug_dir: &Path) -> Result<()> {
 fn format_timestamp() -> String {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs();
 
-    let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(now as i64, 0).unwrap();
+    let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(now as i64, 0)
+        .unwrap_or(chrono::DateTime::UNIX_EPOCH);
     datetime.format("%Y-%m-%d-%H-%M-%S").to_string()
 }
 
 /// Format timestamp for JSON log entry
 fn format_iso_timestamp() -> String {
     let now = SystemTime::now();
-    let duration = now.duration_since(SystemTime::UNIX_EPOCH).unwrap();
+    let duration = now.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
     let secs = duration.as_secs();
     let nsecs = duration.subsec_nanos();
 
-    let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(secs as i64, nsecs).unwrap();
+    let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(secs as i64, nsecs)
+        .unwrap_or(chrono::DateTime::UNIX_EPOCH);
     datetime.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 

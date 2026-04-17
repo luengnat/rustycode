@@ -1020,6 +1020,7 @@ mod tests {
                     usage: Some(Usage::new(100, 50)),
                     stop_reason: None,
                     citations: Some(Vec::new()),
+                    thinking_blocks: None,
                 })
             }
 
@@ -1113,6 +1114,7 @@ mod tests {
                     usage: Some(Usage::new(100, 50)),
                     stop_reason: None,
                     citations: Some(Vec::new()),
+                    thinking_blocks: None,
                 })
             }
 

@@ -5,15 +5,28 @@
 //! plans for execution.
 
 use super::plan_templates::PlanTemplate;
+use crate::security::{validate_list_path, validate_read_path, validate_write_path};
 use crate::{Tool, ToolContext, ToolOutput, ToolPermission};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use rustycode_protocol::SessionId;
 use serde_json::{json, Value};
 use std::fs;
-use std::path::PathBuf;
 
 use std::time::SystemTime;
+
+/// Check if a plan ID contains path traversal characters.
+fn validate_plan_id(plan_id: &str) -> Result<()> {
+    if plan_id.is_empty() {
+        return Err(anyhow!("plan_id cannot be empty"));
+    }
+    if plan_id.contains('/') || plan_id.contains('\\') || plan_id.contains("..") {
+        return Err(anyhow!(
+            "plan_id contains invalid characters (path separators or traversal)"
+        ));
+    }
+    Ok(())
+}
 
 /// Create a plan from a template
 pub struct CreatePlanFromTemplateTool;
@@ -220,18 +233,21 @@ the full plan object. This is a simplified version.
 
     fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let plan_id_str = required_string(&params, "plan_id")?;
+        validate_plan_id(plan_id_str)?;
+
         let default_path = format!(".rustycode/plans/{}.json", plan_id_str);
         let file_path = params
             .get("file_path")
             .and_then(|v| v.as_str())
             .unwrap_or(&default_path);
 
-        // Resolve file path
-        let path = if PathBuf::from(file_path).is_absolute() {
-            PathBuf::from(file_path)
-        } else {
-            ctx.cwd.join(file_path)
-        };
+        // Validate path stays within workspace
+        let plan_json = serde_json::to_string_pretty(&json!({
+            "id": plan_id_str,
+            "saved_at": Utc::now().to_rfc3339(),
+            "note": "This is a placeholder. In a real implementation, the plan would be retrieved from state."
+        }))?;
+        let path = validate_write_path(file_path, &ctx.cwd, plan_json.len())?;
 
         // Create parent directories if needed
         if let Some(parent) = path.parent() {
@@ -239,15 +255,8 @@ the full plan object. This is a simplified version.
                 .with_context(|| format!("failed to create directory: {}", parent.display()))?;
         }
 
-        // Create a placeholder plan (in real implementation, you'd get this from state)
-        let plan_data = json!({
-            "id": plan_id_str,
-            "saved_at": Utc::now().to_rfc3339(),
-            "note": "This is a placeholder. In a real implementation, the plan would be retrieved from state."
-        });
-
-        // Write plan to file
-        fs::write(&path, serde_json::to_string_pretty(&plan_data)?)
+        // Write plan to file (plan_json computed above for size validation)
+        fs::write(&path, &plan_json)
             .with_context(|| format!("failed to write plan to: {}", path.display()))?;
 
         let output = format!(
@@ -316,17 +325,8 @@ impl Tool for LoadPlanTool {
     fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let file_path_str = required_string(&params, "file_path")?;
 
-        // Resolve file path
-        let path = if PathBuf::from(file_path_str).is_absolute() {
-            PathBuf::from(file_path_str)
-        } else {
-            ctx.cwd.join(file_path_str)
-        };
-
-        // Check if file exists
-        if !path.exists() {
-            return Err(anyhow!("plan file not found: {}", path.display()));
-        }
+        // Validate path stays within workspace
+        let path = validate_read_path(file_path_str, &ctx.cwd)?;
 
         // Read plan file
         let content = fs::read_to_string(&path)
@@ -419,12 +419,8 @@ impl Tool for ListPlansTool {
             .and_then(|v| v.as_str())
             .unwrap_or(".rustycode/plans");
 
-        // Resolve directory path
-        let dir_path = if PathBuf::from(directory).is_absolute() {
-            PathBuf::from(directory)
-        } else {
-            ctx.cwd.join(directory)
-        };
+        // Validate path stays within workspace
+        let dir_path = validate_list_path(directory, &ctx.cwd)?;
 
         // Check if directory exists
         if !dir_path.exists() {
@@ -631,5 +627,81 @@ mod tests {
         assert_eq!(tool.name(), "approve_plan");
         assert!(tool.description().contains("approve"));
         assert_eq!(tool.permission(), ToolPermission::Read);
+    }
+
+    // ── Path traversal tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_plan_id_rejects_traversal() {
+        assert!(validate_plan_id("../etc/passwd").is_err());
+        assert!(validate_plan_id("foo/bar").is_err());
+        assert!(validate_plan_id("foo\\bar").is_err());
+        assert!(validate_plan_id("").is_err());
+        assert!(validate_plan_id("valid-plan-id").is_ok());
+        assert!(validate_plan_id("plan_123").is_ok());
+    }
+
+    #[test]
+    fn test_save_plan_rejects_traversal_path() {
+        let tool = SavePlanTool;
+        let ctx = ToolContext::new("/tmp");
+        let result = tool.execute(
+            json!({
+                "plan_id": "valid-id",
+                "file_path": "/etc/passwd"
+            }),
+            &ctx,
+        );
+        assert!(
+            result.is_err(),
+            "absolute path outside workspace should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_save_plan_rejects_traversal_plan_id() {
+        let tool = SavePlanTool;
+        let ctx = ToolContext::new("/tmp");
+        let result = tool.execute(
+            json!({
+                "plan_id": "../../etc/passwd"
+            }),
+            &ctx,
+        );
+        assert!(result.is_err(), "plan_id with .. should be rejected");
+    }
+
+    #[test]
+    fn test_load_plan_rejects_traversal_path() {
+        let tool = LoadPlanTool;
+        let ctx = ToolContext::new("/tmp");
+        let result = tool.execute(
+            json!({
+                "file_path": "/etc/shadow"
+            }),
+            &ctx,
+        );
+        assert!(
+            result.is_err(),
+            "absolute path outside workspace should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_list_plans_rejects_traversal_directory() {
+        let tool = ListPlansTool;
+        let ctx = ToolContext::new("/tmp");
+        let result = tool.execute(
+            json!({
+                "directory": "/etc"
+            }),
+            &ctx,
+        );
+        // validate_list_path checks that it's within workspace and is a directory
+        // /etc is not within /tmp workspace, so should be rejected
+        assert!(
+            result.is_err(),
+            "directory outside workspace should be rejected"
+        );
     }
 }

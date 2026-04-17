@@ -122,6 +122,7 @@ impl FixtureProvider {
             usage: None,
             stop_reason: Some("end_turn".to_string()),
             citations: None,
+            thinking_blocks: None,
         }
     }
 }

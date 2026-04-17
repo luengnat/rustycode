@@ -433,10 +433,11 @@ impl<'a> BrutalistRenderer<'a> {
             } else {
                 // End current chain if any
                 if chain_len >= 2 {
-                    let start = chain_start.unwrap();
-                    for j in start..start + chain_len {
-                        let is_last = j == start + chain_len - 1;
-                        map.insert(j, (true, is_last));
+                    if let Some(start) = chain_start {
+                        for j in start..start + chain_len {
+                            let is_last = j == start + chain_len - 1;
+                            map.insert(j, (true, is_last));
+                        }
                     }
                 }
                 chain_start = None;
@@ -446,10 +447,11 @@ impl<'a> BrutalistRenderer<'a> {
 
         // Handle trailing chain
         if chain_len >= 2 {
-            let start = chain_start.unwrap();
-            for j in start..start + chain_len {
-                let is_last = j == start + chain_len - 1;
-                map.insert(j, (true, is_last));
+            if let Some(start) = chain_start {
+                for j in start..start + chain_len {
+                    let is_last = j == start + chain_len - 1;
+                    map.insert(j, (true, is_last));
+                }
             }
         }
 

@@ -107,8 +107,7 @@ fn test_anthropic_provider_name() {
         retry_config: None,
     };
 
-    let provider =
-        AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
+    let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
     assert_eq!(provider.name(), "anthropic");
 }
 
@@ -122,8 +121,7 @@ fn test_anthropic_list_models() {
         retry_config: None,
     };
 
-    let provider =
-        AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
+    let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
 
     // This test doesn't require async since list_models just returns a static list
     let models = futures::executor::block_on(provider.list_models()).unwrap();
@@ -144,8 +142,7 @@ fn test_anthropic_endpoint_default() {
     };
 
     let provider =
-        AnthropicProvider::new_without_validation(config, "claude-sonnet-4-6".to_string())
-            .unwrap();
+        AnthropicProvider::new_without_validation(config, "claude-sonnet-4-6".to_string()).unwrap();
 
     // The endpoint should be the default Anthropic API
     // We can't access endpoint() directly as it's private, but we can verify the provider was created
@@ -162,8 +159,7 @@ fn test_anthropic_custom_base_url() {
         retry_config: None,
     };
 
-    let result =
-        AnthropicProvider::new_without_validation(config, "claude-sonnet-4-6".to_string());
+    let result = AnthropicProvider::new_without_validation(config, "claude-sonnet-4-6".to_string());
     assert!(result.is_ok());
 }
 
@@ -569,8 +565,7 @@ async fn test_anthropic_invalid_api_key() {
         retry_config: None,
     };
 
-    let provider =
-        AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
+    let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
     let request = create_test_request("Test");
 
     // Act
@@ -625,8 +620,7 @@ async fn test_anthropic_is_available_without_key() {
     };
 
     let provider =
-        AnthropicProvider::new_without_validation(config, "claude-sonnet-4-6".to_string())
-            .unwrap();
+        AnthropicProvider::new_without_validation(config, "claude-sonnet-4-6".to_string()).unwrap();
 
     // Act
     let available = LLMProvider::is_available(&provider).await;

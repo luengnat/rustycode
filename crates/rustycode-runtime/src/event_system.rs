@@ -12,7 +12,7 @@
 use crate::multi_agent::AgentRole;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
@@ -282,7 +282,7 @@ impl EventAggregator {
         }
 
         let oldest = self.current_events.first().unwrap();
-        let age = (Utc::now() - oldest.timestamp).num_milliseconds() as u64;
+        let age = (Utc::now() - oldest.timestamp).num_milliseconds().max(0) as u64;
         age >= self.aggregation_window_ms || self.current_events.len() >= self.max_events
     }
 }
@@ -322,8 +322,8 @@ pub struct EventSystem {
     event_channel: Arc<broadcast::Sender<Event>>,
     _receiver: broadcast::Receiver<Event>, // Keep alive to prevent channel closure
     subscriptions: Arc<RwLock<HashMap<String, EventSubscription>>>,
-    event_store: Arc<RwLock<Vec<Event>>>,
-    dead_letter_queue: Arc<RwLock<Vec<DeadLetterEvent>>>,
+    event_store: Arc<RwLock<VecDeque<Event>>>,
+    dead_letter_queue: Arc<RwLock<VecDeque<DeadLetterEvent>>>,
     statistics: Arc<RwLock<EventStatistics>>,
     event_counter: Arc<RwLock<u64>>,
     subscription_counter: Arc<RwLock<u64>>,
@@ -338,8 +338,8 @@ impl EventSystem {
             event_channel: Arc::new(tx),
             _receiver: rx, // Keep receiver alive
             subscriptions: Arc::new(RwLock::new(HashMap::new())),
-            event_store: Arc::new(RwLock::new(Vec::new())),
-            dead_letter_queue: Arc::new(RwLock::new(Vec::new())),
+            event_store: Arc::new(RwLock::new(VecDeque::new())),
+            dead_letter_queue: Arc::new(RwLock::new(VecDeque::new())),
             statistics: Arc::new(RwLock::new(EventStatistics {
                 total_events_published: 0,
                 total_events_delivered: 0,
@@ -372,11 +372,11 @@ impl EventSystem {
         // Store event
         {
             let mut store = self.event_store.write().await;
-            store.push(event.clone());
+            store.push_back(event.clone());
 
             // Trim store if needed
             if store.len() > self.config.max_size {
-                store.remove(0);
+                store.pop_front();
             }
         }
 
@@ -506,7 +506,7 @@ impl EventSystem {
     /// Get dead letter events
     pub async fn get_dead_letter_events(&self) -> Vec<DeadLetterEvent> {
         let queue = self.dead_letter_queue.read().await;
-        queue.clone()
+        queue.iter().cloned().collect()
     }
 
     /// Clear dead letter queue
@@ -595,7 +595,13 @@ impl EventSystem {
     /// Add to dead letter queue
     pub async fn add_to_dead_letter(&self, dle: DeadLetterEvent) {
         let mut queue = self.dead_letter_queue.write().await;
-        queue.push(dle);
+        queue.push_back(dle);
+
+        // Evict oldest entries to prevent unbounded growth
+        const MAX_DEAD_LETTER_SIZE: usize = 1000;
+        while queue.len() > MAX_DEAD_LETTER_SIZE {
+            queue.pop_front();
+        }
 
         let mut stats = self.statistics.write().await;
         stats.total_events_failed += 1;
@@ -1643,5 +1649,216 @@ mod tests {
         let aggregator = EventAggregator::new(5000, 10);
         let debug = format!("{:?}", aggregator);
         assert!(debug.contains("EventAggregator"));
+    }
+
+    // =========================================================================
+    // 16-20: VecDeque eviction behavior tests
+    // =========================================================================
+
+    // 16. Event store evicts oldest when exceeding max_size
+    #[tokio::test]
+    async fn test_event_store_evicts_oldest_beyond_max_size() {
+        // Use a small max_size to trigger eviction quickly
+        let config = EventStoreConfig {
+            max_size: 3,
+            ..EventStoreConfig::default()
+        };
+        let system = EventSystem::new(config);
+
+        // Publish 5 events — only the last 3 should remain
+        for i in 0..5 {
+            let event = system.create_event(
+                EventType::TaskCreated,
+                format!("source_{}", i),
+                EventData::Text(format!("event_{}", i)),
+                EventPriority::Medium,
+            );
+            system.publish(event).await.unwrap();
+        }
+
+        // Verify store size is bounded
+        let store = system.event_store.read().await;
+        assert_eq!(store.len(), 3, "store should be capped at max_size=3");
+        // The first two (event_0, event_1) should have been evicted
+        drop(store);
+
+        // Verify the remaining events are the newest ones
+        let events = system
+            .get_events(Some(EventType::TaskCreated), None, None)
+            .await;
+        assert_eq!(events.len(), 3);
+        // The surviving events should be event_2, event_3, event_4
+        let texts: Vec<&str> = events
+            .iter()
+            .filter_map(|e| {
+                if let EventData::Text(ref t) = e.data {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(texts.contains(&"event_2"));
+        assert!(texts.contains(&"event_3"));
+        assert!(texts.contains(&"event_4"));
+    }
+
+    // 17. Dead letter queue evicts when exceeding MAX_DEAD_LETTER_SIZE
+    #[tokio::test]
+    async fn test_dead_letter_queue_eviction() {
+        let system = EventSystem::new(EventStoreConfig::default());
+
+        // Add more than 1000 dead letter events (the MAX_DEAD_LETTER_SIZE)
+        for i in 0..1010 {
+            let event = Event {
+                id: format!("dle_{}", i),
+                event_type: EventType::TaskFailed,
+                priority: EventPriority::Low,
+                source: format!("worker_{}", i),
+                timestamp: Utc::now(),
+                data: EventData::Text(format!("failure_{}", i)),
+                metadata: HashMap::new(),
+                correlation_id: None,
+                causation_id: None,
+            };
+            let dle = DeadLetterEvent {
+                event,
+                subscription_id: "sub_eviction_test".into(),
+                reason: format!("reason_{}", i),
+                failed_at: Utc::now(),
+                retry_count: 0,
+            };
+            system.add_to_dead_letter(dle).await;
+        }
+
+        // Queue should be capped at 1000
+        let dles = system.get_dead_letter_events().await;
+        assert_eq!(
+            dles.len(),
+            1000,
+            "dead letter queue should be capped at 1000"
+        );
+
+        // The oldest entries should have been evicted (dle_0 through dle_9)
+        let reasons: Vec<&str> = dles.iter().map(|d| d.reason.as_str()).collect();
+        assert!(
+            !reasons.contains(&"reason_0"),
+            "oldest entry should be evicted"
+        );
+        assert!(
+            !reasons.contains(&"reason_9"),
+            "10th oldest should be evicted"
+        );
+        assert!(reasons.contains(&"reason_10"), "reason_10 should survive");
+    }
+
+    // 18. Event store with max_size=1 retains only the latest event
+    #[tokio::test]
+    async fn test_event_store_max_size_one() {
+        let config = EventStoreConfig {
+            max_size: 1,
+            ..EventStoreConfig::default()
+        };
+        let system = EventSystem::new(config);
+
+        let e1 = system.create_event(
+            EventType::SystemStarted,
+            "src1".into(),
+            EventData::Empty,
+            EventPriority::High,
+        );
+        system.publish(e1).await.unwrap();
+
+        let e2 = system.create_event(
+            EventType::SystemStopped,
+            "src2".into(),
+            EventData::Empty,
+            EventPriority::Low,
+        );
+        system.publish(e2).await.unwrap();
+
+        let events = system
+            .get_events(Some(EventType::SystemStarted), None, None)
+            .await;
+        assert!(events.is_empty(), "SystemStarted should have been evicted");
+
+        let events = system
+            .get_events(Some(EventType::SystemStopped), None, None)
+            .await;
+        assert_eq!(events.len(), 1, "only SystemStopped should remain");
+    }
+
+    // 19. Dead letter queue clear removes all entries
+    #[tokio::test]
+    async fn test_dead_letter_clear_after_eviction() {
+        let system = EventSystem::new(EventStoreConfig::default());
+
+        // Add some entries
+        for i in 0..5 {
+            let event = Event {
+                id: format!("clr_{}", i),
+                event_type: EventType::TaskFailed,
+                priority: EventPriority::Medium,
+                source: "src".into(),
+                timestamp: Utc::now(),
+                data: EventData::Empty,
+                metadata: HashMap::new(),
+                correlation_id: None,
+                causation_id: None,
+            };
+            let dle = DeadLetterEvent {
+                event,
+                subscription_id: "sub_clear_test".into(),
+                reason: "test".into(),
+                failed_at: Utc::now(),
+                retry_count: 0,
+            };
+            system.add_to_dead_letter(dle).await;
+        }
+
+        assert_eq!(system.get_dead_letter_events().await.len(), 5);
+
+        system.clear_dead_letter_queue().await;
+        assert!(system.get_dead_letter_events().await.is_empty());
+
+        // Stats should still reflect the historical count
+        let stats = system.get_statistics().await;
+        assert_eq!(
+            stats.dead_letter_count, 5,
+            "historical count should persist"
+        );
+    }
+
+    // 20. Publishing events with empty ID auto-generates unique IDs
+    #[tokio::test]
+    async fn test_auto_generated_event_ids() {
+        let system = EventSystem::new(EventStoreConfig::default());
+
+        let mut e1 = system.create_event(
+            EventType::AgentSpawned,
+            "src".into(),
+            EventData::Empty,
+            EventPriority::Medium,
+        );
+        e1.id.clear(); // Force auto-generation
+        system.publish(e1).await.unwrap();
+
+        let mut e2 = system.create_event(
+            EventType::AgentSpawned,
+            "src".into(),
+            EventData::Empty,
+            EventPriority::Medium,
+        );
+        e2.id.clear();
+        system.publish(e2).await.unwrap();
+
+        let events = system
+            .get_events(Some(EventType::AgentSpawned), None, None)
+            .await;
+        assert_eq!(events.len(), 2);
+        assert_ne!(
+            events[0].id, events[1].id,
+            "auto-generated IDs must be unique"
+        );
     }
 }

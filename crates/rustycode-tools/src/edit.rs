@@ -4,6 +4,7 @@
 //! to handle common LLM output issues like whitespace normalization.
 //! Preserves original line endings and shows diff output.
 
+use crate::file_formatter;
 use crate::line_endings::{detect_line_ending, generate_diff, normalize_to_lf};
 use crate::security::{create_file_symlink_safe, open_file_symlink_safe, validate_write_path};
 use crate::{Tool, ToolContext, ToolOutput, ToolPermission};
@@ -26,7 +27,9 @@ pub struct EditFileInput {
 
 /// Try exact string match
 fn try_exact_match(content: &str, old_text: &str) -> Option<(usize, usize)> {
-    content.find(old_text).map(|start| (start, start + old_text.len()))
+    content
+        .find(old_text)
+        .map(|start| (start, start + old_text.len()))
 }
 
 /// Try matching after normalizing line endings (CRLF → LF).
@@ -65,9 +68,8 @@ fn try_trimmed_match(content: &str, old_text: &str, new_text: &str) -> Option<St
             let normalized_new = normalize_to_lf(new_text);
             let new_lines: Vec<&str> = normalized_new.lines().collect();
 
-            let mut result_lines = Vec::with_capacity(
-                content_lines.len() - old_lines.len() + new_lines.len(),
-            );
+            let mut result_lines =
+                Vec::with_capacity(content_lines.len() - old_lines.len() + new_lines.len());
             // Lines before the match
             result_lines.extend_from_slice(&content_lines[..i]);
             // Replacement lines
@@ -141,14 +143,15 @@ impl Tool for EditFile {
             .map_err(|e| anyhow::anyhow!("Failed to open file: {}", e))?;
         let mut content = String::new();
         use std::io::Read;
-        file.read_to_string(&mut content)
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::InvalidData {
-                    anyhow::anyhow!("Binary or non-UTF-8 file detected; edit_file only supports text files")
-                } else {
-                    anyhow::anyhow!("Failed to read file: {}", e)
-                }
-            })?;
+        file.read_to_string(&mut content).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::InvalidData {
+                anyhow::anyhow!(
+                    "Binary or non-UTF-8 file detected; edit_file only supports text files"
+                )
+            } else {
+                anyhow::anyhow!("Failed to read file: {}", e)
+            }
+        })?;
 
         // Check file size for edit operations
         if content.len() > MAX_EDIT_SIZE {
@@ -179,7 +182,9 @@ impl Tool for EditFile {
         {
             // Strategy 2: Line-ending-normalized match
             replacement
-        } else if let Some(replacement) = try_trimmed_match(&content, &input.old_text, &input.new_text) {
+        } else if let Some(replacement) =
+            try_trimmed_match(&content, &input.old_text, &input.new_text)
+        {
             // Strategy 3: Trimmed match
             replacement
         } else {
@@ -225,10 +230,13 @@ impl Tool for EditFile {
         let path_display = input.path.display().to_string();
         let diff = generate_diff(&content, &new_content, &path_display, 30);
 
-        Ok(ToolOutput::text(format!(
-            "Edited {}:\n{}",
-            path_display, diff
-        )))
+        let mut output = format!("Edited {}:\n{}", path_display, diff);
+
+        if let Some(formatter_diff) = file_formatter::format_file(&validated_path, &ctx.cwd) {
+            output.push_str(&formatter_diff);
+        }
+
+        Ok(ToolOutput::text(output))
     }
 }
 
@@ -379,10 +387,7 @@ mod tests {
 
         let result = tool.execute(params, &ctx);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("non-UTF-8 file"));
+        assert!(result.unwrap_err().to_string().contains("non-UTF-8 file"));
     }
 
     #[test]
@@ -535,8 +540,14 @@ mod tests {
         let _ = tool.execute(params, &ctx).unwrap();
         let content = std::fs::read_to_string(&test_file).unwrap();
         // Must preserve lines before and after the match
-        assert!(content.contains("line one"), "should preserve line before match");
-        assert!(content.contains("line five"), "should preserve line after match");
+        assert!(
+            content.contains("line one"),
+            "should preserve line before match"
+        );
+        assert!(
+            content.contains("line five"),
+            "should preserve line after match"
+        );
         assert!(content.contains("replaced two"));
     }
 
@@ -579,8 +590,14 @@ mod tests {
         assert!(result.text.contains("Edited test.txt"));
         let content = std::fs::read_to_string(&test_file).unwrap();
         // CRLF should be preserved
-        assert!(content.contains("ALPHA\r\nBETA"), "CRLF should be preserved in output");
-        assert!(content.contains("gamma\r\n"), "unmatched line should keep CRLF");
+        assert!(
+            content.contains("ALPHA\r\nBETA"),
+            "CRLF should be preserved in output"
+        );
+        assert!(
+            content.contains("gamma\r\n"),
+            "unmatched line should keep CRLF"
+        );
     }
 
     #[test]
@@ -631,9 +648,15 @@ mod tests {
 
         let content = std::fs::read_to_string(&test_file).unwrap();
         // CRLF should be preserved in unchanged lines
-        assert!(content.contains("line one\r\n"), "CRLF preserved before edit");
+        assert!(
+            content.contains("line one\r\n"),
+            "CRLF preserved before edit"
+        );
         assert!(content.contains("LINE TWO"), "replacement applied");
-        assert!(content.contains("line three\r\n"), "CRLF preserved after edit");
+        assert!(
+            content.contains("line three\r\n"),
+            "CRLF preserved after edit"
+        );
     }
 
     /// Integration test: trimmed match works for indented code
@@ -687,7 +710,10 @@ mod tests {
         assert!(result.is_ok());
 
         let content = std::fs::read_to_string(&test_file).unwrap();
-        assert_eq!(content, "XXX\nbbb\naaa\nccc\naaa\n", "only first occurrence replaced");
+        assert_eq!(
+            content, "XXX\nbbb\naaa\nccc\naaa\n",
+            "only first occurrence replaced"
+        );
     }
 
     /// Regression test: trimmed match must preserve trailing newlines

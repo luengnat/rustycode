@@ -451,6 +451,7 @@ impl GeminiProvider {
             usage,
             stop_reason: candidate.finish_reason,
             citations: None,
+            thinking_blocks: None,
         })
     }
 }

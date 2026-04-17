@@ -80,8 +80,7 @@ mod tests {
         retry_config: None,
     };
 
-    let model =
-        env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+    let model = env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
 
     let provider = match AnthropicProvider::new_without_validation(config, model.clone()) {
         Ok(p) => p,

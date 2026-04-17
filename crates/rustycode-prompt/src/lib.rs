@@ -292,6 +292,27 @@ Provide the refactored code and explain your changes.
 
         // Only register if not already present
         if !self.registry.has_template(&template_name) {
+            // Prevent unbounded growth: if too many inline templates, use a
+            // temporary registry for one-shot rendering instead.
+            const MAX_INLINE_TEMPLATES: usize = 256;
+            let inline_count = self
+                .registry
+                .get_templates()
+                .keys()
+                .filter(|k| k.starts_with("inline_"))
+                .count();
+
+            if inline_count >= MAX_INLINE_TEMPLATES {
+                // One-shot render without polluting the main registry
+                let mut temp = handlebars::Handlebars::new();
+                temp.register_escape_fn(handlebars::no_escape);
+                temp.register_template_string(&template_name, template)
+                    .map_err(|e| TemplateError::ParseError(e.to_string()))?;
+                return temp
+                    .render(&template_name, context)
+                    .map_err(|e| TemplateError::RenderError(e.to_string()));
+            }
+
             self.registry
                 .register_template_string(&template_name, template)
                 .map_err(|e| TemplateError::ParseError(e.to_string()))?;
@@ -865,5 +886,19 @@ mod tests {
         let r2 = manager.render_inline("B: {{val}}", &ctx).unwrap();
         assert_eq!(r1, "A: test");
         assert_eq!(r2, "B: test");
+    }
+
+    #[test]
+    fn test_inline_template_cap_falls_back_to_temp_registry() {
+        let mut manager = TemplateManager::new().unwrap();
+        let ctx = context! { "val" => "test" };
+
+        // Register more than 256 unique inline templates
+        for i in 0..260 {
+            let template = format!("template_{}: {{{{val}}}}", i);
+            let result = manager.render_inline(&template, &ctx);
+            assert!(result.is_ok(), "render_inline should succeed for template {}", i);
+            assert_eq!(result.unwrap(), format!("template_{}: test", i));
+        }
     }
 }

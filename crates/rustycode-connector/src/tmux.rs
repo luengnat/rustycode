@@ -50,6 +50,31 @@ impl TmuxConnector {
             .unwrap_or(false)
     }
 
+    /// Validate a tmux session name.
+    ///
+    /// Tmux forbids `.` and `:` in session names (used as target delimiters).
+    /// Also rejects empty names and names with control characters.
+    fn validate_session_name(name: &str) -> Result<(), ConnectorError> {
+        if name.is_empty() {
+            return Err(ConnectorError::SessionCreateFailed(
+                "session name must not be empty".to_string(),
+            ));
+        }
+        if name.contains('.') || name.contains(':') {
+            return Err(ConnectorError::SessionCreateFailed(format!(
+                "session name {:?} contains forbidden tmux characters ('.' or ':')",
+                name
+            )));
+        }
+        if name.contains(|c: char| c.is_control()) {
+            return Err(ConnectorError::SessionCreateFailed(format!(
+                "session name {:?} contains control characters",
+                name
+            )));
+        }
+        Ok(())
+    }
+
     /// Get the tmux session target string
     fn session_target(&self, session: &SessionId) -> String {
         session.0.clone()
@@ -125,6 +150,9 @@ impl TerminalConnector for TmuxConnector {
     }
 
     fn create_session(&mut self, name: &str) -> ConnectorResult<SessionId> {
+        // Validate the session name
+        Self::validate_session_name(name)?;
+
         // Create a unique session ID
         let session_id = format!("{}-{}-{}", self.session_prefix, name, std::process::id());
 
@@ -508,5 +536,50 @@ mod tests {
     fn test_connector_with_custom_prefix() {
         let connector = TmuxConnector::new("myapp");
         assert_eq!(connector.name(), "tmux");
+    }
+
+    // --- Session name validation tests ---
+
+    #[test]
+    fn test_validate_session_name_valid() {
+        assert!(TmuxConnector::validate_session_name("my-session").is_ok());
+        assert!(TmuxConnector::validate_session_name("session123").is_ok());
+        assert!(TmuxConnector::validate_session_name("a_b_c").is_ok());
+    }
+
+    #[test]
+    fn test_validate_session_name_empty() {
+        assert!(TmuxConnector::validate_session_name("").is_err());
+    }
+
+    #[test]
+    fn test_validate_session_name_dot() {
+        let result = TmuxConnector::validate_session_name("my.session");
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("forbidden"));
+    }
+
+    #[test]
+    fn test_validate_session_name_colon() {
+        let result = TmuxConnector::validate_session_name("my:session");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_session_name_control_char() {
+        let result = TmuxConnector::validate_session_name("my\tsession");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_session_name_newline() {
+        let result = TmuxConnector::validate_session_name("my\nsession");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_session_name_hyphen_ok() {
+        assert!(TmuxConnector::validate_session_name("my-session-name").is_ok());
     }
 }

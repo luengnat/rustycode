@@ -565,9 +565,7 @@ mod tests {
     #[test]
     fn cost_table_calculate_cost_zero_tokens() {
         let ct = CostTable::new();
-        let cost = ct
-            .calculate_cost("claude-sonnet-4-6", 0, 0)
-            .unwrap();
+        let cost = ct.calculate_cost("claude-sonnet-4-6", 0, 0).unwrap();
         assert!((cost - 0.0).abs() < f64::EPSILON);
     }
 

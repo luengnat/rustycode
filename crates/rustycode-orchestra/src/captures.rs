@@ -583,9 +583,10 @@ fn parse_captures_content(content: &str) -> Vec<CaptureEntry> {
         let resolved_at = extract_bold_field(&body, "Resolved");
         let executed_at = extract_bold_field(&body, "Executed");
 
-        if text.is_none() || timestamp.is_none() {
-            continue;
-        }
+        let (text, timestamp) = match (text, timestamp) {
+            (Some(t), Some(ts)) => (t, ts),
+            _ => continue,
+        };
 
         let status = match status_raw.as_deref() {
             Some("resolved") | Some("triaged") => {
@@ -600,8 +601,8 @@ fn parse_captures_content(content: &str) -> Vec<CaptureEntry> {
 
         entries.push(CaptureEntry {
             id: id.to_string(),
-            text: text.unwrap(),
-            timestamp: timestamp.unwrap(),
+            text,
+            timestamp,
             status,
             classification,
             resolution,

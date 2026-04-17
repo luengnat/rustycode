@@ -119,6 +119,7 @@ mod tests {
             usage: None,
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
 
         ensure_usage(
@@ -148,6 +149,7 @@ mod tests {
             }),
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
 
         ensure_usage(&mut response, "System prompt", &test_messages(), &[]);
@@ -171,6 +173,7 @@ mod tests {
             }),
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
 
         ensure_usage(
@@ -194,6 +197,7 @@ mod tests {
             usage: None,
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
 
         ensure_usage(&mut response, "", &[], &[]);
@@ -213,6 +217,7 @@ mod tests {
             usage: None,
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
 
         let tools = vec![
@@ -250,6 +255,7 @@ mod tests {
             }),
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
 
         ensure_usage(&mut response, "System", &test_messages(), &[]);

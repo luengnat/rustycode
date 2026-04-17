@@ -98,7 +98,7 @@ impl AutoMode {
 
     /// Get current execution phase as a string
     pub fn current_phase(&self) -> &'static str {
-        let pm = self.plan_mode.lock().unwrap();
+        let pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
         match pm.current_phase() {
             crate::plan_mode::ExecutionPhase::Planning => "planning",
             crate::plan_mode::ExecutionPhase::Implementation => "implementation",
@@ -139,7 +139,7 @@ impl AutoMode {
         };
 
         // Submit the plan to plan_mode
-        let mut pm = self.plan_mode.lock().unwrap();
+        let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
         pm.submit_plan(plan.clone());
 
         Ok(plan)
@@ -150,7 +150,7 @@ impl AutoMode {
         &self,
         plan: &crate::plan_mode::Plan,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut pm = self.plan_mode.lock().unwrap();
+        let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
         pm.approve_plan(&plan.id)?;
         Ok(())
     }
@@ -160,7 +160,7 @@ impl AutoMode {
         &self,
         _plan: &crate::plan_mode::Plan,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut pm = self.plan_mode.lock().unwrap();
+        let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
         pm.reject();
         Ok(())
     }
@@ -175,7 +175,7 @@ impl AutoMode {
 
         // Check if in planning phase
         let phase = {
-            let pm = self.plan_mode.lock().unwrap();
+            let pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
             pm.current_phase()
         };
 

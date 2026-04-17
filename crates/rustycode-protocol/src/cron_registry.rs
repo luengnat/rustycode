@@ -105,7 +105,7 @@ impl CronRegistry {
     /// assert!(entry.enabled);
     /// ```
     pub fn create(&self, schedule: &str, prompt: &str, description: Option<&str>) -> CronEntry {
-        let mut inner = self.inner.lock().expect("cron registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.counter += 1;
         let ts = now_secs();
         let cron_id = format!("cron_{:08x}_{:04x}", ts, inner.counter);
@@ -133,7 +133,7 @@ impl CronRegistry {
     /// `Some(CronEntry)` if found, `None` otherwise
     #[must_use]
     pub fn get(&self, cron_id: &str) -> Option<CronEntry> {
-        let inner = self.inner.lock().expect("cron registry lock poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.entries.get(cron_id).cloned()
     }
 
@@ -148,7 +148,7 @@ impl CronRegistry {
     /// Vec of CronEntry matching the filter
     #[must_use]
     pub fn list(&self, enabled_only: bool) -> Vec<CronEntry> {
-        let inner = self.inner.lock().expect("cron registry lock poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner
             .entries
             .values()
@@ -167,7 +167,7 @@ impl CronRegistry {
     ///
     /// `Ok(CronEntry)` if deleted, `Err(String)` if not found
     pub fn delete(&self, cron_id: &str) -> Result<CronEntry, String> {
-        let mut inner = self.inner.lock().expect("cron registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner
             .entries
             .remove(cron_id)
@@ -184,7 +184,7 @@ impl CronRegistry {
     ///
     /// `Ok(())` if disabled, `Err(String)` if not found
     pub fn disable(&self, cron_id: &str) -> Result<(), String> {
-        let mut inner = self.inner.lock().expect("cron registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let entry = inner
             .entries
             .get_mut(cron_id)
@@ -204,7 +204,7 @@ impl CronRegistry {
     ///
     /// `Ok(())` if enabled, `Err(String)` if not found
     pub fn enable(&self, cron_id: &str) -> Result<(), String> {
-        let mut inner = self.inner.lock().expect("cron registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let entry = inner
             .entries
             .get_mut(cron_id)
@@ -226,7 +226,7 @@ impl CronRegistry {
     ///
     /// `Ok(())` if recorded, `Err(String)` if not found
     pub fn record_run(&self, cron_id: &str) -> Result<(), String> {
-        let mut inner = self.inner.lock().expect("cron registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let entry = inner
             .entries
             .get_mut(cron_id)
@@ -248,7 +248,7 @@ impl CronRegistry {
     ///
     /// `Ok(CronEntry)` with updated prompt, `Err(String)` if not found
     pub fn update_prompt(&self, cron_id: &str, new_prompt: &str) -> Result<CronEntry, String> {
-        let mut inner = self.inner.lock().expect("cron registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let entry = inner
             .entries
             .get_mut(cron_id)
@@ -261,7 +261,7 @@ impl CronRegistry {
     /// Get count of cron entries
     #[must_use]
     pub fn len(&self) -> usize {
-        let inner = self.inner.lock().expect("cron registry lock poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.entries.len()
     }
 

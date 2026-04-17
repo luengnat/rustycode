@@ -13,6 +13,18 @@ use regex::Regex;
 /// Token patterns for redaction
 static TOKEN_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     vec![
+        // Anthropic API keys: sk-ant-...
+        Regex::new(r"sk-ant-api03-[A-Za-z0-9\-_]{80,}").unwrap(),
+        // OpenAI API keys: sk-...
+        Regex::new(r"sk-[A-Za-z0-9]{40,}").unwrap(),
+        // AWS access keys: AKIA...
+        Regex::new(r"AKIA[A-Z0-9]{16}").unwrap(),
+        // GitHub tokens: ghp_, gho_, ghu_, ghs_, ghr_
+        Regex::new(r"gh[posur]_[A-Za-z0-9]{36,}").unwrap(),
+        // GitLab tokens: glpat-...
+        Regex::new(r"glpat-[A-Za-z0-9\-]{20,}").unwrap(),
+        // Generic Bearer tokens in headers
+        Regex::new(r"(?i)bearer\s+[A-Za-z0-9\-_.~+/]+=*").unwrap(),
         // Slack bot tokens: xoxb-...
         Regex::new(r"xoxb-[A-Za-z0-9\-]+").unwrap(),
         // Slack user tokens: xoxp-...
@@ -120,5 +132,50 @@ mod tests {
         let msg = "";
         let sanitized = sanitize_error(msg);
         assert_eq!(sanitized, "");
+    }
+
+    #[test]
+    fn test_sanitize_anthropic_api_key() {
+        let key = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let msg = format!("Error with key {}", key);
+        let sanitized = sanitize_error(&msg);
+        assert!(sanitized.contains("[REDACTED]"));
+        assert!(!sanitized.contains("sk-ant"));
+    }
+
+    #[test]
+    fn test_sanitize_openai_api_key() {
+        let msg = "Failed with key sk-1234567890abcdef1234567890abcdef1234567890abcdef";
+        let sanitized = sanitize_error(msg);
+        assert!(sanitized.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn test_sanitize_aws_access_key() {
+        let msg = "AWS key AKIAIOSFODNN7EXAMPLE detected";
+        let sanitized = sanitize_error(msg);
+        assert!(sanitized.contains("[REDACTED]"));
+        assert!(!sanitized.contains("AKIA"));
+    }
+
+    #[test]
+    fn test_sanitize_github_token() {
+        let msg = "Using token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn";
+        let sanitized = sanitize_error(msg);
+        assert!(sanitized.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn test_sanitize_gitlab_token() {
+        let msg = "Token glpat-abcdefghijklmnopqrstuvwx";
+        let sanitized = sanitize_error(msg);
+        assert!(sanitized.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn test_sanitize_bearer_token() {
+        let msg = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc";
+        let sanitized = sanitize_error(msg);
+        assert!(sanitized.contains("[REDACTED]"));
     }
 }

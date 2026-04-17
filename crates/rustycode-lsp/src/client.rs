@@ -141,8 +141,20 @@ impl LspClient {
             .with_context(|| format!("Failed to spawn LSP server: {}", self.config.server_name))?;
 
         // Take stdout for response reader and stdin for sending responses
-        let stdout = child.stdout.take().expect("Failed to take stdout");
-        let stdin = child.stdin.take().expect("Failed to take stdin");
+        let stdout = child.stdout.take().with_context(|| {
+            format!(
+                "LSP server '{}' spawned without stdout — \
+                 ensure Stdio::piped() is configured",
+                self.config.server_name
+            )
+        })?;
+        let stdin = child.stdin.take().with_context(|| {
+            format!(
+                "LSP server '{}' spawned without stdin — \
+                 ensure Stdio::piped() is configured",
+                self.config.server_name
+            )
+        })?;
         let child_stdin = Arc::new(Mutex::new(Some(stdin)));
 
         // Create response reader and spawn background task

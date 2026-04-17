@@ -331,6 +331,7 @@ impl BedrockProvider {
             }),
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         })
     }
 
@@ -424,6 +425,7 @@ impl BedrockProvider {
             }),
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         })
     }
 }

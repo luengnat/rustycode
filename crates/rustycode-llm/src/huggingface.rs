@@ -353,6 +353,7 @@ impl LLMProvider for HuggingFaceProvider {
             }),
             stop_reason: choice.finish_reason.clone(),
             citations: None,
+            thinking_blocks: None,
         })
     }
 

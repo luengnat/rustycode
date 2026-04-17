@@ -198,7 +198,7 @@ impl WorkerRegistry {
     /// The newly created Worker with status `Spawning`
     #[must_use]
     pub fn spawn(&self, cwd: &str) -> Worker {
-        let mut inner = self.inner.lock().expect("worker registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.counter += 1;
         let ts = now_secs();
         let worker_id = format!("wkr_{:08x}_{:04x}", ts, inner.counter);
@@ -231,14 +231,14 @@ impl WorkerRegistry {
     /// Get a worker by ID
     #[must_use]
     pub fn get(&self, worker_id: &str) -> Option<Worker> {
-        let inner = self.inner.lock().expect("worker registry lock poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.workers.get(worker_id).cloned()
     }
 
     /// List all workers
     #[must_use]
     pub fn list(&self) -> Vec<Worker> {
-        let inner = self.inner.lock().expect("worker registry lock poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.workers.values().cloned().collect()
     }
 
@@ -253,7 +253,7 @@ impl WorkerRegistry {
         task_id: &str,
         description: &str,
     ) -> Result<Worker, String> {
-        let mut inner = self.inner.lock().expect("worker registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let worker = inner
             .workers
             .get_mut(worker_id)
@@ -281,7 +281,7 @@ impl WorkerRegistry {
     ///
     /// Returns error if worker not found
     pub fn mark_running(&self, worker_id: &str) -> Result<Worker, String> {
-        let mut inner = self.inner.lock().expect("worker registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let worker = inner
             .workers
             .get_mut(worker_id)
@@ -305,7 +305,7 @@ impl WorkerRegistry {
     ///
     /// Returns error if worker not found
     pub fn mark_finished(&self, worker_id: &str, result_summary: &str) -> Result<Worker, String> {
-        let mut inner = self.inner.lock().expect("worker registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let worker = inner
             .workers
             .get_mut(worker_id)
@@ -342,7 +342,7 @@ impl WorkerRegistry {
         kind: WorkerFailureKind,
         message: &str,
     ) -> Result<Worker, String> {
-        let mut inner = self.inner.lock().expect("worker registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let worker = inner
             .workers
             .get_mut(worker_id)
@@ -372,14 +372,14 @@ impl WorkerRegistry {
     /// `Some(Worker)` if worker existed and was removed, `None` otherwise
     #[must_use]
     pub fn remove(&self, worker_id: &str) -> Option<Worker> {
-        let mut inner = self.inner.lock().expect("worker registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.workers.remove(worker_id)
     }
 
     /// Get count of workers
     #[must_use]
     pub fn len(&self) -> usize {
-        let inner = self.inner.lock().expect("worker registry lock poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.workers.len()
     }
 
@@ -392,7 +392,7 @@ impl WorkerRegistry {
     /// Get workers by status
     #[must_use]
     pub fn workers_by_status(&self, status: WorkerStatus) -> Vec<Worker> {
-        let inner = self.inner.lock().expect("worker registry lock poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner
             .workers
             .values()
@@ -407,7 +407,7 @@ impl WorkerRegistry {
     ///
     /// Returns error if worker not found
     pub fn clear_trust_gate(&self, worker_id: &str) -> Result<Worker, String> {
-        let mut inner = self.inner.lock().expect("worker registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let worker = inner
             .workers
             .get_mut(worker_id)

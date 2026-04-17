@@ -199,7 +199,7 @@ fn generate_call_id() -> String {
 
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_nanos();
     let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("call_{:x}{:x}", nanos, counter)
@@ -271,6 +271,25 @@ mod tests {
         assert!(id1.starts_with("call_"));
         assert!(id2.starts_with("call_"));
         assert_ne!(id1, id2); // Should be unique
+    }
+
+    #[test]
+    fn test_generate_call_id_uniqueness_across_many() {
+        let ids: Vec<String> = (0..100).map(|_| generate_call_id()).collect();
+        let unique: std::collections::HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
+        assert_eq!(unique.len(), 100, "All 100 IDs should be unique");
+    }
+
+    #[test]
+    fn test_generate_call_id_format() {
+        let id = generate_call_id();
+        // Format is call_{hex_timestamp}{hex_counter}
+        let parts: Vec<&str> = id.splitn(2, '_').collect();
+        assert_eq!(parts[0], "call");
+        // The hex part should be non-empty
+        assert!(!parts[1].is_empty());
+        // Should only contain hex chars
+        assert!(parts[1].chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     // --- ToolPermission serde ---

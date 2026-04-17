@@ -1152,7 +1152,7 @@ impl Tool for LspGetSymbolsOverviewTool {
         Ok(ToolOutput::with_structured(
             serde_json::to_string_pretty(&overview)?,
             json!({
-                "file_path": file_path.to_str().unwrap(),
+                "file_path": file_path.to_string_lossy().to_string(),
                 "symbols": overview
             }),
         ))
@@ -1293,7 +1293,7 @@ impl Tool for LspFindSymbolTool {
         Ok(ToolOutput::with_structured(
             serde_json::to_string_pretty(&results)?,
             json!({
-                "file_path": file_path.to_str().unwrap(),
+                "file_path": file_path.to_string_lossy(),
                 "matches_count": results.len(),
                 "matches": results
             }),
@@ -1391,12 +1391,12 @@ impl Tool for LspReplaceSymbolBodyTool {
         Ok(ToolOutput::with_structured(
             serde_json::to_string_pretty(&json!({
                 "replaced": name_path_str,
-                "file_path": file_path.to_str().unwrap(),
+                "file_path": file_path.to_string_lossy(),
                 "characters_changed": new_text.len() as i64 - text.len() as i64
             }))?,
             json!({
                 "replaced": name_path_str,
-                "file_path": file_path.to_str().unwrap(),
+                "file_path": file_path.to_string_lossy(),
                 "characters_changed": new_text.len() as i64 - text.len() as i64
             }),
         ))
@@ -1494,12 +1494,12 @@ impl Tool for LspInsertBeforeSymbolTool {
         Ok(ToolOutput::with_structured(
             serde_json::to_string_pretty(&json!({
                 "inserted_before": name_path_str,
-                "file_path": file_path.to_str().unwrap(),
+                "file_path": file_path.to_string_lossy(),
                 "line": insertion_line
             }))?,
             json!({
                 "inserted_before": name_path_str,
-                "file_path": file_path.to_str().unwrap(),
+                "file_path": file_path.to_string_lossy(),
                 "line": insertion_line
             }),
         ))
@@ -1597,12 +1597,12 @@ impl Tool for LspInsertAfterSymbolTool {
         Ok(ToolOutput::with_structured(
             serde_json::to_string_pretty(&json!({
                 "inserted_after": name_path_str,
-                "file_path": file_path.to_str().unwrap(),
+                "file_path": file_path.to_string_lossy(),
                 "line": insertion_line
             }))?,
             json!({
                 "inserted_after": name_path_str,
-                "file_path": file_path.to_str().unwrap(),
+                "file_path": file_path.to_string_lossy(),
                 "line": insertion_line
             }),
         ))
@@ -1720,11 +1720,11 @@ impl Tool for LspSafeDeleteSymbolTool {
         Ok(ToolOutput::with_structured(
             serde_json::to_string_pretty(&json!({
                 "deleted": name_path_str,
-                "file_path": file_path.to_str().unwrap(),
+                "file_path": file_path.to_string_lossy(),
             }))?,
             json!({
                 "deleted": name_path_str,
-                "file_path": file_path.to_str().unwrap(),
+                "file_path": file_path.to_string_lossy(),
             }),
         ))
     }
@@ -1991,7 +1991,7 @@ impl Tool for LspAnalyzeSymbolTool {
                 "symbol": name_path_str,
                 "kind": crate::symbol::format_symbol_kind(&target_symbol.kind),
                 "definition": {
-                    "file": file_path.to_str().unwrap(),
+                    "file": file_path.to_string_lossy(),
                     "range": {
                         "start": format!("{}:{}", target_symbol.range.start.line + 1, target_symbol.range.start.character + 1),
                         "end": format!("{}:{}", target_symbol.range.end.line + 1, target_symbol.range.end.character + 1)
@@ -2157,14 +2157,14 @@ impl Tool for LspExtractSymbolTool {
         Ok(ToolOutput::with_structured(
             serde_json::to_string_pretty(&json!({
                 "extracted": name_path_str,
-                "from": file_path.to_str().unwrap(),
-                "to": target_file.to_str().unwrap(),
+                "from": file_path.to_string_lossy(),
+                "to": target_file.to_string_lossy(),
                 "import_statement": import_stmt,
                 "symbol_size_bytes": symbol_body.len()
             }))?,
             json!({
                 "extracted": name_path_str,
-                "target_file": target_file.to_str().unwrap(),
+                "target_file": target_file.to_string_lossy(),
                 "import": import_stmt
             }),
         ))
@@ -2516,6 +2516,21 @@ mod tests {
         path
     }
 
+    #[test]
+    fn test_path_lossy_in_json() {
+        // Verify that PathBuf::to_string_lossy works in json! macro
+        let p = PathBuf::from("/project/src/main.rs");
+        let val = json!({ "file_path": p.to_string_lossy() });
+        assert_eq!(val["file_path"], "/project/src/main.rs");
+    }
+
+    #[test]
+    fn test_path_lossy_relative() {
+        let p = PathBuf::from("src/lib.rs");
+        let val = json!({ "path": p.to_string_lossy() });
+        assert_eq!(val["path"], "src/lib.rs");
+    }
+
     // ============================================================================
     // LspDiagnosticsTool Tests
     // ============================================================================
@@ -2683,7 +2698,7 @@ mod tests {
         let file_path = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
 
         let params = json!({
-            "file_path": file_path.to_str().unwrap(),
+            "file_path": file_path.to_string_lossy(),
             "character": 0
         });
 
@@ -2699,7 +2714,7 @@ mod tests {
         let file_path = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
 
         let params = json!({
-            "file_path": file_path.to_str().unwrap(),
+            "file_path": file_path.to_string_lossy(),
             "line": 0
         });
 
@@ -2756,7 +2771,7 @@ mod tests {
         // Test Rust file
         let rs_file = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
         let params = json!({
-            "file_path": rs_file.to_str().unwrap(),
+            "file_path": rs_file.to_string_lossy(),
             "line": 0,
             "character": 0
         });
@@ -2825,7 +2840,7 @@ mod tests {
 
         // Test valid position
         let params = json!({
-            "file_path": file_path.to_str().unwrap(),
+            "file_path": file_path.to_string_lossy(),
             "line": 0,
             "character": 0
         });
@@ -2846,7 +2861,7 @@ mod tests {
 
         // Test negative line (should be rejected by schema)
         let params = json!({
-            "file_path": file_path.to_str().unwrap(),
+            "file_path": file_path.to_string_lossy(),
             "line": -1,
             "character": 0
         });
@@ -2864,7 +2879,7 @@ mod tests {
 
         // Test with absolute path
         let params_abs = json!({
-            "file_path": file_path.to_str().unwrap(),
+            "file_path": file_path.to_string_lossy(),
             "line": 0,
             "character": 0
         });
@@ -2969,7 +2984,7 @@ mod tests {
         let file_path = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
 
         let params = json!({
-            "file_path": file_path.to_str().unwrap(),
+            "file_path": file_path.to_string_lossy(),
             "line": 0,
             "character": 0,
             "trigger_character": "."
@@ -2991,7 +3006,7 @@ mod tests {
 
         // Test without language parameter (should auto-detect)
         let params = json!({
-            "file_path": file_path.to_str().unwrap(),
+            "file_path": file_path.to_string_lossy(),
             "line": 0,
             "character": 0
         });
@@ -3008,7 +3023,7 @@ mod tests {
         let file_path = create_test_file(&ctx.cwd, "test.py", "print('hello')");
 
         let params = json!({
-            "file_path": file_path.to_str().unwrap(),
+            "file_path": file_path.to_string_lossy(),
             "line": 0,
             "character": 0,
             "language": "python"
@@ -3029,7 +3044,7 @@ mod tests {
         let file_path = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
 
         let params = json!({
-            "file_path": file_path.to_str().unwrap(),
+            "file_path": file_path.to_string_lossy(),
             "line": 0,
             "character": 0
         });
@@ -3112,7 +3127,7 @@ mod tests {
         let file_path = temp_dir.path().join("test.rs");
 
         let params = json!({
-            "file_path": file_path.to_str().unwrap()
+            "file_path": file_path.to_string_lossy()
         });
 
         let resolved = resolve_file_path(&ctx, &params).unwrap();

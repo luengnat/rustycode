@@ -1,0 +1,19 @@
+[package]
+name = "rustycode-litert"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+dirs.workspace = true
+flate2 = "1"
+futures.workspace = true
+reqwest.workspace = true
+tar = "0.4"
+tokio.workspace = true
+tracing.workspace = true
+walkdir = "2"
+

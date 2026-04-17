@@ -179,7 +179,13 @@ impl SessionCaptureManager {
         if let Ok(mut captures) = self.active_captures.lock() {
             if let Some(mut capture) = captures.remove(session_id) {
                 // Force outcome by capturing a synthetic event if needed
-                let summary = capture.finalize_session();
+                let summary = match capture.finalize_session() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!("Failed to finalize session {}: {}", session_id, e);
+                        return;
+                    }
+                };
                 let summary_with_outcome = SessionSummary { outcome, ..summary };
 
                 // Store summary

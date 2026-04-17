@@ -401,12 +401,11 @@ impl std::fmt::Display for CommitMessage {
 }
 
 /// Extract just the filename from a path.
-fn file_name(path: &str) -> &str {
+fn file_name(path: &str) -> String {
     std::path::Path::new(path)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string())
-        .leak()
 }
 
 #[cfg(test)]

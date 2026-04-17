@@ -122,6 +122,15 @@ impl ITermConnector {
     }
 }
 
+/// Escape special characters for safe embedding in AppleScript string literals.
+///
+/// AppleScript uses `"..."` for strings. Backslash and double-quote must be
+/// escaped to prevent breaking out of the string and injecting arbitrary
+/// AppleScript commands.
+fn escape_applescript_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[allow(unused_variables)]
 impl TerminalConnector for ITermConnector {
     fn name(&self) -> &'static str {
@@ -356,6 +365,7 @@ impl TerminalConnector for ITermConnector {
                 .ok_or_else(|| ConnectorError::SessionNotFound(session.0.clone()))?;
 
             // Use "current window" and select pane first
+            let safe_keys = escape_applescript_string(keys);
             let script = format!(
                 r#"
                 tell application "iTerm2"
@@ -367,7 +377,7 @@ impl TerminalConnector for ITermConnector {
                     end tell
                 end tell
                 "#,
-                pane_index, keys
+                pane_index, safe_keys
             );
 
             self.run_applescript_silent(&script).map_err(|e| {
@@ -409,6 +419,7 @@ impl TerminalConnector for ITermConnector {
             // iTerm2 doesn't support setting pane titles via AppleScript directly
             // The pane title is typically set by the shell or application running in it
             // We can try to set the custom title of the window
+            let safe_title = escape_applescript_string(title);
             let script = format!(
                 r#"
                 tell application "iTerm2"
@@ -417,7 +428,7 @@ impl TerminalConnector for ITermConnector {
                     end tell
                 end tell
                 "#,
-                title
+                safe_title
             );
 
             self.run_applescript_silent(&script)?;
@@ -618,5 +629,59 @@ mod tests {
     fn test_is_inside_iterm_check() {
         // Just verify it doesn't panic - result depends on environment
         let _ = ITermConnector::is_inside_iterm();
+    }
+
+    // --- AppleScript escaping tests ---
+
+    #[test]
+    fn test_escape_applescript_plain_text() {
+        assert_eq!(escape_applescript_string("hello world"), "hello world");
+    }
+
+    #[test]
+    fn test_escape_applescript_double_quote() {
+        assert_eq!(escape_applescript_string(r#"say "hello""#), r#"say \"hello\""#);
+    }
+
+    #[test]
+    fn test_escape_applescript_backslash() {
+        assert_eq!(escape_applescript_string(r"path\to\file"), r"path\\to\\file");
+    }
+
+    #[test]
+    fn test_escape_applescript_injection_attempt() {
+        // Simulate an injection attempt that tries to break out of the string
+        let malicious = r#""; do shell script "rm -rf /"; ""#;
+        let escaped = escape_applescript_string(malicious);
+        // Verify no unescaped quotes remain — every " must be preceded by \
+        let mut chars = escaped.chars().peekable();
+        let mut safe = true;
+        while let Some(c) = chars.next() {
+            if c == '"' {
+                safe = false;
+                break;
+            }
+            if c == '\\' {
+                chars.next();
+            }
+        }
+        assert!(safe, "Unescaped quote found in: {}", escaped);
+    }
+
+    #[test]
+    fn test_escape_applescript_mixed_special_chars() {
+        let input = r#"set "x" to "y\"#;
+        let escaped = escape_applescript_string(input);
+        assert_eq!(escaped, r#"set \"x\" to \"y\\"#);
+    }
+
+    #[test]
+    fn test_escape_applescript_empty_string() {
+        assert_eq!(escape_applescript_string(""), "");
+    }
+
+    #[test]
+    fn test_escape_applescript_no_special_chars() {
+        assert_eq!(escape_applescript_string("ls -la /tmp"), "ls -la /tmp");
     }
 }

@@ -540,8 +540,13 @@ impl VectorMemory {
         let path = self.index_path(memory_type);
         let content =
             serde_json::to_string_pretty(&index.entries).context("Failed to serialize index")?;
-        fs::write(&path, &content)
-            .with_context(|| format!("Failed to write index to {:?}", path))?;
+
+        // Atomic write: write to temp file then rename to avoid corruption on crash
+        let tmp_path = path.with_extension("json.tmp");
+        fs::write(&tmp_path, &content)
+            .with_context(|| format!("Failed to write temp index to {:?}", tmp_path))?;
+        fs::rename(&tmp_path, &path)
+            .with_context(|| format!("Failed to rename temp index to {:?}", path))?;
         Ok(())
     }
 

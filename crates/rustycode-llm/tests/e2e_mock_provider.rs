@@ -54,6 +54,7 @@ async fn test_mock_chat_completion_with_multiple_responses() {
             usage: None,
             stop_reason: Some("end_turn".to_string()),
             citations: None,
+            thinking_blocks: None,
         }),
         Ok(CompletionResponse {
             content: "Second response".to_string(),
@@ -61,6 +62,7 @@ async fn test_mock_chat_completion_with_multiple_responses() {
             usage: None,
             stop_reason: Some("end_turn".to_string()),
             citations: None,
+            thinking_blocks: None,
         }),
         Ok(CompletionResponse {
             content: "Third response".to_string(),
@@ -68,6 +70,7 @@ async fn test_mock_chat_completion_with_multiple_responses() {
             usage: None,
             stop_reason: Some("end_turn".to_string()),
             citations: None,
+            thinking_blocks: None,
         }),
     ];
     let provider = MockProvider::new(responses, None);
@@ -104,6 +107,7 @@ async fn test_mock_streaming_mode() {
                 usage: None,
                 stop_reason: None,
                 citations: None,
+                thinking_blocks: None,
             }),
             Err(e) => Err(ProviderError::Unknown(e)),
         })
@@ -173,6 +177,7 @@ async fn test_mock_streaming_with_error() {
                 usage: None,
                 stop_reason: None,
                 citations: None,
+                thinking_blocks: None,
             }),
             Err(e) => Err(ProviderError::Unknown(e)),
         })
@@ -244,6 +249,7 @@ async fn test_mock_repeats_last_response_on_exhaustion() {
         usage: None,
         stop_reason: Some("end_turn".to_string()),
         citations: None,
+        thinking_blocks: None,
     };
     let provider = MockProvider::new(vec![Ok(response.clone())], None);
 

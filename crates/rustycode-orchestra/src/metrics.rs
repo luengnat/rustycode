@@ -303,7 +303,7 @@ impl MetricsManager {
     /// Flush metrics to disk
     pub async fn flush(&self) -> Result<()> {
         let metrics_path = self.project_root.join(METRICS_FILE);
-        let parent_dir = metrics_path.parent().unwrap();
+        let parent_dir = metrics_path.parent().unwrap_or(&self.project_root);
 
         // Create parent directory if needed
         fs::create_dir_all(parent_dir).await?;

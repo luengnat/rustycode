@@ -165,8 +165,12 @@ fn run_writer_loop(
         if buffer.is_empty() {
             return;
         }
-        let combined: String = buffer.concat();
-        buffer.clear();
+        // Pre-allocate capacity to avoid repeated reallocations
+        let total_len: usize = buffer.iter().map(|s| s.len()).sum();
+        let mut combined = String::with_capacity(total_len);
+        for s in buffer.drain(..) {
+            combined.push_str(&s);
+        }
         *bytes = 0;
         write_fn(&combined);
     };

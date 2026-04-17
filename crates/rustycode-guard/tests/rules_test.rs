@@ -58,3 +58,230 @@ fn test_r15_large_content() {
     let res = pre_tool::evaluate(&input);
     assert_eq!(res.permission_decision.as_deref(), Some("deny"));
 }
+
+// ── R07: Secret detection ──────────────────────────────────────────
+
+#[test]
+fn test_r07_detects_aws_access_key() {
+    let input = make_input(
+        "Write",
+        json!({"path": "/workspace/project/config.py", "content": "AWS_KEY=AKIAIOSFODNN7EXAMPLE"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+#[test]
+fn test_r07_detects_openai_key() {
+    let input = make_input(
+        "Write",
+        json!({"path": "/workspace/project/config.py", "content": "OPENAI_API_KEY=sk-proj-abc123"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+#[test]
+fn test_r07_detects_github_token() {
+    let input = make_input(
+        "Write",
+        json!({"path": "/workspace/project/config.py", "content": "GITHUB_TOKEN=ghp_ABCDEF1234567890"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+#[test]
+fn test_r07_detects_private_key() {
+    let input = make_input(
+        "Write",
+        json!({"path": "/workspace/project/key.pem", "content": "-----BEGIN RSA PRIVATE KEY-----\nMIIE..."}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+#[test]
+fn test_r07_detects_pkcs8_key() {
+    let input = make_input(
+        "Write",
+        json!({"path": "/workspace/project/key.pem", "content": "-----BEGIN PRIVATE KEY-----\nMIIE..."}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+#[test]
+fn test_r07_allows_normal_content() {
+    let input = make_input(
+        "Write",
+        json!({"path": "/workspace/project/main.rs", "content": "fn main() { println!(\"hello\"); }"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_ne!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+// ── R09: Path traversal ────────────────────────────────────────────
+
+#[test]
+fn test_r09_blocks_path_traversal() {
+    let input = make_input(
+        "Write",
+        json!({"path": "../../../etc/passwd"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+// ── R05: rm -rf ──────────────────────────────────────────────────────
+
+#[test]
+fn test_r05_blocks_rm_rf() {
+    let input = make_input(
+        "Bash",
+        json!({"command": "rm -rf /tmp/important"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+// ── R06: Force push ─────────────────────────────────────────────────
+
+#[test]
+fn test_r06_blocks_force_push() {
+    let input = make_input(
+        "Bash",
+        json!({"command": "git push --force origin main"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+// ── R08: Binary extensions ──────────────────────────────────────────
+
+#[test]
+fn test_r08_blocks_binary_extensions() {
+    for ext in &["exe", "dll", "so", "dylib", "bin"] {
+        let input = make_input(
+            "Write",
+            json!({"path": &format!("payload.{}", ext), "content": "binary"}),
+            Some("/workspace/project"),
+        );
+        let res = pre_tool::evaluate(&input);
+        assert_eq!(res.permission_decision.as_deref(), Some("deny"), "blocked .{}", ext);
+    }
+}
+
+// ── R10: no-verify / no-gpg-sign ────────────────────────────────────
+
+#[test]
+fn test_r10_blocks_no_verify() {
+    let input = make_input(
+        "Bash",
+        json!({"command": "git commit --no-verify -m 'wip'"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+// ── R11: git reset --hard main/master ───────────────────────────────
+
+#[test]
+fn test_r11_blocks_hard_reset_main() {
+    let input = make_input(
+        "Bash",
+        json!({"command": "git reset --hard main"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+// ── R12: git push origin main/master ────────────────────────────────
+
+#[test]
+fn test_r12_blocks_push_origin_main() {
+    let input = make_input(
+        "Bash",
+        json!({"command": "git push origin main"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+// ── R13: Config edits ──────────────────────────────────────────────
+
+#[test]
+fn test_r13_blocks_settings_json_edit() {
+    let input = make_input(
+        "Edit",
+        json!({"path": "settings.json", "old_string": "a", "new_string": "b"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+// ── Safe operations ────────────────────────────────────────────────
+
+#[test]
+fn test_allows_safe_bash_cargo_test() {
+    let input = make_input(
+        "Bash",
+        json!({"command": "cargo test"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_ne!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+#[test]
+fn test_allows_safe_write_to_src() {
+    let input = make_input(
+        "Write",
+        json!({"path": "/workspace/project/src/main.rs", "content": "fn main() {}"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_ne!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+// ── R15: Content size edge cases ───────────────────────────────────
+
+#[test]
+fn test_r15_allows_normal_sized_content() {
+    let content = "x".repeat(100_000); // 100KB, well under 10MB limit
+    let input = make_input(
+        "Write",
+        json!({"path": "/workspace/project/normal.txt", "content": content}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_ne!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+// ── Post-tool ──────────────────────────────────────────────────────
+
+#[test]
+fn test_post_tool_allows_by_default() {
+    let input = make_input(
+        "Bash",
+        json!({"command": "ls -la"}),
+        Some("/workspace/project"),
+    );
+    let res = rustycode_guard::post_tool::evaluate(&input);
+    assert_ne!(res.permission_decision.as_deref(), Some("deny"));
+    // Should not have a warning either (no false-positive fatigue)
+    assert!(res.additional_context.is_none());
+}

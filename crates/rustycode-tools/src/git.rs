@@ -278,7 +278,11 @@ impl Tool for GitLogTool {
     }
 
     fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(10);
+        let limit = params
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .min(1000);
         let n = limit.to_string();
         let output = run_git(ctx, &["log", "--oneline", "--no-decorate", "-n", &n])?;
         let commits: Vec<serde_json::Value> = output
@@ -978,10 +982,7 @@ mod tests {
         let ctx = create_context(&repo.path().to_path_buf());
         let tool = GitDiffTool;
 
-        let result = tool.execute(
-            json!({"path": "../../../etc/passwd"}),
-            &ctx,
-        );
+        let result = tool.execute(json!({"path": "../../../etc/passwd"}), &ctx);
         assert!(result.is_err());
     }
 

@@ -86,14 +86,13 @@ No API key required for basic functionality!"#
 
         // Check for Exa API key (optional, for premium results)
         let exa_api_key = env::var("EXA_API_KEY").ok();
-        let has_exa_key = exa_api_key.is_some();
 
         // Route to appropriate search method
         let results = match source {
             "wikipedia" => search_wikipedia(query, num_results)?,
             "news" => {
-                if has_exa_key {
-                    search_exa_news(query, num_results, exa_api_key.as_ref().unwrap())?
+                if let Some(ref key) = exa_api_key {
+                    search_exa_news(query, num_results, key)?
                 } else {
                     search_duckduckgo(query, num_results)?
                 }
@@ -115,8 +114,8 @@ No API key required for basic functionality!"#
                             }
                         }
                     }
-                } else if has_exa_key {
-                    match search_exa_web(query, num_results, exa_api_key.as_ref().unwrap()) {
+                } else if let Some(ref key) = exa_api_key {
+                    match search_exa_web(query, num_results, key) {
                         Ok(exa_results) => exa_results,
                         Err(_) => search_duckduckgo(query, num_results)?,
                     }

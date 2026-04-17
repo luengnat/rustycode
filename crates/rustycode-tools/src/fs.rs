@@ -1,3 +1,4 @@
+use crate::file_formatter;
 use crate::security::{
     create_file_symlink_safe, open_file_symlink_safe, validate_list_path, validate_read_path,
     validate_regex_pattern, validate_url, validate_write_path, BLOCKED_EXTENSIONS,
@@ -610,7 +611,9 @@ impl Tool for WriteFileTool {
         let text_content = optional_string(&params, "content");
         let binary_content = optional_string(&params, "content_base64");
         if text_content.is_some() && binary_content.is_some() {
-            return Err(anyhow!("use either `content` or `content_base64`, not both"));
+            return Err(anyhow!(
+                "use either `content` or `content_base64`, not both"
+            ));
         }
         let binary_bytes = if let Some(encoded) = binary_content {
             Some(
@@ -624,7 +627,10 @@ impl Tool for WriteFileTool {
         let content = text_content.unwrap_or("");
 
         // Validate path and content size using security module
-        let write_size = binary_bytes.as_ref().map(|b: &Vec<u8>| b.len()).unwrap_or(content.len());
+        let write_size = binary_bytes
+            .as_ref()
+            .map(|b: &Vec<u8>| b.len())
+            .unwrap_or(content.len());
         let path = validate_write_path(path_str, &ctx.cwd, write_size)?;
 
         // Validate against sandbox rules
@@ -646,7 +652,16 @@ impl Tool for WriteFileTool {
         } else if let Ok(mut f) = open_file_symlink_safe(&path) {
             use std::io::Read;
             let mut buf = String::new();
-            f.read_to_string(&mut buf).unwrap_or(0);
+            let bytes_read = f.read_to_string(&mut buf).unwrap_or_else(|e| {
+                tracing::debug!("Failed to read existing file for diff: {}", e);
+                0
+            });
+            if bytes_read == 0 && !buf.is_empty() {
+                tracing::debug!(
+                    "Read returned 0 bytes but buffer is non-empty for {}",
+                    path.display()
+                );
+            }
             buf.into_bytes()
         } else {
             Vec::new()
@@ -683,11 +698,19 @@ impl Tool for WriteFileTool {
             crate::line_endings::generate_diff(&old_text, content, &path_display, 50)
         };
 
+        let mut output_text = format!(
+            "wrote {} ({} bytes, {} lines)\n{}",
+            path_display, bytes, lines, diff
+        );
+
+        if binary_bytes.is_none() {
+            if let Some(formatter_diff) = file_formatter::format_file(&path, &ctx.cwd) {
+                output_text.push_str(&formatter_diff);
+            }
+        }
+
         Ok(ToolOutput::with_structured(
-            format!(
-                "wrote {} ({} bytes, {} lines)\n{}",
-                path_display, bytes, lines, diff
-            ),
+            output_text,
             json!({
                 "path": path_display,
                 "bytes": bytes,
@@ -983,7 +1006,10 @@ impl Tool for WebFetchTool {
 
         // Truncate content if too large (limit to ~50k chars to avoid overwhelming context)
         let (content, truncated) = if content.len() > WEB_FETCH_MAX_CHARS {
-            (truncate_to_char_boundary(&content, WEB_FETCH_MAX_CHARS), true)
+            (
+                truncate_to_char_boundary(&content, WEB_FETCH_MAX_CHARS),
+                true,
+            )
         } else {
             (&content[..], false)
         };

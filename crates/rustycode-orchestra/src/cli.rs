@@ -62,14 +62,13 @@ pub async fn execute_command(cmd: OrchestraCommand) -> anyhow::Result<()> {
         }
         OrchestraCommand::Auto { budget } => {
             let project_root = std::env::current_dir()?;
+            let b = budget.unwrap_or(100.0);
 
-            if let Some(b) = budget {
+            if budget.is_some() {
                 println!("Budget: ${:.2}", b);
             }
 
-            if let Some(info) =
-                OrchestraService::run_auto(project_root, budget.unwrap_or(100.0)).await?
-            {
+            if let Some(info) = OrchestraService::run_auto(project_root, b).await? {
                 println!("Bootstrapped project: {}", info.project_name);
                 println!("Task: {}", info.task_title);
                 println!("Goal: {}", info.task_goal);
@@ -87,8 +86,61 @@ pub async fn execute_command(cmd: OrchestraCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        _ => {
-            println!("Command not yet implemented");
+        OrchestraCommand::Progress => {
+            println!("Orchestra Progress is not yet implemented.");
+            println!("This command will show project progress across milestones and slices.");
+            Ok(())
+        }
+        OrchestraCommand::PlanPhase { phase_id } => {
+            println!("Orchestra PlanPhase ({}) is not yet implemented.", phase_id);
+            println!("This command will generate a multi-wave plan for a specific phase.");
+            Ok(())
+        }
+        OrchestraCommand::ExecutePhase { phase_id, auto } => {
+            println!(
+                "Orchestra ExecutePhase ({}) is not yet implemented (auto: {}).",
+                phase_id, auto
+            );
+            println!("This command will execute all waves in a planned phase.");
+            Ok(())
+        }
+        OrchestraCommand::Debug { issue } => {
+            println!(
+                "Orchestra Debug is not yet implemented (issue: {:?}).",
+                issue
+            );
+            println!(
+                "This command will start an interactive debug session to resolve specific issues."
+            );
+            Ok(())
+        }
+        OrchestraCommand::AddTodo { description } => {
+            println!(
+                "Orchestra AddTodo is not yet implemented (description: {:?}).",
+                description
+            );
+            Ok(())
+        }
+        OrchestraCommand::CheckTodos { area } => {
+            println!(
+                "Orchestra CheckTodos is not yet implemented (area: {:?}).",
+                area
+            );
+            Ok(())
+        }
+        OrchestraCommand::Help => {
+            println!("Orchestra v2 - Get Stuff Done Methodology Framework");
+            println!();
+            println!("Available commands:");
+            println!("  init <name> <description> <vision>  Initialize a new project");
+            println!("  auto [--budget <cost>]              Run autonomous mode");
+            println!("  quick <task>                        Execute a quick task");
+            println!("  progress                            Show project progress");
+            println!("  plan-phase <id>                     Create a new phase plan");
+            println!("  execute-phase <id> [--auto]         Execute a phase");
+            println!("  debug [issue]                       Start/resume debug session");
+            println!("  add-todo [desc]                     Add a todo");
+            println!("  check-todos [area]                  Check todos");
             Ok(())
         }
     }

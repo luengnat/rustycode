@@ -85,6 +85,16 @@ struct AnthropicContent {
     /// Citations returned by Anthropic API (web search results, etc.)
     #[serde(default)]
     citations: Option<Vec<AnthropicCitation>>,
+    /// Thinking content from extended thinking blocks
+    #[serde(default)]
+    thinking: String,
+    /// Signature for extended thinking blocks (encrypted, for round-tripping)
+    #[serde(default)]
+    #[allow(dead_code)]
+    signature: String,
+    /// Encrypted data for redacted_thinking blocks (for round-tripping)
+    #[serde(default)]
+    data: String,
 }
 
 /// Citation within an Anthropic content block.
@@ -399,6 +409,15 @@ impl AnthropicProvider {
                     "arguments": block.input
                 });
                 tool_calls.push(tool_call);
+            } else if block.content_type == "thinking" {
+                // Preserve thinking blocks for round-tripping in multi-turn conversations
+                tracing::debug!("Received thinking block ({} chars)", block.thinking.len());
+            } else if block.content_type == "redacted_thinking" {
+                // Preserve redacted thinking blocks for round-tripping
+                tracing::debug!(
+                    "Received redacted_thinking block ({} bytes)",
+                    block.data.len()
+                );
             } else if block.content_type == "refusal" {
                 // Handle refusal content blocks (Claude 4 models)
                 refused = true;
@@ -456,6 +475,7 @@ impl AnthropicProvider {
             } else {
                 Some(all_citations)
             },
+            thinking_blocks: None,
         })
     }
 
@@ -1509,26 +1529,25 @@ mod tests {
     #[test]
     fn test_requires_api_key() {
         let config = make_config(None);
-assert!(AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).is_err());
+        assert!(AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).is_err());
     }
 
     #[test]
     fn test_accepts_valid_api_key() {
         let config = make_config(Some("test-key"));
-assert!(AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).is_ok());
+        assert!(AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).is_ok());
     }
 
     #[test]
     fn test_rejects_empty_api_key() {
         let config = make_config(Some(""));
-assert!(AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).is_err());
+        assert!(AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).is_err());
     }
 
     #[test]
     fn test_provider_name() {
         let config = make_config(Some("test-key"));
-        let provider =
-AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
+        let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
         assert_eq!(provider.name(), "anthropic");
     }
 
@@ -1738,8 +1757,7 @@ AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
     #[test]
     fn test_anthropic_endpoint_default() {
         let config = make_config(Some("test-key"));
-        let provider =
-AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
+        let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
         assert_eq!(provider.endpoint(), "https://api.anthropic.com/v1/messages");
     }
 
@@ -1747,8 +1765,7 @@ AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
     fn test_anthropic_endpoint_custom_base_url() {
         let mut config = make_config(Some("test-key"));
         config.base_url = Some("https://my-proxy.example.com".to_string());
-        let provider =
-AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
+        let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
         assert_eq!(
             provider.endpoint(),
             "https://my-proxy.example.com/v1/messages"
@@ -2217,5 +2234,73 @@ AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"output_config\""));
         assert!(json.contains("\"json_schema\""));
+    }
+
+    #[test]
+    fn test_anthropic_content_thinking_block_deserialization() {
+        let json = r#"{
+            "type": "thinking",
+            "thinking": "Let me analyze this step by step...",
+            "signature": "WaUjzkypQ2mUEVM36O2TxuC06KN8xyfbJwyem2dw3URve..."
+        }"#;
+        let block: super::AnthropicContent = serde_json::from_str(json).unwrap();
+        assert_eq!(block.content_type, "thinking");
+        assert_eq!(block.thinking, "Let me analyze this step by step...");
+        assert_eq!(
+            block.signature,
+            "WaUjzkypQ2mUEVM36O2TxuC06KN8xyfbJwyem2dw3URve..."
+        );
+    }
+
+    #[test]
+    fn test_anthropic_content_redacted_thinking_block_deserialization() {
+        let json = r#"{
+            "type": "redacted_thinking",
+            "data": "ErwDkUYICxIMMb3LzNrMu..."
+        }"#;
+        let block: super::AnthropicContent = serde_json::from_str(json).unwrap();
+        assert_eq!(block.content_type, "redacted_thinking");
+        assert_eq!(block.data, "ErwDkUYICxIMMb3LzNrMu...");
+    }
+
+    #[test]
+    fn test_thinking_block_roundtrip_preservation() {
+        use crate::provider_v2::ThinkingBlock;
+        let thinking = ThinkingBlock {
+            block_type: "thinking".to_string(),
+            thinking: "I need to think about this...".to_string(),
+            signature: "sig_abc123".to_string(),
+            data: String::new(),
+        };
+        let json = serde_json::to_string(&thinking).unwrap();
+        let back: ThinkingBlock = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.block_type, "thinking");
+        assert_eq!(back.thinking, "I need to think about this...");
+        assert_eq!(back.signature, "sig_abc123");
+    }
+
+    #[test]
+    fn test_completion_response_with_thinking_blocks() {
+        use crate::provider_v2::{CompletionResponse, ThinkingBlock};
+        let response = CompletionResponse {
+            content: "The answer is 42.".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
+            usage: None,
+            stop_reason: Some("end_turn".to_string()),
+            citations: None,
+            thinking_blocks: Some(vec![ThinkingBlock {
+                block_type: "thinking".to_string(),
+                thinking: "Deep analysis...".to_string(),
+                signature: "sig_xyz".to_string(),
+                data: String::new(),
+            }]),
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("thinking_blocks"));
+        let back: CompletionResponse = serde_json::from_str(&json).unwrap();
+        assert!(back.thinking_blocks.is_some());
+        let blocks = back.thinking_blocks.unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].block_type, "thinking");
     }
 }

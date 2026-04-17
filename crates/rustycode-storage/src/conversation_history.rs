@@ -162,8 +162,13 @@ impl ConversationHistory {
         let path = self.storage_dir.join(&filename);
         let json = serde_json::to_string_pretty(conversation)
             .context("failed to serialize conversation")?;
-        std::fs::write(&path, json)
-            .with_context(|| format!("failed to write conversation to {}", path.display()))?;
+
+        // Atomic write: temp file + rename to avoid corruption on crash
+        let tmp_path = path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, &json)
+            .with_context(|| format!("failed to write temp file to {}", tmp_path.display()))?;
+        std::fs::rename(&tmp_path, &path)
+            .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
         Ok(())
     }
 

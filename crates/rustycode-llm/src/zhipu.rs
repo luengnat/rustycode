@@ -102,11 +102,16 @@ impl ZhipuProvider {
     }
 
     fn endpoint(&self) -> String {
-        self.config.base_url.clone().unwrap_or_else(|| ZHIPU_DEFAULT_ENDPOINT.to_string())
+        self.config
+            .base_url
+            .clone()
+            .unwrap_or_else(|| ZHIPU_DEFAULT_ENDPOINT.to_string())
     }
 
     fn get_api_key(&self) -> Result<String, ProviderError> {
-        self.config.api_key.as_ref()
+        self.config
+            .api_key
+            .as_ref()
             .ok_or_else(|| ProviderError::auth("ZHIPU_API_KEY is required"))
             .map(|k| k.expose_secret().to_string())
     }
@@ -131,7 +136,8 @@ impl ZhipuProvider {
                 optional_fields: vec![ConfigField {
                     name: "base_url".to_string(),
                     label: "Base URL".to_string(),
-                    description: "API endpoint (defaults to https://api.z.ai/api/paas/v4)".to_string(),
+                    description: "API endpoint (defaults to https://api.z.ai/api/paas/v4)"
+                        .to_string(),
                     field_type: ConfigFieldType::URL,
                     placeholder: Some(ZHIPU_DEFAULT_ENDPOINT.to_string()),
                     default: Some(ZHIPU_DEFAULT_ENDPOINT.to_string()),
@@ -168,7 +174,11 @@ impl ZhipuProvider {
                     description: "Latest flagship model with agentic capabilities".to_string(),
                     context_window: 128_000,
                     supports_tools: true,
-                    use_cases: vec!["Complex reasoning".to_string(), "Coding".to_string(), "Agent workflows".to_string()],
+                    use_cases: vec![
+                        "Complex reasoning".to_string(),
+                        "Coding".to_string(),
+                        "Agent workflows".to_string(),
+                    ],
                     cost_tier: 3,
                 },
                 ModelInfo {
@@ -186,7 +196,10 @@ impl ZhipuProvider {
                     description: "Fast, cost-effective GLM-4 model".to_string(),
                     context_window: 128_000,
                     supports_tools: true,
-                    use_cases: vec!["Quick tasks".to_string(), "High-volume workloads".to_string()],
+                    use_cases: vec![
+                        "Quick tasks".to_string(),
+                        "High-volume workloads".to_string(),
+                    ],
                     cost_tier: 1,
                 },
             ],
@@ -202,9 +215,16 @@ impl LLMProvider for ZhipuProvider {
 
     async fn is_available(&self) -> bool {
         let url = format!("{}/models", self.endpoint());
-        match self.client.get(&url)
-            .header("Authorization", format!("Bearer {}", self.get_api_key().unwrap_or_default()))
-            .send().await {
+        match self
+            .client
+            .get(&url)
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.get_api_key().unwrap_or_default()),
+            )
+            .send()
+            .await
+        {
             Ok(response) => response.status().is_success(),
             Err(_) => false,
         }
@@ -212,36 +232,59 @@ impl LLMProvider for ZhipuProvider {
 
     async fn list_models(&self) -> Result<Vec<String>, ProviderError> {
         let url = format!("{}/models", self.endpoint());
-        let req = self.client.get(&url)
+        let req = self
+            .client
+            .get(&url)
             .header("Authorization", format!("Bearer {}", self.get_api_key()?));
-        let response = req.send().await.map_err(|e| {
-            ProviderError::Network(format!("Failed to connect to Zhipu: {}", e))
-        })?;
+        let response = req
+            .send()
+            .await
+            .map_err(|e| ProviderError::Network(format!("Failed to connect to Zhipu: {}", e)))?;
         if !response.status().is_success() {
-            return Err(ProviderError::Api(format!("Zhipu API returned status {}", response.status())));
+            return Err(ProviderError::Api(format!(
+                "Zhipu API returned status {}",
+                response.status()
+            )));
         }
         #[derive(Deserialize)]
-        struct ZhipuModelsResponse { data: Vec<ZhipuModel> }
+        struct ZhipuModelsResponse {
+            data: Vec<ZhipuModel>,
+        }
         #[derive(Deserialize)]
-        struct ZhipuModel { id: String }
+        struct ZhipuModel {
+            id: String,
+        }
         let models: ZhipuModelsResponse = response.json().await.map_err(|e| {
             ProviderError::Serialization(format!("Failed to parse response: {}", e))
         })?;
         Ok(models.data.into_iter().map(|m| m.id).collect())
     }
 
-    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, ProviderError> {
+    async fn complete(
+        &self,
+        request: CompletionRequest,
+    ) -> Result<CompletionResponse, ProviderError> {
         let api_key = self.get_api_key()?;
         let url = format!("{}/chat/completions", self.endpoint());
         let mut messages = Vec::new();
         if let Some(system_prompt) = &request.system_prompt {
-            messages.push(ZhipuMessage { role: "system".to_string(), content: system_prompt.clone() });
+            messages.push(ZhipuMessage {
+                role: "system".to_string(),
+                content: system_prompt.clone(),
+            });
         }
         for msg in &request.messages {
             let role = match msg.role.as_ref() {
-                "user" => "user", "assistant" => "assistant", "system" => "system", "tool" => "tool", _ => "user",
+                "user" => "user",
+                "assistant" => "assistant",
+                "system" => "system",
+                "tool" => "tool",
+                _ => "user",
             };
-            messages.push(ZhipuMessage { role: role.to_string(), content: msg.content.to_text() });
+            messages.push(ZhipuMessage {
+                role: role.to_string(),
+                content: msg.content.to_text(),
+            });
         }
         let body = ZhipuRequest {
             model: request.model.clone(),
@@ -251,30 +294,42 @@ impl LLMProvider for ZhipuProvider {
             max_tokens: request.max_tokens,
             tools: request.tools.map(|t| serde_json::json!(t)),
         };
-        let req = self.client.post(&url)
+        let req = self
+            .client
+            .post(&url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json");
-        let response = req.json(&body).send().await.map_err(|e| {
-            ProviderError::network(format!("failed to send request: {}", e))
-        })?;
+        let response = req
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ProviderError::network(format!("failed to send request: {}", e)))?;
         if !response.status().is_success() {
             let status = response.status();
             let headers = response.headers().clone();
-            let error_text = response.text().await.unwrap_or_else(|_| "unable to read error".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "unable to read error".to_string());
             return Err(match status.as_u16() {
                 401 | 403 => ProviderError::auth(format!("Authentication failed: {}", error_text)),
                 404 => ProviderError::InvalidModel(format!("model not found: {}", error_text)),
                 429 => ProviderError::RateLimited {
                     retry_delay: extract_retry_after_ms(&headers).map(Duration::from_millis),
                 },
-                502..=504 => ProviderError::Network(format!("Zhipu service unavailable: {}", error_text)),
+                502..=504 => {
+                    ProviderError::Network(format!("Zhipu service unavailable: {}", error_text))
+                }
                 _ => ProviderError::api(format!("{}: {}", status, error_text)),
             });
         }
         let resp: ZhipuResponse = response.json().await.map_err(|e| {
             ProviderError::Serialization(format!("failed to parse response: {}", e))
         })?;
-        let choice = resp.choices.into_iter().next()
+        let choice = resp
+            .choices
+            .into_iter()
+            .next()
             .ok_or_else(|| ProviderError::api("no choices in response"))?;
         let mut content = choice.message.content.unwrap_or_default();
         if let Some(tool_calls) = &choice.message.tool_calls {
@@ -282,8 +337,11 @@ impl LLMProvider for ZhipuProvider {
                 let tool_calls_json: Vec<serde_json::Value> = tool_calls.iter().map(|tc| {
                     serde_json::json!({"id": tc.id, "type": tc.tool_type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}})
                 }).collect();
-                let formatted = serde_json::to_string_pretty(&tool_calls_json).unwrap_or_else(|_| "[]".to_string());
-                if !content.is_empty() { content.push('\n'); }
+                let formatted = serde_json::to_string_pretty(&tool_calls_json)
+                    .unwrap_or_else(|_| "[]".to_string());
+                if !content.is_empty() {
+                    content.push('\n');
+                }
                 content.push_str(&format!("```tool\n{}\n```", formatted));
             }
         }
@@ -299,21 +357,35 @@ impl LLMProvider for ZhipuProvider {
             }),
             stop_reason: choice.finish_reason,
             citations: None,
+            thinking_blocks: None,
         })
     }
 
-    async fn complete_stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>, ProviderError> {
+    async fn complete_stream(
+        &self,
+        request: CompletionRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>, ProviderError> {
         let api_key = self.get_api_key()?;
         let url = format!("{}/chat/completions", self.endpoint());
         let mut messages = Vec::new();
         if let Some(system_prompt) = &request.system_prompt {
-            messages.push(ZhipuMessage { role: "system".to_string(), content: system_prompt.clone() });
+            messages.push(ZhipuMessage {
+                role: "system".to_string(),
+                content: system_prompt.clone(),
+            });
         }
         for msg in &request.messages {
             let role = match msg.role.as_ref() {
-                "user" => "user", "assistant" => "assistant", "system" => "system", "tool" => "tool", _ => "user",
+                "user" => "user",
+                "assistant" => "assistant",
+                "system" => "system",
+                "tool" => "tool",
+                _ => "user",
             };
-            messages.push(ZhipuMessage { role: role.to_string(), content: msg.content.to_text() });
+            messages.push(ZhipuMessage {
+                role: role.to_string(),
+                content: msg.content.to_text(),
+            });
         }
         let body = ZhipuRequest {
             model: request.model.clone(),
@@ -323,23 +395,32 @@ impl LLMProvider for ZhipuProvider {
             max_tokens: request.max_tokens,
             tools: request.tools.map(|t| serde_json::json!(t)),
         };
-        let req = self.client.post(&url)
+        let req = self
+            .client
+            .post(&url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json");
-        let response = req.json(&body).send().await.map_err(|e| {
-            ProviderError::network(format!("failed to send request: {}", e))
-        })?;
+        let response = req
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ProviderError::network(format!("failed to send request: {}", e)))?;
         if !response.status().is_success() {
             let status = response.status();
             let headers = response.headers().clone();
-            let error_text = response.text().await.unwrap_or_else(|_| "unable to read error".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "unable to read error".to_string());
             return Err(match status.as_u16() {
                 401 | 403 => ProviderError::auth(format!("Authentication failed: {}", error_text)),
                 404 => ProviderError::InvalidModel(format!("model not found: {}", error_text)),
                 429 => ProviderError::RateLimited {
                     retry_delay: extract_retry_after_ms(&headers).map(Duration::from_millis),
                 },
-                502..=504 => ProviderError::Network(format!("Zhipu service unavailable: {}", error_text)),
+                502..=504 => {
+                    ProviderError::Network(format!("Zhipu service unavailable: {}", error_text))
+                }
                 _ => ProviderError::api(format!("{}: {}", status, error_text)),
             });
         }
@@ -349,12 +430,16 @@ impl LLMProvider for ZhipuProvider {
             let done_sent = done_sent.clone();
             let chunk = match chunk_result {
                 Ok(c) => c,
-                Err(e) => return futures::stream::iter(vec![Err(ProviderError::Network(e.to_string()))]),
+                Err(e) => {
+                    return futures::stream::iter(vec![Err(ProviderError::Network(e.to_string()))])
+                }
             };
             let text = String::from_utf8_lossy(&chunk);
             let mut events = Vec::new();
             for line in text.lines() {
-                if line.is_empty() { continue; }
+                if line.is_empty() {
+                    continue;
+                }
                 if line.starts_with("data: ") {
                     let json_str = line.trim_start_matches("data: ").trim();
                     if json_str == "[DONE]" {
@@ -370,18 +455,34 @@ impl LLMProvider for ZhipuProvider {
                                     if let Some(content) = delta.get("content") {
                                         if let Some(content_str) = content.as_str() {
                                             if !content_str.is_empty() {
-                                                events.push(Ok(crate::provider_v2::SSEEvent::Text { text: content_str.to_string() }));
+                                                events.push(Ok(
+                                                    crate::provider_v2::SSEEvent::Text {
+                                                        text: content_str.to_string(),
+                                                    },
+                                                ));
                                             }
                                         }
                                     }
                                 }
-                                if let Some(finish_reason) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+                                if let Some(finish_reason) =
+                                    choice.get("finish_reason").and_then(|f| f.as_str())
+                                {
                                     let usage = data.get("usage").and_then(|u| {
                                         let input_tokens = u.get("prompt_tokens")?.as_u64()? as u32;
-                                        let output_tokens = u.get("completion_tokens")?.as_u64()? as u32;
-                                        Some(Usage { input_tokens, output_tokens, total_tokens: input_tokens + output_tokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 })
+                                        let output_tokens =
+                                            u.get("completion_tokens")?.as_u64()? as u32;
+                                        Some(Usage {
+                                            input_tokens,
+                                            output_tokens,
+                                            total_tokens: input_tokens + output_tokens,
+                                            cache_read_input_tokens: 0,
+                                            cache_creation_input_tokens: 0,
+                                        })
                                     });
-                                    events.push(Ok(crate::provider_v2::SSEEvent::MessageDelta { stop_reason: Some(finish_reason.to_string()), usage }));
+                                    events.push(Ok(crate::provider_v2::SSEEvent::MessageDelta {
+                                        stop_reason: Some(finish_reason.to_string()),
+                                        usage,
+                                    }));
                                     if !done_sent.swap(true, std::sync::atomic::Ordering::SeqCst) {
                                         events.push(Ok(crate::provider_v2::SSEEvent::MessageStop));
                                     }

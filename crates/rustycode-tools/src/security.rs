@@ -149,6 +149,12 @@ pub fn validate_path(
     // Normalize cross-platform path quirks (backslashes, WSL, Cygwin, Git Bash)
     let normalized = normalize_path(path);
 
+    // Check for encoded traversal in raw string before path parsing
+    let lower = normalized.to_ascii_lowercase();
+    if lower.contains("%2e%2e") || lower.contains("%2e.") || lower.contains(".%2e") {
+        return Err(anyhow!("path traversal detected: encoded '..' component"));
+    }
+
     // Check for absolute paths (block unless within workspace)
     let candidate = Path::new(&normalized);
 
@@ -533,10 +539,30 @@ pub fn sanitize_for_log(input: &str) -> String {
 
     // Sort by position descending so we can replace without invalidating offsets
     redactions.sort_by(|a, b| b.0.cmp(&a.0));
-    redactions.dedup_by(|a, b| a.0 == b.0);
+
+    // Remove overlapping ranges — keep the one that starts earlier (covers more)
+    let mut i = 0;
+    while i + 1 < redactions.len() {
+        // Sorted descending: redactions[i] starts AFTER redactions[i+1]
+        // They overlap if the later range starts before the earlier range ends:
+        //   redactions[i].0 < redactions[i+1].1
+        let (start_cur, _, _) = redactions[i];
+        let (_, end_next, _) = redactions[i + 1];
+        if start_cur < end_next {
+            // Remove the shorter/later match, keep the earlier one
+            redactions.remove(i);
+        } else {
+            i += 1;
+        }
+    }
 
     for (start, end, pattern) in redactions {
-        output.replace_range(start..end, &format!("{}=[REDACTED]", pattern));
+        // Clamp to string bounds to prevent panic on edge cases
+        let start = start.min(output.len());
+        let end = end.min(output.len());
+        if start < end {
+            output.replace_range(start..end, &format!("{}=[REDACTED]", pattern));
+        }
     }
 
     output
@@ -1114,6 +1140,47 @@ mod tests {
         assert!(result.contains("[REDACTED]"));
     }
 
+    #[test]
+    fn test_sanitize_overlapping_patterns_no_panic() {
+        // Multiple patterns that could overlap — must not panic on replace_range
+        let input = "api_key=secret123 password=hunter2 api_key=other456";
+        let result = sanitize_for_log(input);
+        assert!(result.contains("[REDACTED]"));
+        assert!(!result.contains("secret123"));
+        assert!(!result.contains("hunter2"));
+        assert!(!result.contains("other456"));
+    }
+
+    #[test]
+    fn test_sanitize_adjacent_sensitive_fields() {
+        // Two patterns right next to each other
+        let input = "api_key=sk-abc password=xyz token=def";
+        let result = sanitize_for_log(input);
+        assert!(!result.contains("sk-abc"));
+        assert!(!result.contains("xyz"));
+        assert!(!result.contains("def"));
+    }
+
+    #[test]
+    fn test_sanitize_same_pattern_repeated() {
+        // Same pattern appearing multiple times
+        let input = "password=aaa password=bbb password=ccc";
+        let result = sanitize_for_log(input);
+        assert!(!result.contains("aaa"));
+        assert!(!result.contains("bbb"));
+        assert!(!result.contains("ccc"));
+    }
+
+    #[test]
+    fn test_sanitize_overlapping_key_and_token() {
+        // "token" and "api_key" — adjacent sensitive fields
+        let input = "token=myvalue api_key=sk-abc";
+        let result = sanitize_for_log(input);
+        assert!(result.contains("[REDACTED]"));
+        assert!(!result.contains("myvalue"));
+        assert!(!result.contains("sk-abc"));
+    }
+
     // --- Cross-platform path normalization tests ---
 
     #[test]
@@ -1128,34 +1195,58 @@ mod tests {
     #[test]
     fn test_normalize_wsl_path() {
         if cfg!(windows) {
-            assert_eq!(normalize_path("/mnt/c/Users/test/file.txt"), "C:/Users/test/file.txt");
-            assert_eq!(normalize_path("/mnt/d/projects/app/src/main.rs"), "D:/projects/app/src/main.rs");
+            assert_eq!(
+                normalize_path("/mnt/c/Users/test/file.txt"),
+                "C:/Users/test/file.txt"
+            );
+            assert_eq!(
+                normalize_path("/mnt/d/projects/app/src/main.rs"),
+                "D:/projects/app/src/main.rs"
+            );
         } else {
-            assert_eq!(normalize_path("/mnt/c/Users/test/file.txt"), "/mnt/c/Users/test/file.txt");
-            assert_eq!(normalize_path("/mnt/d/projects/app/src/main.rs"), "/mnt/d/projects/app/src/main.rs");
+            assert_eq!(
+                normalize_path("/mnt/c/Users/test/file.txt"),
+                "/mnt/c/Users/test/file.txt"
+            );
+            assert_eq!(
+                normalize_path("/mnt/d/projects/app/src/main.rs"),
+                "/mnt/d/projects/app/src/main.rs"
+            );
         }
     }
 
     #[test]
     fn test_normalize_cygwin_path() {
         if cfg!(windows) {
-            assert_eq!(normalize_path("/cygdrive/c/Users/test/file.txt"), "C:/Users/test/file.txt");
+            assert_eq!(
+                normalize_path("/cygdrive/c/Users/test/file.txt"),
+                "C:/Users/test/file.txt"
+            );
         } else {
-            assert_eq!(normalize_path("/cygdrive/c/Users/test/file.txt"), "/cygdrive/c/Users/test/file.txt");
+            assert_eq!(
+                normalize_path("/cygdrive/c/Users/test/file.txt"),
+                "/cygdrive/c/Users/test/file.txt"
+            );
         }
     }
 
     #[test]
     #[cfg(windows)]
     fn test_normalize_git_bash_path() {
-        assert_eq!(normalize_path("/c/Users/test/file.txt"), "C:/Users/test/file.txt");
+        assert_eq!(
+            normalize_path("/c/Users/test/file.txt"),
+            "C:/Users/test/file.txt"
+        );
     }
 
     #[test]
     #[cfg(not(windows))]
     fn test_normalize_unix_single_letter_unchanged() {
         // On Unix, /c/... should NOT be converted to C:/... (it's a valid Unix path)
-        assert_eq!(normalize_path("/c/Users/test/file.txt"), "/c/Users/test/file.txt");
+        assert_eq!(
+            normalize_path("/c/Users/test/file.txt"),
+            "/c/Users/test/file.txt"
+        );
     }
 
     #[test]
@@ -1170,5 +1261,31 @@ mod tests {
     fn test_normalize_preserves_relative() {
         assert_eq!(normalize_path("./src/lib.rs"), "./src/lib.rs");
         assert_eq!(normalize_path("../sibling/file.txt"), "../sibling/file.txt");
+    }
+
+    // ── Path encoding bypass tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_encoded_traversal_mixed_case() {
+        // %2e. should be caught
+        let workspace = tempdir().unwrap();
+        let result = validate_path("%2e./etc/passwd", workspace.path(), false, false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encoded_traversal_dot_percent() {
+        // .%2e should be caught
+        let workspace = tempdir().unwrap();
+        let result = validate_path(".%2e/etc/passwd", workspace.path(), false, false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encoded_traversal_uppercase() {
+        // %2E%2E should be caught (already worked, but verify)
+        let workspace = tempdir().unwrap();
+        let result = validate_path("%2E%2E/etc/passwd", workspace.path(), false, false);
+        assert!(result.is_err());
     }
 }

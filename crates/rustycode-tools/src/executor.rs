@@ -105,9 +105,9 @@ impl UnifiedToolExecutor {
         plan_mode: &dyn PlanModeProvider,
     ) -> Result<ToolOutput> {
         info!(
-            "Executing tool '{}' with args: {:?}",
+            "Executing tool '{}' ({} bytes of args)",
             tool_name,
-            args.to_string().chars().take(100).collect::<String>()
+            args.to_string().len()
         );
 
         // Step 1: Check plan mode — block if tool not allowed in current phase
@@ -217,7 +217,19 @@ impl UnifiedToolExecutor {
 
     /// Check if a tool should trigger auto-checkpoint before execution
     fn should_checkpoint(&self, tool_name: &str) -> bool {
-        matches!(tool_name, "edit" | "write" | "bash" | "edit_file")
+        matches!(
+            tool_name,
+            "edit"
+                | "edit_file"
+                | "write"
+                | "write_file"
+                | "bash"
+                | "multi_edit"
+                | "search_replace"
+                | "apply_patch"
+                | "text_editor_20250728"
+                | "text_editor_20250124"
+        )
     }
 
     /// Execute the tool (dispatcher to actual tool implementations)
@@ -404,8 +416,14 @@ mod tests {
 
         assert!(executor.should_checkpoint("edit"));
         assert!(executor.should_checkpoint("write"));
+        assert!(executor.should_checkpoint("write_file"));
         assert!(executor.should_checkpoint("bash"));
         assert!(executor.should_checkpoint("edit_file"));
+        assert!(executor.should_checkpoint("multi_edit"));
+        assert!(executor.should_checkpoint("search_replace"));
+        assert!(executor.should_checkpoint("apply_patch"));
+        assert!(executor.should_checkpoint("text_editor_20250728"));
+        assert!(executor.should_checkpoint("text_editor_20250124"));
     }
 
     #[test]

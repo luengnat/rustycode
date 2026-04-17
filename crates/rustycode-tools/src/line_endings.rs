@@ -182,7 +182,10 @@ mod tests {
 
     #[test]
     fn test_apply_lf() {
-        assert_eq!(apply_line_ending("hello\nworld", LineEnding::LF), "hello\nworld");
+        assert_eq!(
+            apply_line_ending("hello\nworld", LineEnding::LF),
+            "hello\nworld"
+        );
     }
 
     #[test]
@@ -256,14 +259,26 @@ mod tests {
 
     #[test]
     fn test_generate_diff_truncation_keeps_changes() {
-        let old = (1..=100).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        let old = (1..=100)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         // Change only 2 lines so all changes fit in limit of 5
         let new_lines: Vec<String> = (1..=100)
-            .map(|i| if i == 50 || i == 51 { format!("CHANGED {i}") } else { format!("line {i}") })
+            .map(|i| {
+                if i == 50 || i == 51 {
+                    format!("CHANGED {i}")
+                } else {
+                    format!("line {i}")
+                }
+            })
             .collect();
         let new_content = new_lines.join("\n");
         let diff = generate_diff(&old, &new_content, "big.txt", 5);
-        assert!(diff.contains("CHANGED"), "truncated diff should still contain changes: {diff}");
+        assert!(
+            diff.contains("CHANGED"),
+            "truncated diff should still contain changes: {diff}"
+        );
     }
 
     #[test]

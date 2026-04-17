@@ -246,7 +246,6 @@ fn cmd_skill_info(
     }
 
     // Statistics
-    let error_count = 0; // TODO: Track error count in SkillState
     output.push_str(&format!(
         "\nLast run: {}\n\
          Run count: {} times\n\
@@ -254,7 +253,7 @@ fn cmd_skill_info(
         skill.last_run_display(),
         skill.run_count,
         if skill.run_count > 0 {
-            ((skill.run_count - error_count) as f64 / skill.run_count as f64) * 100.0
+            (((skill.run_count - skill.error_count) as f64) / (skill.run_count as f64)) * 100.0
         } else {
             100.0
         }
@@ -262,12 +261,7 @@ fn cmd_skill_info(
 
     // Installation info
     if let Some(installation) = &skill.base.path.to_str() {
-        output.push_str(&format!(
-            "\nInstalled: {:?}\n\
-             Path: {}",
-            "N/A", // TODO: Add installation metadata
-            installation
-        ));
+        output.push_str(&format!("\nPath: {}", installation));
     }
 
     // Lifecycle commands

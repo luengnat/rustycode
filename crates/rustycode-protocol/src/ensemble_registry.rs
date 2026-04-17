@@ -124,7 +124,7 @@ impl TeamRegistry {
     /// assert_eq!(team.status, TeamStatus::Created);
     /// ```
     pub fn create(&self, name: &str, task_ids: Vec<String>) -> Team {
-        let mut inner = self.inner.lock().expect("team registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.counter += 1;
         let ts = now_secs();
         let team_id = format!("team_{:08x}_{:04x}", ts, inner.counter);
@@ -149,14 +149,14 @@ impl TeamRegistry {
     /// `Some(Team)` if found, `None` otherwise
     #[must_use]
     pub fn get(&self, team_id: &str) -> Option<Team> {
-        let inner = self.inner.lock().expect("team registry lock poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.teams.get(team_id).cloned()
     }
 
     /// List all teams
     #[must_use]
     pub fn list(&self) -> Vec<Team> {
-        let inner = self.inner.lock().expect("team registry lock poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.teams.values().cloned().collect()
     }
 
@@ -170,7 +170,7 @@ impl TeamRegistry {
     ///
     /// `Ok(Team)` with status Deleted, `Err(String)` if not found
     pub fn delete(&self, team_id: &str) -> Result<Team, String> {
-        let mut inner = self.inner.lock().expect("team registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let team = inner
             .teams
             .get_mut(team_id)
@@ -191,7 +191,7 @@ impl TeamRegistry {
     /// `Some(Team)` if removed, `None` if not found
     #[must_use]
     pub fn remove(&self, team_id: &str) -> Option<Team> {
-        let mut inner = self.inner.lock().expect("team registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.teams.remove(team_id)
     }
 
@@ -205,7 +205,7 @@ impl TeamRegistry {
     ///
     /// `Ok(Team)` with status Running, `Err(String)` if not found
     pub fn mark_running(&self, team_id: &str) -> Result<Team, String> {
-        let mut inner = self.inner.lock().expect("team registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let team = inner
             .teams
             .get_mut(team_id)
@@ -225,7 +225,7 @@ impl TeamRegistry {
     ///
     /// `Ok(Team)` with status Completed, `Err(String)` if not found
     pub fn mark_completed(&self, team_id: &str) -> Result<Team, String> {
-        let mut inner = self.inner.lock().expect("team registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let team = inner
             .teams
             .get_mut(team_id)
@@ -246,7 +246,7 @@ impl TeamRegistry {
     ///
     /// `Ok(Team)` with updated task list, `Err(String)` if not found
     pub fn add_task(&self, team_id: &str, task_id: &str) -> Result<Team, String> {
-        let mut inner = self.inner.lock().expect("team registry lock poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let team = inner
             .teams
             .get_mut(team_id)
@@ -259,7 +259,7 @@ impl TeamRegistry {
     /// Get count of teams
     #[must_use]
     pub fn len(&self) -> usize {
-        let inner = self.inner.lock().expect("team registry lock poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.teams.len()
     }
 
@@ -272,7 +272,7 @@ impl TeamRegistry {
     /// Get teams by status
     #[must_use]
     pub fn teams_by_status(&self, status: TeamStatus) -> Vec<Team> {
-        let inner = self.inner.lock().expect("team registry lock poisoned");
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner
             .teams
             .values()

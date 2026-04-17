@@ -205,7 +205,10 @@ impl ThinkingType {
         }
 
         // Opus 4.6+
-        if model_lower.contains("opus-4-20250214") || model_lower.contains("opus-4.6-") {
+        if model_lower.contains("opus-4-20250214")
+            || model_lower.contains("opus-4.6-")
+            || model_lower.contains("opus-4-6")
+        {
             return true;
         }
 
@@ -215,7 +218,15 @@ impl ThinkingType {
         }
 
         // Sonnet 4.6+
-        if model_lower.contains("sonnet-4-20250214") || model_lower.contains("sonnet-4.6-") {
+        if model_lower.contains("sonnet-4-20250214")
+            || model_lower.contains("sonnet-4.6-")
+            || model_lower.contains("sonnet-4-6")
+        {
+            return true;
+        }
+
+        // Opus 4.7+ (adaptive-only, manual mode returns 400)
+        if model_lower.contains("opus-4-7") || model_lower.contains("opus-4.7-") {
             return true;
         }
 
@@ -389,12 +400,28 @@ impl CompletionRequest {
     /// ```
     pub fn validate_thinking(&self) -> Result<(), String> {
         if let Some(ref thinking) = self.thinking {
+            // Disabled thinking is always valid — it means "no thinking"
+            if matches!(thinking.thinking_type, ThinkingType::Disabled) {
+                return Ok(());
+            }
+
             if !thinking.thinking_type.supports_model(&self.model) {
                 return Err(format!(
                     "Thinking type {:?} is not supported by model {}. \
                      Adaptive/Enabled thinking requires Opus 4.5+ or Sonnet 4.5+",
                     thinking.thinking_type, self.model
                 ));
+            }
+            // Opus 4.7+ only supports Adaptive mode; manual (Enabled) returns 400 from API
+            if matches!(thinking.thinking_type, ThinkingType::Enabled) {
+                let model_lower = self.model.to_lowercase();
+                if model_lower.contains("opus-4-7") || model_lower.contains("opus-4.7-") {
+                    return Err(format!(
+                        "Model {} only supports adaptive thinking. \
+                         Use ThinkingType::Adaptive instead of Enabled",
+                        self.model
+                    ));
+                }
             }
         }
         Ok(())
@@ -497,6 +524,24 @@ impl ChatMessage {
     }
 }
 
+/// A thinking block from an extended thinking response.
+/// Must be preserved unchanged for multi-turn conversations with tool use.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThinkingBlock {
+    /// The block type: "thinking" or "redacted_thinking"
+    #[serde(rename = "type")]
+    pub block_type: String,
+    /// The thinking content (empty for redacted_thinking or display: "omitted")
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub thinking: String,
+    /// The encrypted signature (for round-tripping)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub signature: String,
+    /// Encrypted data for redacted_thinking blocks
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub data: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionResponse {
     pub content: String,
@@ -507,6 +552,9 @@ pub struct CompletionResponse {
     /// Citation metadata for search results (when applicable)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub citations: Option<Vec<Citation>>,
+    /// Thinking blocks for round-tripping in multi-turn conversations with tool use
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_blocks: Option<Vec<ThinkingBlock>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -990,7 +1038,13 @@ macro_rules! build_request {
         // Add extra headers from config (if provided)
         if let Some(extra) = &$extra_headers {
             use $crate::provider_v2::validate_extra_headers;
-            let validated = validate_extra_headers(&Some(extra.clone())).unwrap();
+            let validated = match validate_extra_headers(&Some(extra.clone())) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!("Skipping invalid extra_headers: {}", e);
+                    Vec::new()
+                }
+            };
             for (name, value) in validated {
                 req = req.header(name, value);
             }
@@ -1364,7 +1418,10 @@ mod tests {
 
     #[test]
     fn test_output_config_serialization_no_effort() {
-        let config = OutputConfig { effort: None, format: None };
+        let config = OutputConfig {
+            effort: None,
+            format: None,
+        };
         let serialized = serde_json::to_string(&config).unwrap();
         let value: Value = serde_json::from_str(&serialized).unwrap();
         // When effort is None, the entire object might serialize differently
@@ -1583,5 +1640,182 @@ mod tests {
         // Should still work when api_key is None
         assert!(debug_str.contains("ProviderConfig"));
         assert!(debug_str.contains("30"));
+    }
+
+    #[test]
+    fn test_thinking_type_supports_opus_4_7() {
+        assert!(ThinkingType::Adaptive.supports_model("claude-opus-4-7"));
+        assert!(ThinkingType::Adaptive.supports_model("claude-opus-4.7-20260401"));
+        assert!(ThinkingType::Enabled.supports_model("claude-opus-4-7"));
+    }
+
+    #[test]
+    fn test_validate_thinking_rejects_enabled_on_opus_4_7() {
+        let request = CompletionRequest::new("claude-opus-4-7".to_string(), vec![])
+            .with_thinking_type(ThinkingType::Enabled);
+        let result = request.validate_thinking();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("adaptive"));
+    }
+
+    #[test]
+    fn test_validate_thinking_allows_adaptive_on_opus_4_7() {
+        let request = CompletionRequest::new("claude-opus-4-7".to_string(), vec![])
+            .with_thinking_type(ThinkingType::Adaptive);
+        assert!(request.validate_thinking().is_ok());
+    }
+
+    // ─── Additional coverage: supports_model edge cases ────────────────
+
+    #[test]
+    fn test_supports_model_short_form_ids() {
+        // Short-form IDs like "claude-opus-4-6" and "claude-sonnet-4-6"
+        assert!(ThinkingType::Adaptive.supports_model("claude-opus-4-6"));
+        assert!(ThinkingType::Adaptive.supports_model("claude-sonnet-4-6"));
+        assert!(ThinkingType::Enabled.supports_model("claude-opus-4-6"));
+        assert!(ThinkingType::Enabled.supports_model("claude-sonnet-4-6"));
+    }
+
+    #[test]
+    fn test_supports_model_haiku_never_supports_thinking() {
+        assert!(!ThinkingType::Adaptive.supports_model("claude-haiku-4-5"));
+        assert!(!ThinkingType::Enabled.supports_model("claude-3-5-haiku-20241022"));
+        assert!(!ThinkingType::Adaptive.supports_model("claude-haiku-4-6"));
+    }
+
+    #[test]
+    fn test_supports_model_empty_and_garbage() {
+        assert!(!ThinkingType::Adaptive.supports_model(""));
+        assert!(!ThinkingType::Adaptive.supports_model("not-a-model"));
+        assert!(!ThinkingType::Adaptive.supports_model("gpt-4"));
+        assert!(!ThinkingType::Enabled.supports_model("random-string"));
+    }
+
+    #[test]
+    fn test_supports_model_date_format_variants() {
+        // Opus 4.5 date format
+        assert!(ThinkingType::Adaptive.supports_model("claude-opus-4-20250514"));
+        // Opus 4.6 date format
+        assert!(ThinkingType::Adaptive.supports_model("claude-opus-4-20250214"));
+        // Sonnet 4.5 date format
+        assert!(ThinkingType::Adaptive.supports_model("claude-sonnet-4-20250514"));
+        // Sonnet 4.6 date format
+        assert!(ThinkingType::Adaptive.supports_model("claude-sonnet-4-20250214"));
+    }
+
+    #[test]
+    fn test_supports_model_dotted_format() {
+        assert!(ThinkingType::Adaptive.supports_model("claude-opus-4.5-20250514"));
+        assert!(ThinkingType::Adaptive.supports_model("claude-opus-4.6-20250214"));
+        assert!(ThinkingType::Adaptive.supports_model("claude-sonnet-4.5-20250514"));
+        assert!(ThinkingType::Adaptive.supports_model("claude-sonnet-4.6-20250214"));
+    }
+
+    #[test]
+    fn test_validate_thinking_enabled_ok_on_older_models() {
+        // Opus 4.5 and 4.6 should accept Enabled
+        let req = CompletionRequest::new("claude-opus-4.5-20250514".to_string(), vec![])
+            .with_thinking_type(ThinkingType::Enabled);
+        assert!(req.validate_thinking().is_ok());
+
+        let req = CompletionRequest::new("claude-sonnet-4-6".to_string(), vec![])
+            .with_thinking_type(ThinkingType::Enabled);
+        assert!(req.validate_thinking().is_ok());
+    }
+
+    #[test]
+    fn test_validate_thinking_disabled_always_ok() {
+        for model in &[
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-sonnet-4-6",
+            "claude-3-opus",
+        ] {
+            let req = CompletionRequest::new(model.to_string(), vec![])
+                .with_thinking_type(ThinkingType::Disabled);
+            assert!(
+                req.validate_thinking().is_ok(),
+                "Disabled should be ok for {}",
+                model
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_thinking_no_config_is_ok() {
+        // No thinking config at all should be fine
+        let req = CompletionRequest::new("claude-opus-4-7".to_string(), vec![]);
+        assert!(req.validate_thinking().is_ok());
+    }
+
+    // --- validate_extra_headers tests ---
+
+    #[test]
+    fn test_validate_extra_headers_blocks_authorization() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer token".to_string());
+        let result = validate_extra_headers(&Some(headers));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("security header"));
+    }
+
+    #[test]
+    fn test_validate_extra_headers_blocks_host() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("Host".to_string(), "evil.com".to_string());
+        let result = validate_extra_headers(&Some(headers));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_extra_headers_blocks_crlf_injection() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("X-Custom".to_string(), "value\r\nInjected: true".to_string());
+        let result = validate_extra_headers(&Some(headers));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("newline"));
+    }
+
+    #[test]
+    fn test_validate_extra_headers_allows_valid() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("X-Request-ID".to_string(), "abc123".to_string());
+        headers.insert("X-Custom-Header".to_string(), "value".to_string());
+        let result = validate_extra_headers(&Some(headers));
+        assert!(result.is_ok());
+        let validated = result.unwrap();
+        assert_eq!(validated.len(), 2);
+    }
+
+    #[test]
+    fn test_validate_extra_headers_none_is_ok() {
+        let result = validate_extra_headers(&None);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_validate_extra_headers_empty_map() {
+        let headers = std::collections::HashMap::new();
+        let result = validate_extra_headers(&Some(headers));
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_validate_extra_headers_blocks_invalid_name() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("Invalid Name\n".to_string(), "value".to_string());
+        let result = validate_extra_headers(&Some(headers));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_extra_headers_case_insensitive_security() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("authorization".to_string(), "Bearer token".to_string());
+        let result = validate_extra_headers(&Some(headers));
+        assert!(result.is_err());
     }
 }

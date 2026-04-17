@@ -1076,7 +1076,9 @@ pub async fn stream_llm_response(config: StreamConfig) -> Result<()> {
                 // If there are structured content blocks, push them as a Blocks-based message.
                 // Otherwise, push the plain textual assistant response only if non-empty.
                 if !content_blocks.is_empty() {
-                    messages.push(ChatMessage::assistant(MessageContent::Blocks(content_blocks.clone())));
+                    messages.push(ChatMessage::assistant(MessageContent::Blocks(
+                        content_blocks.clone(),
+                    )));
                 } else if !assistant_response.is_empty() {
                     messages.push(ChatMessage::assistant(assistant_response.clone()));
                 }

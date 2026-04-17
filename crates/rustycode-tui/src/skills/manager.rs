@@ -51,6 +51,8 @@ pub struct SkillState {
     pub last_run: Option<Instant>,
     /// Run count
     pub run_count: usize,
+    /// Error count
+    pub error_count: usize,
 }
 
 impl SkillState {
@@ -63,6 +65,7 @@ impl SkillState {
             triggers: vec![TriggerCondition::ManualOnly],
             last_run: None,
             run_count: 0,
+            error_count: 0,
         }
     }
 
@@ -91,6 +94,8 @@ impl SkillState {
     pub fn mark_error(&mut self, error: String) {
         self.status = SkillStatus::Error(error);
         self.last_run = Some(Instant::now());
+        self.run_count += 1;
+        self.error_count += 1;
     }
 
     /// Toggle auto-enable state

@@ -135,10 +135,7 @@ impl CheckpointStore for StorageBasedCheckpointStore {
 
         match self.storage.save_checkpoint(&record) {
             Ok(_) => Ok(()),
-            Err(e) => {
-                eprintln!("Storage error details: {:?}", e);
-                Err(e).context("failed to save checkpoint to storage")
-            }
+            Err(e) => Err(e).context("failed to save checkpoint to storage"),
         }
     }
 
@@ -409,14 +406,20 @@ impl CheckpointManager {
 
             // Evict old checkpoints if over limit
             while cache.len() > self.config.max_checkpoints {
-                // Remove oldest
-                if let Some(oldest) = cache.keys().next().cloned() {
+                // Find the oldest checkpoint by created_at timestamp
+                let oldest_key = cache
+                    .iter()
+                    .min_by_key(|(_, cp)| cp.created_at)
+                    .map(|(k, _)| k.clone());
+                if let Some(oldest) = oldest_key {
                     if let Some(cp) = cache.remove(&oldest) {
                         // Delete from store
                         if let Some(ref store) = self.store {
                             let _ = store.delete_checkpoint(&cp.id.0);
                         }
                     }
+                } else {
+                    break;
                 }
             }
         }
@@ -424,13 +427,8 @@ impl CheckpointManager {
         // Persist to storage backend
         if let Some(ref store) = self.store {
             if let Err(e) = store.save_checkpoint(&self.session_id, &checkpoint) {
-                eprintln!("ERROR: failed to persist checkpoint: {}", e);
                 tracing::warn!("failed to persist checkpoint: {}", e);
-            } else {
-                eprintln!("DEBUG: checkpoint persisted successfully to storage");
             }
-        } else {
-            eprintln!("DEBUG: no storage backend configured");
         }
 
         tracing::info!("Created checkpoint {} for: {}", checkpoint.id, reason);

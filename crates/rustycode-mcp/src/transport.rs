@@ -407,8 +407,11 @@ impl Transport for StdioTransport {
 
 impl Drop for StdioTransport {
     fn drop(&mut self) {
-        if self.child.is_some() {
-            warn!("StdioTransport dropped without explicit close");
+        if let Some(mut child) = self.child.take() {
+            warn!("StdioTransport dropped without explicit close — killing child process");
+            // Best-effort kill; start_kill() is synchronous (sends SIGKILL)
+            // We can't await in Drop, so we use the non-blocking version
+            let _ = child.start_kill();
         }
     }
 }

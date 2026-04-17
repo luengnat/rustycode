@@ -441,6 +441,7 @@ impl LLMProvider for CopilotProvider {
             usage,
             stop_reason: choice.finish_reason,
             citations: None,
+            thinking_blocks: None,
         })
     }
 

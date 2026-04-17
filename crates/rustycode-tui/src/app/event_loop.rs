@@ -1107,6 +1107,14 @@ impl TUI {
                 self.dirty = true; // Mark dirty for animation updates
             }
 
+            // Error auto-dismiss: If error_manager is showing, mark dirty so
+            // the next render can check is_showing() and clear the error overlay
+            // after the auto-dismiss timeout (10s). Without this, the error
+            // indicator persists indefinitely when no other state changes occur.
+            if self.error_manager.is_showing() {
+                self.dirty = true;
+            }
+
             // Phase 2: Poll async sources (ONE item each)
             self.poll_services()?;
 
@@ -1677,7 +1685,7 @@ impl TUI {
         if turn_count > 0 {
             println!(
                 "\n  Session: {} turns, {} tokens ({} in / {} out), {}, model: {}",
-                turn_count, 
+                turn_count,
                 fmt(total_tokens),
                 fmt(self.session_input_tokens),
                 fmt(self.session_output_tokens),

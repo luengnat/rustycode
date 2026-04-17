@@ -285,7 +285,10 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found") || err.contains("path"), "expected path or not found error, got: {err}");
+        assert!(
+            err.contains("not found") || err.contains("path"),
+            "expected path or not found error, got: {err}"
+        );
     }
 
     #[test]
@@ -300,7 +303,9 @@ mod tests {
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(
-            error_msg.contains("not found") || error_msg.contains("not a git repository") || error_msg.contains("path"),
+            error_msg.contains("not found")
+                || error_msg.contains("not a git repository")
+                || error_msg.contains("path"),
             "expected path or git error, got: {error_msg}"
         );
     }

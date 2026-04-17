@@ -289,11 +289,11 @@ pub use rate_limiter::{RateLimitConfig, RateLimitType, RateLimiter, RateLimiterB
 pub use registry::ProviderRegistryBuilder;
 pub use retry::{is_retryable_error, retry_with_backoff, RetryConfig};
 pub use together::TogetherProvider;
-pub use zhipu::ZhipuProvider;
 pub use token_tracker::{
     cost_per_million_tokens, cost_per_million_tokens_io, estimate_cost, ModelUsage, TokenTracker,
     TrackedRequest, UsageSummary,
 };
+pub use zhipu::ZhipuProvider;
 
 // Tool execution integration
 pub use singleton_provider::{initialize_provider, is_initialized, reset, SharedLLMProvider};

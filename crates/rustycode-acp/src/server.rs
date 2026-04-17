@@ -52,8 +52,8 @@ impl ACPServer {
         };
 
         // Get default model from environment or use sensible default
-        let default_model = std::env::var("RUSTYCODE_MODEL")
-            .unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+        let default_model =
+            std::env::var("RUSTYCODE_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
 
         let prompt_handler = PromptHandler::new(".".to_string(), default_model.clone());
 

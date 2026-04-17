@@ -337,6 +337,7 @@ impl LLMProvider for MistralProvider {
             }),
             stop_reason: choice.finish_reason.clone(),
             citations: None,
+            thinking_blocks: None,
         })
     }
 

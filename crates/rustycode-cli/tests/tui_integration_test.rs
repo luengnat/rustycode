@@ -58,7 +58,7 @@ fn test_tui_module_imports() {
     std::env::set_var("RUSTYCODE_TEST_MODE", "1");
 
     let result = rustycode_tui::run(PathBuf::from("/tmp"), false, false);
-    
+
     assert!(
         result.is_err() || result.is_ok(),
         "TUI run should handle errors gracefully"

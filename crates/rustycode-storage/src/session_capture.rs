@@ -33,7 +33,7 @@
 //! });
 //!
 //! // Finalize and store the session summary
-//! let summary = capture.finalize_session();
+//! let summary = capture.finalize_session()?;
 //! # Ok(())
 //! # }
 //! ```
@@ -208,6 +208,7 @@ pub struct SessionMetrics {
 /// use rustycode_storage::session_capture::{SessionCapture, InteractionEvent};
 /// use rustycode_protocol::SessionId;
 ///
+/// # fn main() -> anyhow::Result<()> {
 /// let mut capture = SessionCapture::new(
 ///     SessionId::new(),
 ///     "Fix bug in authentication".to_string(),
@@ -218,7 +219,9 @@ pub struct SessionMetrics {
 ///     timestamp: chrono::Utc::now(),
 /// });
 ///
-/// let summary = capture.finalize_session();
+/// let summary = capture.finalize_session()?;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct SessionCapture {
@@ -343,8 +346,7 @@ impl SessionCapture {
     /// A `SessionSummary` containing all captured information
     ///
     /// # Panics
-    ///
-    /// Panics if called more than once on the same capture instance
+    /// Returns `Err` if called more than once on the same capture instance.
     ///
     /// # Example
     ///
@@ -352,15 +354,22 @@ impl SessionCapture {
     /// use rustycode_storage::session_capture::SessionCapture;
     /// use rustycode_protocol::SessionId;
     ///
+    /// # fn main() -> anyhow::Result<()> {
     /// let mut capture = SessionCapture::new(SessionId::new(), "test".to_string());
-    /// let summary = capture.finalize_session();
+    /// let summary = capture.finalize_session()?;
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn finalize_session(&mut self) -> SessionSummary {
-        assert!(!self.is_finalized, "Session already finalized");
+    pub fn finalize_session(&mut self) -> anyhow::Result<SessionSummary> {
+        if self.is_finalized {
+            anyhow::bail!("session {} already finalized", self.session_id);
+        }
         self.is_finalized = true;
 
         let ended_at = Utc::now();
-        let duration_ms = (ended_at - self.started_at).num_milliseconds() as u64;
+        let duration_ms = (ended_at - self.started_at)
+            .num_milliseconds()
+            .max(0) as u64;
         self.metrics.session_duration_ms = duration_ms;
 
         // Extract key points from events
@@ -372,7 +381,7 @@ impl SessionCapture {
         // Suggest next steps based on outcome
         let next_steps = self.generate_next_steps();
 
-        SessionSummary {
+        Ok(SessionSummary {
             session_id: self.session_id.clone(),
             task: self.task.clone(),
             duration_ms,
@@ -385,7 +394,7 @@ impl SessionCapture {
             next_steps,
             started_at: self.started_at,
             ended_at,
-        }
+        })
     }
 
     /// Store a session summary to disk
@@ -408,7 +417,7 @@ impl SessionCapture {
     ///
     /// # fn main() -> anyhow::Result<()> {
     /// let mut capture = SessionCapture::new(SessionId::new(), "test".to_string());
-    /// let summary = capture.finalize_session();
+    /// let summary = capture.finalize_session()?;
     /// SessionCapture::store_summary(&summary, Path::new("/tmp/sessions"))?;
     /// # Ok(())
     /// # }
@@ -631,7 +640,7 @@ mod tests {
             timestamp: Utc::now(),
         });
 
-        let summary = capture.finalize_session();
+        let summary = capture.finalize_session().unwrap();
 
         assert!(capture.is_finalized());
         assert_eq!(summary.task, "Test task");
@@ -648,7 +657,7 @@ mod tests {
             timestamp: Utc::now(),
         });
 
-        let summary = capture.finalize_session();
+        let summary = capture.finalize_session().unwrap();
         SessionCapture::store_summary(&summary, dir.path()).unwrap();
 
         // Verify file was created
@@ -694,7 +703,7 @@ mod tests {
             to: "executing".to_string(),
         });
 
-        let summary = capture.finalize_session();
+        let summary = capture.finalize_session().unwrap();
         assert!(!summary.key_points.is_empty());
     }
 
@@ -708,16 +717,20 @@ mod tests {
             resolution: None,
         });
 
-        let summary = capture.finalize_session();
+        let summary = capture.finalize_session().unwrap();
         assert!(!summary.learnings.is_empty());
     }
 
     #[test]
-    #[should_panic(expected = "Session already finalized")]
-    fn test_finalize_twice_panics() {
+    fn test_finalize_twice_returns_error() {
         let mut capture = create_test_capture();
-        capture.finalize_session();
-        capture.finalize_session(); // Should panic
+        capture.finalize_session().unwrap();
+        let result = capture.finalize_session();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("already finalized"));
     }
 
     #[test]
@@ -742,7 +755,7 @@ mod tests {
             content_hash: None,
         });
 
-        let summary = capture.finalize_session();
+        let summary = capture.finalize_session().unwrap();
         // Should deduplicate files but count all modifications
         assert_eq!(summary.files_touched.len(), 2);
         assert_eq!(capture.metrics().files_modified_count, 3);

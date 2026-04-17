@@ -35,6 +35,7 @@ async fn mock_provider_multiple_responses() {
             usage: None,
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         }),
         Ok(CompletionResponse {
             content: "Second".to_string(),
@@ -42,6 +43,7 @@ async fn mock_provider_multiple_responses() {
             usage: None,
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         }),
     ];
 

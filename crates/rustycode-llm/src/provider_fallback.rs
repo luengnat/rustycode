@@ -249,6 +249,7 @@ mod tests {
                     usage: None,
                     stop_reason: Some("stop".to_string()),
                     citations: None,
+                    thinking_blocks: None,
                 })
             }
         }

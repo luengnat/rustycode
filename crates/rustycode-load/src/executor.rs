@@ -102,7 +102,7 @@ impl LoadTestRunner {
             Client::builder()
                 .timeout(Duration::from_secs(30))
                 .build()
-                .unwrap()
+                .unwrap_or_else(|e| panic!("failed to build HTTP client for load test: {e}"))
         });
 
         Self {

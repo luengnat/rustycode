@@ -110,7 +110,7 @@ fn test_error_handling_comprehensive() {
         _ => panic!("Expected Io error"),
     }
 
-    // Test invalid line range
+    // Test inverted line range — implementation auto-swaps start/end
     let dir = TempDir::new().unwrap();
     let file_path = dir.path().join("test.txt");
     fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
@@ -118,17 +118,11 @@ fn test_error_handling_comprehensive() {
     let result = ToolDispatcher::<CompileTimeReadFile>::dispatch(ReadFileInput {
         path: file_path,
         start_line: Some(5),
-        end_line: Some(2), // end < start
+        end_line: Some(2), // end < start, will be auto-swapped
     });
 
-    assert!(result.is_err());
-    match result {
-        Err(ReadFileError::LineRangeError { start, end, .. }) => {
-            assert_eq!(start, 5);
-            assert_eq!(end, 2);
-        }
-        _ => panic!("Expected LineRangeError"),
-    }
+    // Implementation auto-swaps inverted ranges instead of erroring
+    assert!(result.is_ok());
 
     // Test command timeout
     let result = ToolDispatcher::<CompileTimeBash>::dispatch(BashInput {

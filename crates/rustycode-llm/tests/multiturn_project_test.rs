@@ -268,6 +268,7 @@ async fn test_mock_provider_multiturn() {
         usage: None,
         stop_reason: None,
         citations: None,
+        thinking_blocks: None,
     };
     let response2 = CompletionResponse {
         content: "I can help you with that! What do you need?".to_string(),
@@ -275,6 +276,7 @@ async fn test_mock_provider_multiturn() {
         usage: None,
         stop_reason: None,
         citations: None,
+        thinking_blocks: None,
     };
     let response3 = CompletionResponse {
         content: "Sure, here's a simple example...".to_string(),
@@ -282,6 +284,7 @@ async fn test_mock_provider_multiturn() {
         usage: None,
         stop_reason: None,
         citations: None,
+        thinking_blocks: None,
     };
 
     let provider = MockProvider::new(vec![Ok(response1), Ok(response2), Ok(response3)], None);

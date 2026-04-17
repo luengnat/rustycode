@@ -1056,7 +1056,10 @@ mod tests {
     #[test]
     fn test_classify_query_case_insensitive() {
         assert_eq!(classify_query("select * from users"), QueryType::Select);
-        assert_eq!(classify_query("INSERT into t values (1)"), QueryType::Insert);
+        assert_eq!(
+            classify_query("INSERT into t values (1)"),
+            QueryType::Insert
+        );
         assert_eq!(classify_query("update t set x=1"), QueryType::Update);
         assert_eq!(classify_query("delete from t"), QueryType::Delete);
     }
@@ -1124,7 +1127,10 @@ mod tests {
 
     #[test]
     fn test_classify_query_other() {
-        assert_eq!(classify_query("EXPLAIN SELECT * FROM users"), QueryType::Other);
+        assert_eq!(
+            classify_query("EXPLAIN SELECT * FROM users"),
+            QueryType::Other
+        );
         assert_eq!(classify_query("VACUUM"), QueryType::Other);
     }
 }

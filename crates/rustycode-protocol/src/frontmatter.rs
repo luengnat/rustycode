@@ -5,7 +5,7 @@ use std::collections::HashMap;
 // supports the subset of frontmatter needed by RustyCode: strings, booleans,
 // numbers, arrays (inline and multi-line), and simple nesting via objects.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FrontmatterValue {
     String(String),
     Bool(bool),
@@ -140,5 +140,124 @@ pub fn as_array(v: &FrontmatterValue) -> Option<Vec<FrontmatterValue>> {
         Some(arr.clone())
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_frontmatter_basic() {
+        let input = "---\nname: test\nversion: 1\n---\nbody content";
+        let result = split_frontmatter(input);
+        assert_eq!(result, Some("name: test\nversion: 1".to_string()));
+    }
+
+    #[test]
+    fn test_split_frontmatter_no_delimiter() {
+        let input = "no frontmatter here\njust content";
+        assert!(split_frontmatter(input).is_none());
+    }
+
+    #[test]
+    fn test_split_frontmatter_unclosed() {
+        let input = "---\nname: test\nno closing delimiter";
+        assert!(split_frontmatter(input).is_none());
+    }
+
+    #[test]
+    fn test_parse_simple_key_value() {
+        let yaml = "name: hello\nversion: 42";
+        let map = parse_frontmatter_map(yaml);
+        assert_eq!(as_string(map.get("name").unwrap()).as_deref(), Some("hello"));
+        assert_eq!(
+            map.get("version").unwrap(),
+            &FrontmatterValue::Number(42)
+        );
+    }
+
+    #[test]
+    fn test_parse_quoted_string() {
+        let yaml = "title: \"hello world\"";
+        let map = parse_frontmatter_map(yaml);
+        assert_eq!(
+            as_string(map.get("title").unwrap()).as_deref(),
+            Some("hello world")
+        );
+    }
+
+    #[test]
+    fn test_parse_single_quoted_string() {
+        let yaml = "title: 'single quoted'";
+        let map = parse_frontmatter_map(yaml);
+        assert_eq!(
+            as_string(map.get("title").unwrap()).as_deref(),
+            Some("single quoted")
+        );
+    }
+
+    #[test]
+    fn test_parse_inline_array() {
+        let yaml = "tags: [\"a\", \"b\", \"c\"]";
+        let map = parse_frontmatter_map(yaml);
+        let arr = as_array(map.get("tags").unwrap()).unwrap();
+        assert_eq!(arr.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_multiline_array() {
+        let yaml = "items:\n  - first\n  - second\n  - third";
+        let map = parse_frontmatter_map(yaml);
+        let arr = as_array(map.get("items").unwrap()).unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(as_string(&arr[0]).as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn test_parse_booleans() {
+        let yaml = "enabled: true\ndisabled: false";
+        let map = parse_frontmatter_map(yaml);
+        assert_eq!(as_bool(map.get("enabled").unwrap()), Some(true));
+        assert_eq!(as_bool(map.get("disabled").unwrap()), Some(false));
+    }
+
+    #[test]
+    fn test_parse_comments_ignored() {
+        let yaml = "# comment\nkey: value";
+        let map = parse_frontmatter_map(yaml);
+        assert_eq!(map.len(), 1);
+        assert_eq!(as_string(map.get("key").unwrap()).as_deref(), Some("value"));
+    }
+
+    #[test]
+    fn test_parse_empty_input() {
+        let map = parse_frontmatter_map("");
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_parse_negative_number() {
+        let yaml = "offset: -42";
+        let map = parse_frontmatter_map(yaml);
+        assert_eq!(map.get("offset").unwrap(), &FrontmatterValue::Number(-42));
+    }
+
+    #[test]
+    fn test_as_string_on_non_string() {
+        let v = FrontmatterValue::Bool(true);
+        assert!(as_string(&v).is_none());
+    }
+
+    #[test]
+    fn test_as_bool_on_non_bool() {
+        let v = FrontmatterValue::String("true".to_string());
+        assert!(as_bool(&v).is_none());
+    }
+
+    #[test]
+    fn test_as_array_on_non_array() {
+        let v = FrontmatterValue::Number(42);
+        assert!(as_array(&v).is_none());
     }
 }

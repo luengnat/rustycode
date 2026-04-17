@@ -222,7 +222,7 @@ pub fn resolve_tool_from_path(tool: ManagedTool, path_value: Option<String>) -> 
 /// use std::path::PathBuf;
 ///
 /// let source = PathBuf::from("/usr/bin/rg");
-/// let target = provision_tool("/managed/tools", ManagedTool::Rg, &source);
+/// let target = provision_tool("/managed/tools", ManagedTool::Rg, &source)?;
 /// ```
 ///
 /// # Errors
@@ -230,7 +230,11 @@ pub fn resolve_tool_from_path(tool: ManagedTool, path_value: Option<String>) -> 
 /// - Target directory creation fails
 /// - Copy operation fails
 /// - Permission setting fails
-pub fn provision_tool<P: AsRef<Path>>(target_dir: P, tool: ManagedTool, source_path: P) -> PathBuf {
+pub fn provision_tool<P: AsRef<Path>>(
+    target_dir: P,
+    tool: ManagedTool,
+    source_path: P,
+) -> anyhow::Result<PathBuf> {
     let target_dir = target_dir.as_ref();
     let source_path = source_path.as_ref();
     let spec = get_tool_spec(tool);
@@ -238,36 +242,34 @@ pub fn provision_tool<P: AsRef<Path>>(target_dir: P, tool: ManagedTool, source_p
 
     // Skip if already exists
     if target_path.exists() {
-        return target_path;
+        return Ok(target_path);
     }
 
     // Create target directory
-    fs::create_dir_all(target_dir).expect("Failed to create target directory");
+    fs::create_dir_all(target_dir)?;
 
     // Try symlink first (Unix only)
     #[cfg(unix)]
     {
         if symlink_unix(source_path, &target_path).is_ok() {
-            return target_path;
+            return Ok(target_path);
         }
     }
 
     // Fallback to copy
     let _ = fs::remove_file(&target_path); // Remove if exists
-    fs::copy(source_path, &target_path).expect("Failed to copy tool");
+    fs::copy(source_path, &target_path)?;
 
     // Make executable on Unix
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&target_path)
-            .expect("Failed to get metadata")
-            .permissions();
+        let mut perms = fs::metadata(&target_path)?.permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(&target_path, perms).expect("Failed to set permissions");
+        fs::set_permissions(&target_path, perms)?;
     }
 
-    target_path
+    Ok(target_path)
 }
 
 /// Ensure all managed tools are provisioned to the target directory
@@ -306,8 +308,9 @@ pub fn ensure_managed_tools<P: AsRef<Path>>(
 
         // Try to find in PATH
         if let Some(source_path) = resolve_tool_from_path(*tool, path_value.clone()) {
-            let provisioned_path = provision_tool(target_dir, *tool, &source_path);
-            provisioned.push(provisioned_path);
+            if let Ok(provisioned_path) = provision_tool(target_dir, *tool, &source_path) {
+                provisioned.push(provisioned_path);
+            }
         }
     }
 
@@ -449,7 +452,8 @@ mod tests {
         let source_path = source_dir.join("rg");
         File::create(&source_path).expect("Failed to create source");
 
-        let target_path = provision_tool(&target_dir, ManagedTool::Rg, &source_path);
+        let target_path = provision_tool(&target_dir, ManagedTool::Rg, &source_path)
+            .expect("provision_tool should succeed");
 
         assert!(target_dir.exists());
         assert!(target_path.exists());
@@ -467,7 +471,8 @@ mod tests {
 
         // Call provision_tool - should skip
         let source_path = temp_dir.path().join("source");
-        let result = provision_tool(&target_dir, ManagedTool::Rg, &source_path);
+        let result = provision_tool(&target_dir, ManagedTool::Rg, &source_path)
+            .expect("provision_tool should succeed");
 
         assert_eq!(result, target_path);
     }

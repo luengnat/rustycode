@@ -522,7 +522,10 @@ impl BashSession {
             while stdout_rx.try_recv().is_ok() {}
 
             let _ = sender.send(StreamChunk::done());
-            return Ok((124, Some("command timed out - output may be incomplete".to_string())));
+            return Ok((
+                124,
+                Some("command timed out - output may be incomplete".to_string()),
+            ));
         }
 
         // Read accumulated stderr from the persistent drain thread
@@ -2108,8 +2111,16 @@ mod tests {
         // Shell boilerplate in stderr may trigger the error field; the key invariant
         // is that execute_stream succeeded and returned output (not a panic).
         let _ = error; // may be Some due to interactive shell stderr noise
-        let output: String = receiver.try_iter().filter(|c| !c.is_done && c.error.is_none()).map(|c| c.text.clone()).collect();
-        assert!(output.contains("hello_stream"), "expected 'hello_stream', got: {:?}", output);
+        let output: String = receiver
+            .try_iter()
+            .filter(|c| !c.is_done && c.error.is_none())
+            .map(|c| c.text.clone())
+            .collect();
+        assert!(
+            output.contains("hello_stream"),
+            "expected 'hello_stream', got: {:?}",
+            output
+        );
     }
 
     #[test]

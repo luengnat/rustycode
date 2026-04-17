@@ -14,6 +14,7 @@
 //! - insert: Insert text at specific line number
 //! - undo_edit: Revert last edit (Sonnet 3.7 only)
 
+use crate::file_formatter;
 use crate::security::{
     create_file_exclusive, create_file_symlink_safe, open_file_symlink_safe, validate_read_path,
     validate_write_path,
@@ -432,12 +433,18 @@ impl ClaudeTextEditor {
         out_file.write_all(new_content.as_bytes())?;
         out_file.sync_all()?;
 
+        let mut output = format!(
+            "Successfully replaced {} occurrence(s) in {}",
+            count,
+            path.display()
+        );
+
+        if let Some(formatter_diff) = file_formatter::format_file(&path, &ctx.cwd) {
+            output.push_str(&formatter_diff);
+        }
+
         Ok(ToolOutput::with_structured(
-            format!(
-                "Successfully replaced {} occurrence(s) in {}",
-                count,
-                path.display()
-            ),
+            output,
             serde_json::json!({
                 "path": path.display().to_string(),
                 "replacements": count,
@@ -472,13 +479,19 @@ impl ClaudeTextEditor {
 
         let line_count = content.lines().count();
 
+        let mut output = format!(
+            "Created {} ({} bytes, {} lines)",
+            path.display(),
+            content.len(),
+            line_count
+        );
+
+        if let Some(formatter_diff) = file_formatter::format_file(&path, &ctx.cwd) {
+            output.push_str(&formatter_diff);
+        }
+
         Ok(ToolOutput::with_structured(
-            format!(
-                "Created {} ({} bytes, {} lines)",
-                path.display(),
-                content.len(),
-                line_count
-            ),
+            output,
             serde_json::json!({
                 "path": path.display().to_string(),
                 "bytes": content.len(),
@@ -514,7 +527,11 @@ impl ClaudeTextEditor {
         file.read_to_string(&mut old_content)?;
 
         // Detect original line ending before splitting
-        let line_ending = if old_content.contains("\r\n") { "\r\n" } else { "\n" };
+        let line_ending = if old_content.contains("\r\n") {
+            "\r\n"
+        } else {
+            "\n"
+        };
 
         let mut lines: Vec<&str> = old_content.lines().collect();
         let total_lines = lines.len();
@@ -533,7 +550,9 @@ impl ClaudeTextEditor {
         let insert_idx = line_num.saturating_sub(1);
         let insert_lines: Vec<&str> = content.lines().collect();
         if insert_lines.is_empty() {
-            return Ok(ToolOutput::text("[Error] content cannot be empty for insert"));
+            return Ok(ToolOutput::text(
+                "[Error] content cannot be empty for insert",
+            ));
         }
         lines.splice(insert_idx..insert_idx, insert_lines.iter().copied());
 
@@ -548,13 +567,19 @@ impl ClaudeTextEditor {
         file.write_all(new_content.as_bytes())?;
         file.sync_all()?;
 
+        let mut output = format!(
+            "Inserted {} line(s) at line {} in {}",
+            insert_lines.len(),
+            line_num,
+            path.display()
+        );
+
+        if let Some(formatter_diff) = file_formatter::format_file(&path, &ctx.cwd) {
+            output.push_str(&formatter_diff);
+        }
+
         Ok(ToolOutput::with_structured(
-            format!(
-                "Inserted {} line(s) at line {} in {}",
-                insert_lines.len(),
-                line_num,
-                path.display()
-            ),
+            output,
             serde_json::json!({
                 "path": path.display().to_string(),
                 "insert_line": line_num,
@@ -1024,7 +1049,10 @@ mod tests {
 
         let content = fs::read_to_string(&test_file).unwrap();
         assert!(content.contains("line1\r\n"), "CRLF before insert");
-        assert!(content.contains("inserted\r\n"), "inserted line should have CRLF");
+        assert!(
+            content.contains("inserted\r\n"),
+            "inserted line should have CRLF"
+        );
         assert!(content.contains("line2\r\n"), "CRLF after insert");
         assert!(content.ends_with("\r\n"), "trailing CRLF preserved");
     }
@@ -1101,7 +1129,9 @@ mod tests {
             .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
             .collect();
-        assert!(names.iter().all(|n| n.starts_with("test.txt.") && !n.contains("bak")));
+        assert!(names
+            .iter()
+            .all(|n| n.starts_with("test.txt.") && !n.contains("bak")));
     }
 
     #[test]

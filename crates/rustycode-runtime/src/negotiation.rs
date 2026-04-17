@@ -423,7 +423,7 @@ impl AgentNegotiator {
                     agreed_agents: participants_clone,
                     disagreed_agents: Vec::new(),
                     confidence: 0.9,
-                    duration_ms: (Utc::now() - started_at).num_milliseconds() as u64,
+                    duration_ms: (Utc::now() - started_at).num_milliseconds().max(0) as u64,
                 });
             }
         }
@@ -666,7 +666,10 @@ impl AgentNegotiator {
         }
 
         // Check if all proposals are the same
-        let first_proposal = proposals.values().next().unwrap();
+        let first_proposal = match proposals.values().next() {
+            Some(p) => p,
+            None => return Ok(None),
+        };
         let all_same = proposals.values().all(|p| p == first_proposal);
 
         if all_same {

@@ -349,8 +349,7 @@ async fn test_lsp_vs_traditional_file_understanding() {
     };
 
     let base_url = env::var("ANTHROPIC_BASE_URL").ok();
-    let model =
-        env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+    let model = env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
 
     let provider = match AnthropicProvider::new_without_validation(
         ProviderConfig {
@@ -470,8 +469,7 @@ async fn test_lsp_vs_traditional_find_references() {
     };
 
     let base_url = env::var("ANTHROPIC_BASE_URL").ok();
-    let model =
-        env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+    let model = env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
 
     let provider = match AnthropicProvider::new_without_validation(
         ProviderConfig {
@@ -591,8 +589,7 @@ async fn test_lsp_vs_traditional_build_check() {
     };
 
     let base_url = env::var("ANTHROPIC_BASE_URL").ok();
-    let model =
-        env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+    let model = env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
 
     let provider = match AnthropicProvider::new_without_validation(
         ProviderConfig {
@@ -714,8 +711,7 @@ async fn test_lsp_comprehensive_workflow() {
     };
 
     let base_url = env::var("ANTHROPIC_BASE_URL").ok();
-    let model =
-        env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+    let model = env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
 
     let provider = match AnthropicProvider::new_without_validation(
         ProviderConfig {

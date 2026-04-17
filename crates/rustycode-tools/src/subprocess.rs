@@ -91,8 +91,13 @@ pub fn configure_subprocess_sync(command: &mut StdCommand) {
 /// between fork and prctl).
 #[cfg(target_os = "linux")]
 fn configure_parent_death_signal(command: &mut TokioCommand) {
+    // SAFETY: getpid() is always safe — it returns the caller's PID, cannot fail.
     let parent_pid = unsafe { libc::getpid() };
 
+    // SAFETY: pre_exec runs between fork and exec in the child process.
+    // PR_SET_PDEATHSIG is a standard Linux mechanism to orphan-proof child
+    // processes. The getppid() check closes the race window where the parent
+    // dies between fork and prctl.
     unsafe {
         command.pre_exec(move || {
             if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {

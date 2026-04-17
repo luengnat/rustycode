@@ -44,8 +44,8 @@ use crate::provider_v2::{
 };
 
 // Import macros exported at crate root
-use crate::{build_request, get_api_key, shared_client};
 use crate::retry::extract_retry_after_ms;
+use crate::{build_request, get_api_key, shared_client};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use secrecy::ExposeSecret;
@@ -415,6 +415,7 @@ impl LLMProvider for TogetherProvider {
             }),
             stop_reason: choice.finish_reason.clone(),
             citations: None,
+            thinking_blocks: None,
         })
     }
 

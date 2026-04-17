@@ -1,3 +1,4 @@
+use crate::file_formatter;
 use crate::security::{create_file_symlink_safe, open_file_symlink_safe, validate_write_path};
 use crate::{Checkpoint, Tool, ToolContext, ToolOutput, ToolPermission};
 use anyhow::{anyhow, Context, Result};
@@ -216,9 +217,9 @@ Summary of changes made to each file.
             ctx.checkpoint()?;
 
             let result = match &edit.operation {
-                EditOperation::Create => apply_create(edit, dry_run),
+                EditOperation::Create => apply_create(edit, dry_run, &ctx.cwd),
                 EditOperation::Edit { old_text, new_text } => {
-                    apply_edit(edit, old_text, new_text, dry_run)
+                    apply_edit(edit, old_text, new_text, dry_run, &ctx.cwd)
                 }
                 EditOperation::Delete => apply_delete(edit, dry_run),
             };
@@ -423,7 +424,11 @@ fn check_conflicts(edits: &[ValidatedEdit]) -> Result<()> {
 }
 
 /// Apply create operation
-fn apply_create(edit: &ValidatedEdit, dry_run: bool) -> Result<String> {
+fn apply_create(
+    edit: &ValidatedEdit,
+    dry_run: bool,
+    project_root: &std::path::Path,
+) -> Result<String> {
     if dry_run {
         return Ok(format!(
             "Would create: {} ({} bytes)",
@@ -451,11 +456,13 @@ fn apply_create(edit: &ValidatedEdit, dry_run: bool) -> Result<String> {
     file.sync_all()
         .with_context(|| format!("failed to sync file: {}", edit.path.display()))?;
 
-    Ok(format!(
-        "Created: {} ({} bytes)",
-        edit.path.display(),
-        content.len()
-    ))
+    let mut output = format!("Created: {} ({} bytes)", edit.path.display(), content.len());
+
+    if let Some(formatter_diff) = file_formatter::format_file(&edit.path, project_root) {
+        output.push_str(&formatter_diff);
+    }
+
+    Ok(output)
 }
 
 /// Apply edit operation
@@ -464,6 +471,7 @@ fn apply_edit(
     old_text: &str,
     new_text: &str,
     dry_run: bool,
+    project_root: &std::path::Path,
 ) -> Result<String> {
     if dry_run {
         return Ok(format!(
@@ -484,20 +492,33 @@ fn apply_edit(
     // Replace only the first occurrence — same behavior as edit_file
     let new_content = content.replacen(old_text, new_text, 1);
 
-    // Write using symlink-safe operation
-    let mut out_file = create_file_symlink_safe(&edit.path)
-        .with_context(|| format!("failed to create file: {}", edit.path.display()))?;
-    out_file
-        .write_all(new_content.as_bytes())
-        .with_context(|| format!("failed to write file: {}", edit.path.display()))?;
-    out_file
-        .sync_all()
-        .with_context(|| format!("failed to sync file: {}", edit.path.display()))?;
+    // Write atomically: write to a temp file, then rename over the target.
+    // This prevents file corruption if the process crashes mid-write.
+    let temp_path = edit.path.with_extension("tmp");
+    {
+        let mut out_file = create_file_symlink_safe(&temp_path)
+            .with_context(|| format!("failed to create temp file: {}", temp_path.display()))?;
+        out_file
+            .write_all(new_content.as_bytes())
+            .with_context(|| format!("failed to write temp file: {}", temp_path.display()))?;
+        out_file
+            .sync_all()
+            .with_context(|| format!("failed to sync temp file: {}", temp_path.display()))?;
+    }
+    fs::rename(&temp_path, &edit.path)
+        .with_context(|| format!(
+            "failed to rename temp file to {}: {}",
+            edit.path.display(),
+            temp_path.display()
+        ))?;
 
-    Ok(format!(
-        "Edited: {} (replaced 1 occurrence)",
-        edit.path.display(),
-    ))
+    let mut output = format!("Edited: {} (replaced 1 occurrence)", edit.path.display(),);
+
+    if let Some(formatter_diff) = file_formatter::format_file(&edit.path, project_root) {
+        output.push_str(&formatter_diff);
+    }
+
+    Ok(output)
 }
 
 /// Apply delete operation
@@ -694,8 +715,7 @@ mod tests {
         );
         assert!(result.is_ok());
 
-        let content =
-            std::fs::read_to_string(workspace.path().join("new_file.txt")).unwrap();
+        let content = std::fs::read_to_string(workspace.path().join("new_file.txt")).unwrap();
         assert_eq!(content, "hello world");
     }
 

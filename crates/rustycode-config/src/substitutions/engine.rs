@@ -183,8 +183,14 @@ impl SubstitutionEngine {
         let canonical_path = std::fs::canonicalize(&expanded)
             .map_err(|e| SubstitutionError::FileReadError(expanded.clone(), e.to_string()))?;
 
-        let canonical_allowed =
-            std::fs::canonicalize(&allowed_base).unwrap_or_else(|_| allowed_base.clone());
+        let canonical_allowed = std::fs::canonicalize(&allowed_base).map_err(|e| {
+            SubstitutionError::SecurityError(format!(
+                "Cannot canonicalize allowed base directory '{}': {}. \
+                 Refusing to proceed with non-canonical path to prevent symlink attacks.",
+                allowed_base.display(),
+                e
+            ))
+        })?;
 
         // Verify the file is within the allowed directory
         if !canonical_path.starts_with(&canonical_allowed) {
@@ -227,6 +233,45 @@ impl SubstitutionEngine {
         );
 
         Ok(trimmed)
+    }
+
+    /// Expand shell-style environment variable references: `${VAR}` and `${VAR:-default}`.
+    ///
+    /// This matches Claude Code's MCP config syntax where values like
+    /// `"Bearer ${API_KEY}"` or `"${DB_URL:-postgresql://localhost/mydb}"` are
+    /// resolved at config load time.
+    pub fn expand_env_vars(&self, input: &str) -> String {
+        let mut result = String::with_capacity(input.len());
+        let chars = input.as_bytes();
+        let len = chars.len();
+        let mut i = 0;
+
+        while i < len {
+            if i + 1 < len && chars[i] == b'$' && chars[i + 1] == b'{' {
+                let start = i + 2;
+                if let Some(end) = chars[start..].iter().position(|&c| c == b'}') {
+                    let var_part = &input[start..start + end];
+                    let (var_name, default) = if let Some(colon_pos) = var_part.find(":-") {
+                        (&var_part[..colon_pos], Some(&var_part[colon_pos + 2..]))
+                    } else {
+                        (var_part, None)
+                    };
+
+                    let value = std::env::var(var_name)
+                        .ok()
+                        .or_else(|| default.map(|d| d.to_string()))
+                        .unwrap_or_default();
+
+                    result.push_str(&value);
+                    i = start + end + 1;
+                    continue;
+                }
+            }
+            result.push(chars[i] as char);
+            i += 1;
+        }
+
+        result
     }
 
     fn expand_tilde(&self, path: &str) -> Result<PathBuf, SubstitutionError> {

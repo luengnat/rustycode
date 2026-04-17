@@ -7,6 +7,7 @@
 //! - Estimate costs for different model tiers
 
 use clap::Subcommand;
+use rustycode_litert::ensure_litert_lm_runtime;
 use rustycode_llm::{provider_helpers, ModelTier};
 
 #[derive(Debug, Subcommand)]
@@ -38,6 +39,12 @@ pub enum ProviderCommand {
     },
     /// Show the unified model catalog from rustycode-providers
     Catalog,
+    /// Install the LiteRT-LM runtime and default model
+    Install {
+        /// Provider to install
+        #[arg(value_name = "PROVIDER")]
+        provider: String,
+    },
 }
 
 pub async fn execute(command: ProviderCommand) -> anyhow::Result<()> {
@@ -51,6 +58,7 @@ pub async fn execute(command: ProviderCommand) -> anyhow::Result<()> {
             output_tokens,
         } => cmd_estimate_cost(input_tokens, output_tokens),
         ProviderCommand::Catalog => cmd_show_catalog().await,
+        ProviderCommand::Install { provider } => cmd_install_provider(&provider).await,
     }
 }
 
@@ -344,4 +352,25 @@ async fn cmd_show_catalog() -> anyhow::Result<()> {
     println!("   Use 'rustycode provider info <MODEL>' for more details.\n");
 
     Ok(())
+}
+
+async fn cmd_install_provider(provider: &str) -> anyhow::Result<()> {
+    match provider {
+        "litert-lm" | "litertlm" | "litert_lm" => {
+            let result = ensure_litert_lm_runtime(None).await?;
+            println!("\n📦 LiteRT-LM installed successfully:\n");
+            println!("Install dir: {}", result.install_dir.display());
+            println!("Binary:      {}", result.binary_path.display());
+            println!("Model:       {}", result.model_path.display());
+            println!();
+            Ok(())
+        }
+        other => {
+            eprintln!(
+                "Provider '{}' does not support automatic installation yet",
+                other
+            );
+            Ok(())
+        }
+    }
 }

@@ -310,4 +310,74 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("recursive"));
     }
+
+    #[test]
+    fn test_auto_tool_clear_history() {
+        let mut registry = ToolRegistry::new();
+        registry.register(MockTool);
+
+        let workspace = tempdir().expect("workspace tempdir");
+        let ctx = ToolContext::new(workspace.path());
+        let config = AutoToolConfig {
+            allow_recursive_calls: true,
+            ..Default::default()
+        };
+        let mut auto_ctx = AutoToolContext::with_config(Arc::new(registry), ctx, config);
+
+        let _ = auto_ctx.call_tool("mock", serde_json::json!({}));
+        assert_eq!(auto_ctx.call_history().len(), 1);
+
+        auto_ctx.clear_history();
+        assert!(auto_ctx.call_history().is_empty());
+    }
+
+    #[test]
+    fn test_auto_tool_execute_tool_call_unknown_tool() {
+        let registry = ToolRegistry::new();
+        let workspace = tempdir().expect("workspace tempdir");
+        let ctx = ToolContext::new(workspace.path());
+        let mut auto_ctx = AutoToolContext::new(Arc::new(registry), ctx);
+
+        let call = ToolCall {
+            call_id: "call_1".to_string(),
+            name: "nonexistent".to_string(),
+            arguments: serde_json::json!({}),
+        };
+        let result = auto_ctx.execute_tool_call(&call);
+        assert!(!result.success);
+        assert!(result.error.is_some());
+    }
+
+    #[test]
+    fn test_auto_tool_call_tool_not_found() {
+        let registry = ToolRegistry::new();
+        let workspace = tempdir().expect("workspace tempdir");
+        let ctx = ToolContext::new(workspace.path());
+        let mut auto_ctx = AutoToolContext::new(Arc::new(registry), ctx);
+
+        let result = auto_ctx.call_tool("nonexistent", serde_json::json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("tool not found"));
+    }
+
+    #[test]
+    fn test_auto_tool_allow_recursive_calls() {
+        let mut registry = ToolRegistry::new();
+        registry.register(MockTool);
+
+        let workspace = tempdir().expect("workspace tempdir");
+        let ctx = ToolContext::new(workspace.path());
+        let config = AutoToolConfig {
+            allow_recursive_calls: true,
+            ..Default::default()
+        };
+        let mut auto_ctx = AutoToolContext::with_config(Arc::new(registry), ctx, config);
+
+        // Both calls should succeed when recursive is allowed
+        let r1 = auto_ctx.call_tool("mock", serde_json::json!({}));
+        let r2 = auto_ctx.call_tool("mock", serde_json::json!({}));
+        assert!(r1.is_ok());
+        assert!(r2.is_ok());
+        assert_eq!(auto_ctx.call_history().len(), 2);
+    }
 }

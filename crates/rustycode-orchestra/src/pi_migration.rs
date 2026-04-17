@@ -429,7 +429,7 @@ mod tests {
         assert!(result.is_some());
         let (provider, model) = result.unwrap();
         assert_eq!(provider, "anthropic");
-        assert_eq!(model, "claude-sonnet-4-6");
+        assert_eq!(model, "claude-sonnet-4-20250514");
     }
 
     #[test]

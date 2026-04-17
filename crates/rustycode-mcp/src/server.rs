@@ -280,7 +280,10 @@ impl McpServer {
                     input_schema: info.parameters_schema.clone(),
                     category: None,
                 };
-                tools.push(serde_json::to_value(tool).unwrap());
+                tools.push(serde_json::to_value(&tool).unwrap_or_else(|e| {
+                    tracing::warn!("Failed to serialize tool {}: {}", tool.name, e);
+                    serde_json::json!({})
+                }));
             }
         }
 

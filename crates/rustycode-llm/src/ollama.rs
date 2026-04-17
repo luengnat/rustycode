@@ -421,6 +421,7 @@ impl LLMProvider for OllamaProvider {
                 None
             },
             citations: None,
+            thinking_blocks: None,
         })
     }
 

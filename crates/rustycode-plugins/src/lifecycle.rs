@@ -85,9 +85,30 @@ impl PluginLifecycleManager {
             )));
         }
 
+        // Reject excessively long names (filesystem / memory DoS)
+        if name.len() > 256 {
+            return Err(anyhow::anyhow!(PluginError::configuration_error(
+                "Plugin name exceeds 256 characters"
+            )));
+        }
+
+        // Reject names with null bytes or path separators
+        if name.contains('\0') || name.contains('/') || name.contains('\\') {
+            return Err(anyhow::anyhow!(PluginError::configuration_error(
+                "Plugin name contains invalid characters"
+            )));
+        }
+
         if version.is_empty() {
             return Err(anyhow::anyhow!(PluginError::configuration_error(format!(
                 "Plugin '{}' version cannot be empty",
+                name
+            ))));
+        }
+
+        if version.len() > 64 {
+            return Err(anyhow::anyhow!(PluginError::configuration_error(format!(
+                "Plugin '{}' version exceeds 64 characters",
                 name
             ))));
         }
@@ -305,6 +326,33 @@ mod tests {
         assert!(result.is_err());
 
         let result = PluginLifecycleManager::validate_plugin_metadata("test", "1.a.0");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_plugin_metadata_name_too_long() {
+        let long_name = "x".repeat(300);
+        let result =
+            PluginLifecycleManager::validate_plugin_metadata(&long_name, "1.0.0");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("256 characters"));
+    }
+
+    #[test]
+    fn test_validate_plugin_metadata_name_with_null_bytes() {
+        let result =
+            PluginLifecycleManager::validate_plugin_metadata("bad\0name", "1.0.0");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("invalid characters"));
+    }
+
+    #[test]
+    fn test_validate_plugin_metadata_name_with_path_separator() {
+        let result =
+            PluginLifecycleManager::validate_plugin_metadata("../evil", "1.0.0");
+        assert!(result.is_err());
+        let result =
+            PluginLifecycleManager::validate_plugin_metadata("evil\\plugin", "1.0.0");
         assert!(result.is_err());
     }
 

@@ -334,6 +334,7 @@ impl CohereProvider {
             usage: None, // Cohere doesn't return token usage in basic API
             stop_reason: cohere_response.finish_reason,
             citations: None,
+            thinking_blocks: None,
         })
     }
 }

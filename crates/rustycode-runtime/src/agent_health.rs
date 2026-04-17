@@ -518,8 +518,10 @@ impl AgentHealthMonitor {
                     if let Some(completed_at) = last_attempt.completed_at {
                         let cooldown = Duration::from_millis(config.recovery_cooldown_ms);
                         let time_since_completion = Utc::now() - completed_at;
-                        if time_since_completion < chrono::Duration::from_std(cooldown).unwrap() {
-                            return; // Still in cooldown
+                        if let Ok(chrono_cooldown) = chrono::Duration::from_std(cooldown) {
+                            if time_since_completion < chrono_cooldown {
+                                return; // Still in cooldown
+                            }
                         }
                     }
                 }

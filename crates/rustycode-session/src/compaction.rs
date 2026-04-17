@@ -28,7 +28,7 @@ pub struct CompactionSnapshot {
 }
 
 impl CompactionSnapshot {
-    /// Save snapshot to disk next to the session data
+    /// Save snapshot to disk next to the session data (atomic via temp file + rename)
     pub fn save_to_disk(&self, session_dir: &Path) -> Result<()> {
         std::fs::create_dir_all(session_dir).with_context(|| {
             format!(
@@ -37,10 +37,12 @@ impl CompactionSnapshot {
             )
         })?;
         let snapshot_path = session_dir.join("compaction-snapshot.json");
+        let tmp_path = session_dir.join("compaction-snapshot.json.tmp");
         let json = serde_json::to_string_pretty(self).context("serialize compaction snapshot")?;
-        std::fs::write(&snapshot_path, json).with_context(|| {
-            format!("Failed to write compaction snapshot to {:?}", snapshot_path)
-        })?;
+        std::fs::write(&tmp_path, &json)
+            .with_context(|| format!("Failed to write compaction snapshot to {:?}", tmp_path))?;
+        std::fs::rename(&tmp_path, &snapshot_path)
+            .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, snapshot_path))?;
         Ok(())
     }
 
@@ -301,13 +303,14 @@ impl CompactionEngine {
             .pre_compact()
             .map_err(|e| CompactionError::SummaryError(e.to_string()))?;
         let session_dir = std::path::PathBuf::from("./sessions").join(session.id.as_str());
-        if let Err(e) = snapshot.save_to_disk(&session_dir) {
-            tracing::warn!(
-                "Failed to save pre-compact snapshot for session {}: {}",
+        snapshot.save_to_disk(&session_dir).map_err(|e| {
+            CompactionError::SummaryError(format!(
+                "Failed to save pre-compact snapshot for session {}: {}. \
+                 Aborting compaction to prevent data loss.",
                 session.id.as_str(),
                 e
-            );
-        }
+            ))
+        })?;
 
         let original_count = session.messages.len();
         let original_tokens = estimate_tokens_parallel(&session.messages);

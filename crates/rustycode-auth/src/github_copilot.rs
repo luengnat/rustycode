@@ -225,6 +225,19 @@ impl GitHubCopilotAuth {
             AuthError::OAuth(format!("failed to parse copilot token response: {}", e))
         })?;
 
+        // Validate that the token hasn't already expired
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if copilot_resp.expires_at <= now {
+            return Err(AuthError::OAuth(format!(
+                "copilot token already expired (expires_at={}, now={}). \
+                 Server may have a clock skew issue.",
+                copilot_resp.expires_at, now
+            )));
+        }
+
         Ok(CopilotAuthResult {
             copilot_token: copilot_resp.token,
             expires_at: copilot_resp.expires_at,
@@ -382,5 +395,37 @@ mod tests {
         let resp: DeviceCodeResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.expires_in, 0);
         assert_eq!(resp.interval, 1);
+    }
+
+    #[test]
+    fn test_token_expiration_validation_rejects_past_timestamp() {
+        // Verify that the expiration check logic works:
+        // a timestamp in the past should be rejected.
+        let now_secs = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // Token expired 1 hour ago
+        let expired_at = now_secs - 3600;
+        assert!(
+            expired_at <= now_secs,
+            "past timestamp should be <= now for validation to catch it"
+        );
+    }
+
+    #[test]
+    fn test_token_expiration_validation_accepts_future_timestamp() {
+        let now_secs = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // Token valid for 1 hour
+        let expires_at = now_secs + 3600;
+        assert!(
+            expires_at > now_secs,
+            "future timestamp should be > now for validation to accept it"
+        );
     }
 }

@@ -475,9 +475,8 @@ async fn async_main() -> Result<()> {
                                 task_result.total_tool_calls >= min_tool_calls;
                             let has_made_writes = task_result.made_writes;
                             let has_fs_progress = snapshot.has_progress(&cwd);
-                            let has_real_progress = has_sufficient_work
-                                && has_made_writes
-                                && has_fs_progress;
+                            let has_real_progress =
+                                has_sufficient_work && has_made_writes && has_fs_progress;
 
                             // If agent made writes but never verified, don't declare success.
                             // This catches the pattern where the agent edits a file and stops

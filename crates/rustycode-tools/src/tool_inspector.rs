@@ -2052,10 +2052,9 @@ mod tests {
 
     #[test]
     fn test_parse_command_preserves_quoted_arguments() {
-        let (binary, args) = OsvInspector::parse_command(
-            r#"npm install eslint --prefix "/tmp/my project""#,
-        )
-        .expect("command should parse");
+        let (binary, args) =
+            OsvInspector::parse_command(r#"npm install eslint --prefix "/tmp/my project""#)
+                .expect("command should parse");
 
         assert_eq!(binary, "npm");
         assert_eq!(

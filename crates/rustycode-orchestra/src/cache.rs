@@ -530,6 +530,19 @@ mod tests {
 
     #[test]
     fn test_cache_clear_error_handling() {
+        // Clean up leftover caches from parallel test execution
+        for id in &[
+            "failing_cache",
+            "test_cache",
+            "single_test",
+            "cache1",
+            "cache2",
+        ] {
+            if is_cache_registered(id) {
+                unregister_cache(id);
+            }
+        }
+
         let cleared = Arc::new(Mutex::new(false));
         let cleared_clone = cleared.clone();
 

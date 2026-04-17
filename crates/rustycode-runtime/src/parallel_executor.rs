@@ -224,10 +224,20 @@ impl ParallelWorktreeExecutor {
             let prefix = self.config.worktree_prefix.clone();
 
             join_set.spawn(async move {
-                let _permit = permit
-                    .acquire()
-                    .await
-                    .expect("semaphore should not be closed");
+                let _permit = match permit.acquire().await {
+                    Ok(p) => p,
+                    Err(_) => {
+                        warn!("Semaphore closed, cancelling task {}", task.id);
+                        return TaskResult {
+                            task_id: task.id.clone(),
+                            worktree_path: PathBuf::new(),
+                            status: TaskExecutionStatus::Failed,
+                            commit_sha: None,
+                            files_changed: vec![],
+                            error: Some("semaphore closed".to_string()),
+                        };
+                    }
+                };
 
                 Self::run_task_in_worktree(&repo_path, &prefix, &task).await
             });
@@ -585,18 +595,50 @@ impl ParallelWorktreeExecutor {
                 }
             }
             MergeStrategy::Rebase => {
-                // Rebase the worktree branch onto the current HEAD, then
-                // fast-forward main to the rebased tip.
+                // Rebase the worktree branch onto the current branch, then
+                // fast-forward the original branch to the rebased tip.
+                //
+                // NOTE: We must capture the original branch name *before* the
+                // rebase because `git rebase <upstream> <branch>` switches HEAD
+                // to <branch>.  Without switching back, the subsequent
+                // `merge --ff-only` would be a no-op (merging a branch into itself).
+
+                // 1. Capture the current branch name before rebase moves HEAD
+                let current_branch_output = Command::new("git")
+                    .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                    .current_dir(&self.repo_path)
+                    .output()
+                    .map_err(|e| format!("git rev-parse failed: {}", e))?;
+                let current_branch =
+                    String::from_utf8_lossy(&current_branch_output.stdout).trim().to_string();
+
+                // 2. Rebase branch_name onto the current branch
                 let output = Command::new("git")
                     .arg("rebase")
-                    .arg("HEAD")
+                    .arg(&current_branch)
                     .arg(branch_name)
                     .current_dir(&self.repo_path)
                     .output()
                     .map_err(|e| format!("git rebase failed: {}", e))?;
 
                 if output.status.success() {
-                    // Fast-forward HEAD to the rebased branch
+                    // 3. Switch back to the original branch
+                    let checkout_output = Command::new("git")
+                        .arg("checkout")
+                        .arg(&current_branch)
+                        .current_dir(&self.repo_path)
+                        .output()
+                        .map_err(|e| format!("git checkout failed: {}", e))?;
+
+                    if !checkout_output.status.success() {
+                        return Err(format!(
+                            "checkout back to '{}' failed: {}",
+                            current_branch,
+                            String::from_utf8_lossy(&checkout_output.stderr)
+                        ));
+                    }
+
+                    // 4. Fast-forward the original branch to the rebased tip
                     let ff_output = Command::new("git")
                         .arg("merge")
                         .arg("--ff-only")
@@ -1053,6 +1095,71 @@ mod tests {
 
         let report = executor.merge_results(&results).await.unwrap();
         assert_eq!(report.successful, 1);
+    }
+
+    #[tokio::test]
+    async fn test_merge_with_rebase_strategy() {
+        let (_temp, repo) = create_test_repo();
+        let config = ParallelConfig {
+            merge_strategy: MergeStrategy::Rebase,
+            auto_cleanup: false,
+            ..test_config()
+        };
+        let executor = ParallelWorktreeExecutor::new(repo.clone(), config).unwrap();
+
+        let tasks = vec![make_task("rebase-1", &["src/z.rs"])];
+        let results = executor.execute_tasks(tasks).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, TaskExecutionStatus::Completed);
+
+        let report = executor.merge_results(&results).await.unwrap();
+        assert_eq!(report.successful, 1);
+        assert_eq!(report.conflicts, 0);
+        assert!(report.details[0].merged);
+
+        // Verify HEAD advanced (the rebase + ff should move main forward)
+        let head_after = executor.get_head_commit(&repo);
+        assert!(head_after.is_some());
+        // The worktree commit should be the new HEAD
+        assert_eq!(head_after.unwrap(), results[0].commit_sha.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_merge_with_rebase_strategy_preserves_branch() {
+        // Verify the rebase strategy returns to the original branch after merging
+        let (_temp, repo) = create_test_repo();
+        let config = ParallelConfig {
+            merge_strategy: MergeStrategy::Rebase,
+            auto_cleanup: false,
+            worktree_prefix: "rebase-test".to_string(),
+            ..test_config()
+        };
+        let executor = ParallelWorktreeExecutor::new(repo.clone(), config).unwrap();
+
+        // Get the current branch name before merging
+        let branch_before = std::process::Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        let branch_name = String::from_utf8_lossy(&branch_before.stdout).trim().to_string();
+
+        let tasks = vec![make_task("rb-branch-1", &["src/br.rs"])];
+        let results = executor.execute_tasks(tasks).await.unwrap();
+        let _ = executor.merge_results(&results).await.unwrap();
+
+        // Verify we're back on the original branch (not detached, not the worktree branch)
+        let branch_after = std::process::Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        let branch_after_str = String::from_utf8_lossy(&branch_after.stdout).trim().to_string();
+        assert_eq!(
+            branch_name, branch_after_str,
+            "Should be back on original branch after rebase merge, got '{}'",
+            branch_after_str
+        );
     }
 
     // -----------------------------------------------------------------------

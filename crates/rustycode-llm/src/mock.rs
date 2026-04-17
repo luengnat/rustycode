@@ -50,6 +50,7 @@ impl MockProvider {
             usage: None,
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
         Self::new(vec![Ok(resp)], Some(ProviderConfig::default()))
     }
@@ -105,6 +106,7 @@ impl MockProvider {
                 usage: None,
                 stop_reason: None,
                 citations: None,
+                thinking_blocks: None,
             })]
         };
 
@@ -153,6 +155,7 @@ impl LLMProvider for MockProvider {
                 usage: None,
                 stop_reason: None,
                 citations: None,
+                thinking_blocks: None,
             })
         } else if guard.len() == 1 {
             // Return the single response but keep it around for repeated calls
@@ -251,6 +254,7 @@ mod tests {
             usage: None,
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
         let r2 = CompletionResponse {
             content: "second".into(),
@@ -258,6 +262,7 @@ mod tests {
             usage: None,
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
 
         let provider = MockProvider::new(vec![Ok(r1.clone()), Ok(r2.clone())], None);
@@ -329,6 +334,7 @@ mod tests {
             usage: None,
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
         let provider = MockProvider::new(vec![Ok(r.clone())], None);
 
@@ -359,6 +365,7 @@ mod tests {
             usage: None,
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
         let r2 = CompletionResponse {
             content: "b".into(),
@@ -366,6 +373,7 @@ mod tests {
             usage: None,
             stop_reason: None,
             citations: None,
+            thinking_blocks: None,
         };
 
         let provider = MockProvider::new(vec![Ok(r1.clone()), Ok(r2.clone())], None);
@@ -387,6 +395,7 @@ mod tests {
                 usage: None,
                 stop_reason: None,
                 citations: None,
+                thinking_blocks: None,
             }));
         });
 

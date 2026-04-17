@@ -132,8 +132,18 @@ impl DiagnosticsCollector {
         // Collect log files
         let logs_dir = AppPaths::in_state_dir("logs");
         if logs_dir.exists() {
-            let mut log_entries: Vec<_> = fs::read_dir(&logs_dir)
-                .unwrap_or_else(|_| panic!("Failed to read logs dir"))
+            let dir_entries = match fs::read_dir(&logs_dir) {
+                Ok(entries) => entries,
+                Err(e) => {
+                    tracing::warn!("Failed to read logs dir: {}", e);
+                    return DiagnosticsSnapshot {
+                        system_info,
+                        files,
+                        total_size_bytes: total_size,
+                    };
+                }
+            };
+            let mut log_entries: Vec<_> = dir_entries
                 .filter_map(|e| e.ok())
                 .filter(|e| {
                     e.path()
@@ -146,7 +156,10 @@ impl DiagnosticsCollector {
 
             for entry in log_entries.iter().rev().take(MAX_LOG_FILES) {
                 let path = entry.path();
-                let name = path.file_name().unwrap().to_str().unwrap();
+                let name = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(n) => n,
+                    None => continue,
+                };
                 let file = collect_file(&format!("logs/{}", name), &path);
                 total_size += file.size_bytes;
                 files.push(file);
@@ -182,7 +195,10 @@ impl DiagnosticsCollector {
 
                 for entry in session_entries.iter().rev().take(3) {
                     let path = entry.path();
-                    let name = path.file_name().unwrap().to_str().unwrap();
+                    let name = match path.file_name().and_then(|n| n.to_str()) {
+                        Some(n) => n,
+                        None => continue,
+                    };
                     let file = collect_file(&format!("sessions/{}", name), &path);
                     total_size += file.size_bytes;
                     files.push(file);

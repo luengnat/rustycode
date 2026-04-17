@@ -281,6 +281,7 @@ impl OpenAiProvider {
             }),
             stop_reason: choice.finish_reason,
             citations: None,
+            thinking_blocks: None,
         })
     }
 
@@ -884,10 +885,12 @@ impl OpenAiProvider {
                                         input_tokens,
                                         output_tokens,
                                         total_tokens: input_tokens + output_tokens,
-                                        cache_read_input_tokens: u.get("prompt_tokens_details")
+                                        cache_read_input_tokens: u
+                                            .get("prompt_tokens_details")
                                             .and_then(|d| d.get("cached_tokens"))
                                             .and_then(|t| t.as_u64())
-                                            .unwrap_or(0) as u32,
+                                            .unwrap_or(0)
+                                            as u32,
                                         cache_creation_input_tokens: 0,
                                     })
                                 });

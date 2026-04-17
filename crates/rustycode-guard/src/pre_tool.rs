@@ -112,8 +112,9 @@ fn matches_rule(rule: &GuardRule, input: &HookInput) -> bool {
                 let s = ct.to_lowercase();
                 return s.contains("sk-")
                     || s.contains("ghp_")
-                    || s.contains("aki a")
-                    || s.contains("-----begin rsa private key-----");
+                    || s.contains("akia")
+                    || s.contains("-----begin rsa private key-----")
+                    || s.contains("-----begin private key-----");
             }
             false
         }
@@ -173,10 +174,10 @@ fn matches_rule(rule: &GuardRule, input: &HookInput) -> bool {
             }
             false
         }
-        // R14: symlink in path
+        // R14: symlink in path — check each component for being a symlink
         "R14" => {
             if let Some(p) = &path {
-                return p.contains("symlink");
+                return is_symlink_in_path(p);
             }
             false
         }
@@ -203,4 +204,26 @@ fn protected_path_contains(p: &str) -> bool {
         "/sys/",
     ];
     restricted.iter().any(|r| p.contains(r))
+}
+
+/// Check if any component in the path is a symlink.
+/// Walks from root toward the leaf, checking each ancestor.
+fn is_symlink_in_path(p: &str) -> bool {
+    let path = std::path::Path::new(p);
+    let mut current = std::path::PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    return true;
+                }
+            }
+            Err(_) => {
+                // Path doesn't exist yet — can't be a symlink
+                return false;
+            }
+        }
+    }
+    false
 }
