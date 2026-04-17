@@ -78,6 +78,24 @@ pub struct BashSession {
     stdout_rx: Arc<Mutex<std::sync::mpsc::Receiver<String>>>,
 }
 
+fn is_shell_boilerplate(trimmed: &str) -> bool {
+    trimmed.contains("$ timeout ")
+        || trimmed.contains("$ echo $?")
+        || trimmed.contains("$ echo '---END---'")
+        || trimmed.contains("$ echo $LASTEXITCODE")
+        || trimmed.starts_with("bash: no job control")
+        || trimmed.starts_with("The default interactive shell")
+        || trimmed.starts_with("To update your account")
+        || trimmed.starts_with("For more details, please visit")
+}
+
+fn filter_shell_boilerplate(text: &str) -> String {
+    text.lines()
+        .filter(|line| !is_shell_boilerplate(line.trim()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 impl BashSession {
     /// Create a new persistent bash session.
     ///
@@ -329,13 +347,14 @@ impl BashSession {
         // Read accumulated stderr from the persistent drain thread, then clear it
         // for the next command. Give the drain thread time to flush remaining data.
         thread::sleep(Duration::from_millis(200));
-        let stderr = if let Ok(mut buf) = self.stderr_buffer.lock() {
+        let raw_stderr = if let Ok(mut buf) = self.stderr_buffer.lock() {
             let s = buf.clone();
             buf.clear();
             s
         } else {
             String::new()
         };
+        let stderr = filter_shell_boilerplate(&raw_stderr);
 
         if read_timed_out {
             if let Ok(mut child_guard) = self.child.lock() {
@@ -362,19 +381,7 @@ impl BashSession {
             exit_code_line = output_lines.pop().unwrap_or_default();
         }
 
-        // Filter shell prompt echoes from interactive mode output.
-        // Interactive shells echo stdin commands to stdout, producing lines like:
-        //   "bash-3.2$ timeout 120 ls" or "zsh$ echo $?"
-        // These are wrapper artifacts, not actual command output.
-        output_lines.retain(|line| {
-            let trimmed = line.trim();
-            !trimmed.contains("$ timeout ")
-                && !trimmed.contains("$ echo $?")
-                && !trimmed.contains("$ echo '---END---'")
-                && !trimmed.contains("$ echo $LASTEXITCODE")
-                && !trimmed.starts_with("bash: no job control")
-                && !trimmed.starts_with("The default interactive shell")
-        });
+        output_lines.retain(|line| !is_shell_boilerplate(line.trim()));
 
         let stdout = output_lines.join("\n");
 
@@ -477,14 +484,7 @@ impl BashSession {
             }
 
             if !line.trim().is_empty() {
-                let trimmed = line.trim();
-                if trimmed.contains("$ timeout ")
-                    || trimmed.contains("$ echo $?")
-                    || trimmed.contains("$ echo '---END---'")
-                    || trimmed.contains("$ echo $LASTEXITCODE")
-                    || trimmed.starts_with("bash: no job control")
-                    || trimmed.starts_with("The default interactive shell")
-                {
+                if is_shell_boilerplate(line.trim()) {
                     continue;
                 }
                 let chunk = StreamChunk::new(format!("{}\n", line));
@@ -500,13 +500,14 @@ impl BashSession {
 
         // Read accumulated stderr from the persistent drain thread
         thread::sleep(Duration::from_millis(200));
-        let stderr = if let Ok(mut buf) = self.stderr_buffer.lock() {
+        let raw_stderr = if let Ok(mut buf) = self.stderr_buffer.lock() {
             let s = buf.clone();
             buf.clear();
             s
         } else {
             String::new()
         };
+        let stderr = filter_shell_boilerplate(&raw_stderr);
 
         // Stream stderr if present
         if !stderr.is_empty() {

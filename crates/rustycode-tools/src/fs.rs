@@ -5,6 +5,7 @@ use crate::security::{
 use crate::truncation::{truncate_items, truncate_lines, LIST_MAX_ITEMS, READ_MAX_LINES};
 use crate::{Tool, ToolContext, ToolOutput, ToolPermission};
 use anyhow::{anyhow, Result};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -166,7 +167,7 @@ impl Tool for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "Read the complete contents of a text file. Use this to view source code, configuration files, documentation, or any text-based file. Returns the full file content with optional line range support."
+        "Read the complete contents of a text file. CRLF line endings are normalized to LF for consistent processing. Supports optional line range (offset/limit). Returns file content with language detection."
     }
 
     fn permission(&self) -> ToolPermission {
@@ -219,6 +220,10 @@ impl Tool for ReadFileTool {
                 "stats": {
                     "type": "boolean",
                     "description": "Return file statistics instead of content"
+                },
+                "binary": {
+                    "type": "boolean",
+                    "description": "Read binary files as base64 instead of blocking them"
                 }
             }
         })
@@ -246,8 +251,13 @@ impl Tool for ReadFileTool {
             )));
         }
 
+        let allow_binary = params
+            .get("binary")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
         // Check for binary file before reading
-        if detect_binary(&path) {
+        if detect_binary(&path) && !allow_binary {
             let ext = path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -288,11 +298,33 @@ impl Tool for ReadFileTool {
             ));
         }
 
+        if allow_binary {
+            let bytes = fs::read(&path)?;
+            let total_bytes = bytes.len();
+            let preview = truncate_bytes_to_boundary(&bytes, WEB_FETCH_MAX_CHARS);
+            let encoded = STANDARD.encode(preview);
+
+            return Ok(ToolOutput::with_structured(
+                encoded,
+                json!({
+                    "path": path.display().to_string(),
+                    "binary": true,
+                    "encoding": "base64",
+                    "bytes": total_bytes,
+                    "shown_bytes": preview.len(),
+                    "content_truncated": preview.len() < total_bytes,
+                }),
+            ));
+        }
+
         // Use symlink-safe file open to prevent TOCTOU attacks
         let mut file = open_file_symlink_safe(&path)?;
         let mut content = String::new();
         use std::io::Read;
         file.read_to_string(&mut content)?;
+
+        // Normalize CRLF to LF for consistent processing and LLM context
+        let (content, _line_ending) = crate::line_endings::normalize_and_detect(&content);
 
         let total_lines = content.lines().count();
         let total_bytes = content.len();
@@ -481,6 +513,8 @@ impl Tool for ReadFileTool {
             let lines: Vec<&str> = content.lines().collect();
             let s = start.unwrap_or(1).saturating_sub(1);
             let e = end.unwrap_or(total_lines).min(total_lines);
+            let s = s.min(total_lines);
+            let e = e.max(s).min(total_lines);
             let text = lines[s..e].join("\n");
 
             return Ok(ToolOutput::with_structured(
@@ -531,7 +565,7 @@ impl Tool for WriteFileTool {
     }
 
     fn description(&self) -> &str {
-        "Write UTF-8 text to a file relative to current workspace."
+        "Write UTF-8 text to a file. Creates parent directories if needed. Returns a diff showing what changed vs the previous file content."
     }
 
     fn permission(&self) -> ToolPermission {
@@ -541,11 +575,25 @@ impl Tool for WriteFileTool {
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["path", "content"],
+            "required": ["path"],
             "properties": {
-                "path": { "type": "string" },
-                "content": { "type": "string" }
-            }
+                "path": {
+                    "type": "string",
+                    "description": "File path relative to workspace root. Parent directories are created automatically."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "UTF-8 text content to write. Completely replaces any existing file content."
+                },
+                "content_base64": {
+                    "type": "string",
+                    "description": "Base64-encoded binary content to write. Use this for binary files."
+                }
+            },
+            "oneOf": [
+                { "required": ["content"] },
+                { "required": ["content_base64"] }
+            ]
         })
     }
 
@@ -554,10 +602,25 @@ impl Tool for WriteFileTool {
         crate::check_permission(self.permission(), ctx)?;
 
         let path_str = required_string(&params, "path")?;
-        let content = required_string(&params, "content")?;
+        let text_content = optional_string(&params, "content");
+        let binary_content = optional_string(&params, "content_base64");
+        if text_content.is_some() && binary_content.is_some() {
+            return Err(anyhow!("use either `content` or `content_base64`, not both"));
+        }
+        let binary_bytes = if let Some(encoded) = binary_content {
+            Some(
+                STANDARD
+                    .decode(encoded)
+                    .map_err(|e| anyhow!("invalid base64 content: {}", e))?,
+            )
+        } else {
+            None
+        };
+        let content = text_content.unwrap_or("");
 
         // Validate path and content size using security module
-        let path = validate_write_path(path_str, &ctx.cwd, content.len())?;
+        let write_size = binary_bytes.as_ref().map(|b: &Vec<u8>| b.len()).unwrap_or(content.len());
+        let path = validate_write_path(path_str, &ctx.cwd, write_size)?;
 
         // Validate against sandbox rules
         crate::check_sandbox_path(&path, ctx)?;
@@ -570,6 +633,13 @@ impl Tool for WriteFileTool {
             ));
         }
 
+        // Read existing content for diff generation (if file exists)
+        let old_content = if binary_bytes.is_some() {
+            Vec::new()
+        } else {
+            fs::read_to_string(&path).unwrap_or_default().into_bytes()
+        };
+
         // Create parent directories if needed (atomic - no TOCTOU)
         // fs::create_dir_all is idempotent - handles AlreadyExists gracefully
         if let Some(parent) = path.parent() {
@@ -579,22 +649,35 @@ impl Tool for WriteFileTool {
         // Use symlink-safe file creation to prevent TOCTOU attacks
         let mut file = create_file_symlink_safe(&path)?;
         use std::io::Write;
-        file.write_all(content.as_bytes())?;
+        if let Some(bytes) = binary_bytes.as_ref() {
+            file.write_all(bytes)?;
+        } else {
+            file.write_all(content.as_bytes())?;
+        }
         file.sync_all()?;
 
         // Calculate size metrics
-        let bytes = content.len();
+        let bytes = write_size;
         let lines = content.lines().count();
+        let path_display = path.display().to_string();
+
+        // Generate diff output so the LLM can see what changed
+        let diff = if binary_bytes.is_some() {
+            format!("Wrote binary file ({} bytes)", bytes)
+        } else if old_content.is_empty() {
+            format!("Created new file ({} bytes, {} lines)", bytes, lines)
+        } else {
+            let old_text = String::from_utf8_lossy(&old_content);
+            crate::line_endings::generate_diff(&old_text, content, &path_display, 50)
+        };
 
         Ok(ToolOutput::with_structured(
             format!(
-                "wrote {} ({} bytes, {} lines)",
-                path.display(),
-                bytes,
-                lines
+                "wrote {} ({} bytes, {} lines)\n{}",
+                path_display, bytes, lines, diff
             ),
             json!({
-                "path": path.display().to_string(),
+                "path": path_display,
                 "bytes": bytes,
                 "lines": lines
             }),
@@ -773,6 +856,30 @@ fn html_to_simple_markdown(html: &str) -> String {
     markdown.trim().to_string()
 }
 
+fn truncate_to_char_boundary(content: &str, max_chars: usize) -> &str {
+    if content.len() <= max_chars {
+        return content;
+    }
+
+    let mut end = max_chars;
+    while end > 0 && !content.is_char_boundary(end) {
+        end -= 1;
+    }
+    &content[..end]
+}
+
+fn truncate_bytes_to_boundary(bytes: &[u8], max_bytes: usize) -> &[u8] {
+    if bytes.len() <= max_bytes {
+        return bytes;
+    }
+
+    let mut end = max_bytes;
+    while end > 0 && std::str::from_utf8(&bytes[..end]).is_err() {
+        end -= 1;
+    }
+    &bytes[..end]
+}
+
 pub struct WebFetchTool;
 
 impl Tool for WebFetchTool {
@@ -864,7 +971,7 @@ impl Tool for WebFetchTool {
 
         // Truncate content if too large (limit to ~50k chars to avoid overwhelming context)
         let (content, truncated) = if content.len() > WEB_FETCH_MAX_CHARS {
-            (&content[..WEB_FETCH_MAX_CHARS], true)
+            (truncate_to_char_boundary(&content, WEB_FETCH_MAX_CHARS), true)
         } else {
             (&content[..], false)
         };
@@ -1050,6 +1157,96 @@ mod tests {
             &ctx,
         );
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn read_file_safe_when_end_line_precedes_start_line() {
+        let workspace = tempdir().expect("workspace tempdir");
+        let test_file = workspace.path().join("test.txt");
+        fs::write(&test_file, "line1\nline2\nline3").expect("write test file");
+
+        let tool = ReadFileTool;
+        let ctx = ToolContext::new(workspace.path());
+        let res = tool.execute(
+            json!({
+                "path": "test.txt",
+                "start_line": 3,
+                "end_line": 1
+            }),
+            &ctx,
+        );
+
+        assert!(res.is_ok());
+        let output = res.unwrap();
+        assert!(output.text.is_empty() || output.text.contains("[Showing lines"));
+        assert!(!output.text.contains("line1"));
+        assert!(!output.text.contains("line2"));
+        assert!(!output.text.contains("line3"));
+    }
+
+    #[test]
+    fn read_file_binary_returns_base64_when_requested() {
+        let workspace = tempdir().expect("workspace tempdir");
+        let test_file = workspace.path().join("image.png");
+        fs::write(&test_file, [0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]).expect("write binary file");
+
+        let tool = ReadFileTool;
+        let ctx = ToolContext::new(workspace.path());
+        let res = tool.execute(json!({ "path": "image.png", "binary": true }), &ctx);
+        assert!(res.is_ok());
+        let output = res.unwrap();
+        assert!(!output.text.is_empty());
+        let structured = output.structured.expect("structured output");
+        assert!(structured["binary"].as_bool().unwrap_or(false));
+        assert_eq!(structured["encoding"], "base64");
+    }
+
+    #[test]
+    fn write_file_supports_base64_binary() {
+        let workspace = tempdir().expect("workspace tempdir");
+        let tool = WriteFileTool;
+        let ctx = ToolContext::new(workspace.path());
+
+        let bytes = [0x89, 0x50, 0x4e, 0x47, 0x00, 0x01];
+        let encoded = STANDARD.encode(bytes);
+        let res = tool.execute(
+            json!({
+                "path": "out.bin",
+                "content_base64": encoded
+            }),
+            &ctx,
+        );
+        assert!(res.is_ok());
+        let written = fs::read(workspace.path().join("out.bin")).expect("read written binary");
+        assert_eq!(written, bytes);
+    }
+
+    #[test]
+    fn truncate_to_char_boundary_keeps_utf8_valid() {
+        let content = "é".repeat(10) + "abc";
+        let truncated = truncate_to_char_boundary(&content, 3);
+        assert!(truncated.is_char_boundary(truncated.len()));
+        assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn read_file_safe_when_end_line_precedes_start_line() {
+        let workspace = tempdir().expect("workspace tempdir");
+        let test_file = workspace.path().join("test.txt");
+        fs::write(&test_file, "line1\nline2\nline3").expect("write test file");
+
+        let tool = ReadFileTool;
+        let ctx = ToolContext::new(workspace.path());
+        let res = tool.execute(
+            json!({ "path": "test.txt", "start_line": 3, "end_line": 1 }),
+            &ctx,
+        );
+        assert!(res.is_ok());
+        let output = res.unwrap();
+        assert!(output.text.is_empty() || output.text.contains("[Showing lines"));
+        assert!(!output.text.contains("line1"));
+        assert!(!output.text.contains("line2"));
+        assert!(!output.text.contains("line3"));
     }
 
     #[test]

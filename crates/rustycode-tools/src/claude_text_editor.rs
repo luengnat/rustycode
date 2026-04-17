@@ -310,7 +310,7 @@ impl ClaudeTextEditor {
         {
             let start = start_line.unwrap_or(1).saturating_sub(1);
             let end = end_line.unwrap_or(total_lines).min(total_lines);
-            (start, end)
+            (start.min(total_lines), end.max(start).min(total_lines))
         } else {
             // Apply truncation if no range specified
             let start = 0;
@@ -394,6 +394,13 @@ impl ClaudeTextEditor {
 
         // Perform replacement
         let new_content = content.replace(old_str, new_str);
+
+        if new_content.len() > MAX_FILE_SIZE {
+            return Ok(ToolOutput::text(format!(
+                "[Error] Replacement would exceed {} byte limit for text editor",
+                MAX_FILE_SIZE
+            )));
+        }
 
         // Write back using symlink-safe operation
         let mut out_file = create_file_symlink_safe(&path)?;
@@ -493,9 +500,15 @@ impl ClaudeTextEditor {
             )));
         }
 
-        // Insert content at specified line (convert to 0-indexed)
+        // Insert content at specified line (convert to 0-indexed).
+        // Multiline inserts must expand into multiple logical lines rather than
+        // being treated as a single line payload.
         let insert_idx = line_num.saturating_sub(1);
-        lines.insert(insert_idx, content);
+        let insert_lines: Vec<&str> = content.lines().collect();
+        if insert_lines.is_empty() {
+            return Ok(ToolOutput::text("[Error] content cannot be empty for insert"));
+        }
+        lines.splice(insert_idx..insert_idx, insert_lines.iter().copied());
 
         // Write back using symlink-safe operation
         let new_content = lines.join("\n");
@@ -507,15 +520,15 @@ impl ClaudeTextEditor {
         Ok(ToolOutput::with_structured(
             format!(
                 "Inserted {} line(s) at line {} in {}",
-                content.lines().count(),
+                insert_lines.len(),
                 line_num,
                 path.display()
             ),
             serde_json::json!({
                 "path": path.display().to_string(),
                 "insert_line": line_num,
-                "inserted_lines": content.lines().count(),
-                "total_lines": total_lines + content.lines().count(),
+                "inserted_lines": insert_lines.len(),
+                "total_lines": total_lines + insert_lines.len(),
             }),
         ))
     }
@@ -602,6 +615,31 @@ mod tests {
         assert!(output.text.contains("line4"));
         assert!(!output.text.contains("line1"));
         assert!(!output.text.contains("line5"));
+    }
+
+    #[test]
+    fn test_view_file_with_reverse_range_is_safe() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        fs::write(&test_file, "line1\nline2\nline3").unwrap();
+
+        let tool = ClaudeTextEditor;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "command": "view",
+            "path": "test.txt",
+            "start_line": 3,
+            "end_line": 1
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.text.is_empty() || output.text.contains("[Showing lines"));
+        assert!(!output.text.contains("line1"));
+        assert!(!output.text.contains("line2"));
+        assert!(!output.text.contains("line3"));
     }
 
     #[test]
@@ -692,6 +730,27 @@ mod tests {
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.text.contains("old_str not found"));
+    }
+
+    #[test]
+    fn test_str_replace_rejects_too_large_result() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        fs::write(&test_file, "a").unwrap();
+
+        let tool = ClaudeTextEditor;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "command": "str_replace",
+            "path": "test.txt",
+            "old_str": "a",
+            "new_str": "x".repeat(1_100_000)
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+        assert!(result.unwrap().text.contains("would exceed"));
     }
 
     #[test]
@@ -807,6 +866,50 @@ mod tests {
 
         let content = fs::read_to_string(&test_file).unwrap();
         assert_eq!(content, "line1\nline2\nlast line");
+    }
+
+    #[test]
+    fn test_insert_multiline_content() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        fs::write(&test_file, "line1\nline2\nline3").unwrap();
+
+        let tool = ClaudeTextEditor;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "command": "insert",
+            "path": "test.txt",
+            "line": 2,
+            "content": "inserted-a\ninserted-b"
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+
+        let content = fs::read_to_string(&test_file).unwrap();
+        assert_eq!(content, "line1\ninserted-a\ninserted-b\nline2\nline3");
+    }
+
+    #[test]
+    fn test_insert_empty_content_rejected() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        fs::write(&test_file, "line1").unwrap();
+
+        let tool = ClaudeTextEditor;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "command": "insert",
+            "path": "test.txt",
+            "line": 2,
+            "content": ""
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+        assert!(result.unwrap().text.contains("content cannot be empty"));
     }
 
     #[test]

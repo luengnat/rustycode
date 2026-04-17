@@ -5172,6 +5172,7 @@ version = "0.1.0"
 dependencies = [
  "ahash",
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "criterion 0.5.1",
  "dashmap 6.1.0",
@@ -5208,6 +5209,7 @@ dependencies = [
  "sha2",
  "shell-words",
  "shellexpand",
+ "similar",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

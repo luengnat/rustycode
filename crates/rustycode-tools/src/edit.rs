@@ -1,4 +1,10 @@
-//! Edit file tool - inline editing capabilities
+//! Edit file tool - inline editing capabilities with flexible matching.
+//!
+//! Supports multiple matching strategies (exact, line-ending-normalized, trimmed)
+//! to handle common LLM output issues like whitespace normalization.
+//! Preserves original line endings and shows diff output.
+
+use crate::line_endings::{detect_line_ending, generate_diff, normalize_to_lf};
 use crate::security::{create_file_symlink_safe, open_file_symlink_safe, validate_write_path};
 use crate::{Tool, ToolContext, ToolOutput, ToolPermission};
 use anyhow::Result;
@@ -8,11 +14,58 @@ use std::path::PathBuf;
 /// Maximum size for edit operations to prevent memory issues
 const MAX_EDIT_SIZE: usize = 1024 * 1024; // 1 MB
 
+/// Maximum lines to show in "not found" error context
+const CONTEXT_LINES_ON_FAILURE: usize = 10;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EditFileInput {
     pub path: PathBuf,
     pub old_text: String,
     pub new_text: String,
+}
+
+/// Try exact string match
+fn try_exact_match(content: &str, old_text: &str) -> Option<(usize, usize)> {
+    content.find(old_text).map(|start| (start, start + old_text.len()))
+}
+
+/// Try matching after normalizing line endings (CRLF → LF).
+/// Normalizes both content and old_text to LF, performs replacement, then
+/// restores original line endings.
+fn try_normalized_match(content: &str, old_text: &str, new_text: &str) -> Option<String> {
+    let norm_content = normalize_to_lf(content);
+    let norm_old = normalize_to_lf(old_text);
+    if norm_content.contains(&norm_old) {
+        let norm_new = normalize_to_lf(new_text);
+        let result = norm_content.replacen(&norm_old, &norm_new, 1);
+        // Restore original line ending style
+        let ending = detect_line_ending(content);
+        Some(crate::line_endings::apply_line_ending(&result, ending))
+    } else {
+        None
+    }
+}
+
+/// Try matching where each line is trimmed of whitespace
+fn try_trimmed_match(content: &str, old_text: &str, new_text: &str) -> Option<String> {
+    let content_lines: Vec<&str> = content.lines().collect();
+    let old_lines: Vec<&str> = old_text.lines().collect();
+    if old_lines.is_empty() || old_lines.len() > content_lines.len() {
+        return None;
+    }
+    for window in content_lines.windows(old_lines.len()) {
+        if window
+            .iter()
+            .zip(old_lines.iter())
+            .all(|(file_line, old_line)| file_line.trim() == old_line.trim())
+        {
+            // Found matching window — replace it using the caller's new_text
+            let line_ending = detect_line_ending(content);
+            let normalized = normalize_to_lf(new_text);
+            return Some(crate::line_endings::apply_line_ending(&normalized, line_ending));
+        }
+    }
+    None
 }
 
 pub struct EditFile;
@@ -23,7 +76,7 @@ impl Tool for EditFile {
     }
 
     fn description(&self) -> &str {
-        "Replace text in a file (inline editing)"
+        "Replace text in a file. Tries exact match first, then line-ending-normalized match (handles CRLF/LF differences), then trimmed-whitespace match. Preserves original line endings. Returns a diff of changes."
     }
 
     fn permission(&self) -> ToolPermission {
@@ -40,11 +93,11 @@ impl Tool for EditFile {
                 },
                 "old_text": {
                     "type": "string",
-                    "description": "Text to search for and replace"
+                    "description": "Text to find. Matching is flexible: tries exact, then line-ending-normalized (CRLF/LF), then trimmed-whitespace."
                 },
                 "new_text": {
                     "type": "string",
-                    "description": "Replacement text"
+                    "description": "Replacement text. Original file line endings (CRLF/LF) are preserved."
                 }
             },
             "required": ["path", "old_text", "new_text"]
@@ -70,7 +123,13 @@ impl Tool for EditFile {
         let mut content = String::new();
         use std::io::Read;
         file.read_to_string(&mut content)
-            .map_err(|e| anyhow::anyhow!("Failed to read file: {}", e))?;
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::InvalidData {
+                    anyhow::anyhow!("Binary or non-UTF-8 file detected; edit_file only supports text files")
+                } else {
+                    anyhow::anyhow!("Failed to read file: {}", e)
+                }
+            })?;
 
         // Check file size for edit operations
         if content.len() > MAX_EDIT_SIZE {
@@ -80,15 +139,45 @@ impl Tool for EditFile {
             )));
         }
 
-        // Check if old_text exists (after reading, so no TOCTOU)
-        if !content.contains(&input.old_text) {
-            return Ok(ToolOutput::text(
-                "Old text not found in file. No changes made.".to_string(),
-            ));
-        }
-
-        // Perform the replacement
-        let new_content = content.replace(&input.old_text, &input.new_text);
+        // Try matching strategies in order: exact → line-ending-normalized → trimmed
+        let new_content = if let Some((start, end)) = try_exact_match(&content, &input.old_text) {
+            // Strategy 1: Exact match
+            let mut result =
+                String::with_capacity(content.len() - (end - start) + input.new_text.len());
+            result.push_str(&content[..start]);
+            result.push_str(&input.new_text);
+            result.push_str(&content[end..]);
+            result
+        } else if let Some(replacement) =
+            try_normalized_match(&content, &input.old_text, &input.new_text)
+        {
+            // Strategy 2: Line-ending-normalized match
+            replacement
+        } else if let Some(replacement) = try_trimmed_match(&content, &input.old_text, &input.new_text) {
+            // Strategy 3: Trimmed match
+            replacement
+        } else {
+            // All strategies failed — provide helpful context
+            let file_preview: String = content
+                .lines()
+                .take(CONTEXT_LINES_ON_FAILURE)
+                .enumerate()
+                .map(|(i, l)| format!("{:4}: {}", i + 1, l))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let old_preview: String = input
+                .old_text
+                .lines()
+                .take(CONTEXT_LINES_ON_FAILURE)
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Ok(ToolOutput::text(format!(
+                "Old text not found in file. No changes made.\n\n\
+                 File content (first {} lines):\n{}\n\n\
+                 Searched for:\n{}",
+                CONTEXT_LINES_ON_FAILURE, file_preview, old_preview
+            )));
+        };
 
         // Verify replacement didn't dramatically increase file size
         if new_content.len() > MAX_EDIT_SIZE * 2 {
@@ -106,9 +195,13 @@ impl Tool for EditFile {
         file.sync_all()
             .map_err(|e| anyhow::anyhow!("Failed to sync file: {}", e))?;
 
+        // Generate diff output
+        let path_display = input.path.display().to_string();
+        let diff = generate_diff(&content, &new_content, &path_display, 30);
+
         Ok(ToolOutput::text(format!(
-            "Successfully replaced text in {}",
-            input.path.display()
+            "Edited {}:\n{}",
+            path_display, diff
         )))
     }
 }
@@ -136,7 +229,6 @@ mod tests {
         let result = tool.execute(params, &ctx);
         assert!(result.is_ok());
 
-        // Verify the file was modified
         let content = std::fs::read_to_string(&test_file).unwrap();
         assert_eq!(content, "hello rust");
     }
@@ -166,8 +258,7 @@ mod tests {
         let tool = EditFile;
         let ctx = ToolContext::new(workspace.path());
 
-        // Try to write content larger than limit
-        let huge_content = "x".repeat(20 * 1024 * 1024); // 20 MB
+        let huge_content = "x".repeat(20 * 1024 * 1024);
 
         let params = serde_json::json!({
             "path": "test.txt",
@@ -179,8 +270,6 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("limit"));
     }
-
-    // --- EditFile metadata ---
 
     #[test]
     fn edit_file_tool_name() {
@@ -201,8 +290,6 @@ mod tests {
         assert!(required.iter().any(|r| r == "new_text"));
     }
 
-    // --- EditFileInput serde ---
-
     #[test]
     fn edit_file_input_serde_roundtrip() {
         let input = EditFileInput {
@@ -215,8 +302,6 @@ mod tests {
         assert_eq!(decoded.path, PathBuf::from("src/main.rs"));
         assert_eq!(decoded.old_text, "fn main");
     }
-
-    // --- Edit edge cases ---
 
     #[test]
     fn edit_file_old_text_not_found() {
@@ -249,5 +334,135 @@ mod tests {
 
         let result = tool.execute(params, &ctx);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn edit_file_rejects_binary_content() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.bin");
+        std::fs::write(&test_file, [0xff, 0xfe, 0xfd]).unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.bin",
+            "old_text": "a",
+            "new_text": "b"
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("non-UTF-8 file"));
+    }
+
+    #[test]
+    fn edit_file_shows_diff_output() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "hello world\nfoo bar\n").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "world\nfoo",
+            "new_text": "rust\nbaz"
+        });
+
+        let result = tool.execute(params, &ctx).unwrap();
+        assert!(result.text.contains("Changes in test.txt"));
+        assert!(result.text.contains("+2 -2"));
+        assert!(result.text.contains("+hello rust"));
+        assert!(result.text.contains("-hello world"));
+    }
+
+    #[test]
+    fn edit_file_line_ending_normalized_match() {
+        // File has CRLF, search text has LF — should still match
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "hello\r\nworld\r\n").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "hello\nworld",
+            "new_text": "hello\nrust"
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn edit_file_trimmed_match_uses_new_text() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "fn main() {\n    println!(\"hi\");\n}\n").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "fn main() {\nprintln!(\"hi\");\n}",
+            "new_text": "fn main() {\nprintln!(\"bye\");\n}"
+        });
+
+        let result = tool.execute(params, &ctx).unwrap();
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert!(content.contains("bye"));
+        assert!(!content.contains("hi"));
+        assert!(result.text.contains("Edited test.txt"));
+    }
+
+    #[test]
+    fn edit_file_trimmed_match_preserves_replacement_indentation() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "if true {\n    old_call();\n}\n").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "if true {\nold_call();\n}",
+            "new_text": "if true {\n        new_call();\n    nested();\n}"
+        });
+
+        let result = tool.execute(params, &ctx).unwrap();
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert!(content.contains("        new_call();"));
+        assert!(content.contains("    nested();"));
+        assert!(result.text.contains("Edited test.txt"));
+    }
+
+    #[test]
+    fn edit_file_not_found_shows_context() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.txt");
+        std::fs::write(&test_file, "line one\nline two\nline three").unwrap();
+
+        let tool = EditFile;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.txt",
+            "old_text": "not here",
+            "new_text": "replacement"
+        });
+
+        let result = tool.execute(params, &ctx).unwrap();
+        assert!(result.text.contains("File content"));
+        assert!(result.text.contains("line one"));
+        assert!(result.text.contains("Searched for"));
     }
 }

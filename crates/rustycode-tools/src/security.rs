@@ -76,6 +76,61 @@ pub const BLOCKED_PATH_COMPONENTS: &[&str] = &[
 /// 3. Checks for symlinks
 /// 4. Ensures path is within workspace
 /// 5. Validates file extensions
+/// Normalize a file path for cross-platform compatibility.
+///
+/// Handles:
+/// - Backslashes → forward slashes (Windows → Unix)
+/// - `/C:/` prefix → `C:/` (Git Bash / MSYS2 paths)
+/// - `/mnt/c/` prefix → `C:/` (WSL paths)
+/// - `/cygdrive/c/` prefix → `C:/` (Cygwin paths)
+pub fn normalize_path(path: &str) -> String {
+    let mut p = path.replace('\\', "/");
+
+    // WSL: /mnt/c/... → C:/... (appears on Linux)
+    if cfg!(target_os = "linux") {
+        if let Some(rest) = p.strip_prefix("/mnt/") {
+            if let Some(drive) = rest.chars().next() {
+                if drive.is_ascii_alphabetic() {
+                    let after_drive = &rest[1..];
+                    if after_drive.starts_with('/') {
+                        p = format!("{}:{}", drive.to_ascii_uppercase(), after_drive);
+                    }
+                }
+            }
+        }
+    }
+
+    // Git Bash / MSYS2: /c/... → C:/... (appears on Windows)
+    if cfg!(windows) {
+        if let Some(rest) = p.strip_prefix('/') {
+            if let Some(drive) = rest.chars().next() {
+                if drive.is_ascii_alphabetic() {
+                    let after_drive = &rest[1..];
+                    if after_drive.starts_with('/') {
+                        p = format!("{}:{}", drive.to_ascii_uppercase(), after_drive);
+                    }
+                }
+            }
+        }
+    }
+
+    // Cygwin: /cygdrive/c/... → C:/... (appears on Windows)
+    if cfg!(windows) {
+        if let Some(rest) = p.strip_prefix("/cygdrive/") {
+            if let Some(drive) = rest.chars().next() {
+                if drive.is_ascii_alphabetic() {
+                    let after_drive = &rest[1..];
+                    if after_drive.starts_with('/') {
+                        p = format!("{}:{}", drive.to_ascii_uppercase(), after_drive);
+                    }
+                }
+            }
+        }
+    }
+
+    p
+}
+
 pub fn validate_path(
     path: &str,
     workspace: &Path,
@@ -90,8 +145,11 @@ pub fn validate_path(
         );
     }
 
+    // Normalize cross-platform path quirks (backslashes, WSL, Cygwin, Git Bash)
+    let normalized = normalize_path(path);
+
     // Check for absolute paths (block unless within workspace)
-    let candidate = Path::new(path);
+    let candidate = Path::new(&normalized);
 
     // Resolve the path
     let resolved = if candidate.is_absolute() {
@@ -1053,5 +1111,63 @@ mod tests {
         let result = sanitize_for_log(r#"{"token": "abc123"}"#);
         // "token" is found and redacted (keyword + value up to quote delimiter)
         assert!(result.contains("[REDACTED]"));
+    }
+
+    // --- Cross-platform path normalization tests ---
+
+    #[test]
+    fn test_normalize_backslashes() {
+        assert_eq!(normalize_path("src\\main.rs"), "src/main.rs");
+        assert_eq!(
+            normalize_path("crates\\rustycode-tools\\src\\lib.rs"),
+            "crates/rustycode-tools/src/lib.rs"
+        );
+    }
+
+    #[test]
+    fn test_normalize_wsl_path() {
+        if cfg!(windows) {
+            assert_eq!(normalize_path("/mnt/c/Users/test/file.txt"), "C:/Users/test/file.txt");
+            assert_eq!(normalize_path("/mnt/d/projects/app/src/main.rs"), "D:/projects/app/src/main.rs");
+        } else {
+            assert_eq!(normalize_path("/mnt/c/Users/test/file.txt"), "/mnt/c/Users/test/file.txt");
+            assert_eq!(normalize_path("/mnt/d/projects/app/src/main.rs"), "/mnt/d/projects/app/src/main.rs");
+        }
+    }
+
+    #[test]
+    fn test_normalize_cygwin_path() {
+        if cfg!(windows) {
+            assert_eq!(normalize_path("/cygdrive/c/Users/test/file.txt"), "C:/Users/test/file.txt");
+        } else {
+            assert_eq!(normalize_path("/cygdrive/c/Users/test/file.txt"), "/cygdrive/c/Users/test/file.txt");
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_normalize_git_bash_path() {
+        assert_eq!(normalize_path("/c/Users/test/file.txt"), "C:/Users/test/file.txt");
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_normalize_unix_single_letter_unchanged() {
+        // On Unix, /c/... should NOT be converted to C:/... (it's a valid Unix path)
+        assert_eq!(normalize_path("/c/Users/test/file.txt"), "/c/Users/test/file.txt");
+    }
+
+    #[test]
+    fn test_normalize_already_unix() {
+        // Regular Unix paths should be unchanged
+        assert_eq!(normalize_path("src/main.rs"), "src/main.rs");
+        assert_eq!(normalize_path("/usr/local/bin"), "/usr/local/bin");
+        assert_eq!(normalize_path("README.md"), "README.md");
+    }
+
+    #[test]
+    fn test_normalize_preserves_relative() {
+        assert_eq!(normalize_path("./src/lib.rs"), "./src/lib.rs");
+        assert_eq!(normalize_path("../sibling/file.txt"), "../sibling/file.txt");
     }
 }

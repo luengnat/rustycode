@@ -84,7 +84,15 @@ impl Tool for SearchReplace {
         let mut content = String::new();
         use std::io::Read;
         file.read_to_string(&mut content)
-            .map_err(|e| anyhow::anyhow!("Failed to read file: {}", e))?;
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::InvalidData {
+                    anyhow::anyhow!(
+                        "Binary or non-UTF-8 file detected; search_replace only supports text files"
+                    )
+                } else {
+                    anyhow::anyhow!("Failed to read file: {}", e)
+                }
+            })?;
 
         // Perform replacement
         let (new_content, replacements_made) = if use_regex {
@@ -254,5 +262,29 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("exceeding maximum"));
+    }
+
+    #[test]
+    fn test_search_replace_rejects_binary_content() {
+        let workspace = tempdir().unwrap();
+        let test_file = workspace.path().join("test.bin");
+        std::fs::write(&test_file, [0xff, 0xfe, 0xfd]).unwrap();
+
+        let tool = SearchReplace;
+        let ctx = ToolContext::new(workspace.path());
+
+        let params = serde_json::json!({
+            "path": "test.bin",
+            "pattern": "a",
+            "replacement": "b",
+            "regex": false
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("non-UTF-8 file"));
     }
 }

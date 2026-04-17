@@ -49,6 +49,7 @@ mod git;
 pub mod large_response;
 pub mod lazy_tool_loader;
 mod lsp;
+pub mod line_endings;
 pub mod plugin;
 pub mod plugin_manager;
 mod question;

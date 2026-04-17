@@ -606,8 +606,12 @@ fn truncate_text(text: &str, max_len: usize) -> String {
         return text.to_string();
     }
 
-    // Truncate at word boundary if possible
-    let truncated = &text[..max_len];
+    // Truncate at a valid UTF-8 boundary first, then prefer a word boundary.
+    let mut end = max_len;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let truncated = &text[..end];
     if let Some(last_space) = truncated.rfind(' ') {
         format!("{}...", &truncated[..last_space])
     } else {
@@ -665,6 +669,14 @@ mod tests {
         let long_text = "This is a very long text that should be truncated at some point";
         let truncated = truncate_text(long_text, 30);
         assert!(truncated.len() <= 33); // 30 + "..."
+        assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn test_truncate_text_handles_multibyte_boundary() {
+        let text = "é".repeat(20);
+        let truncated = truncate_text(&text, 7);
+        assert!(truncated.is_char_boundary(truncated.len()));
         assert!(truncated.ends_with("..."));
     }
 }
