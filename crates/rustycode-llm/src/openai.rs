@@ -875,9 +875,26 @@ impl OpenAiProvider {
                                         crate::provider_v2::SSEEvent::ContentBlockStop { index: 0 },
                                     ));
                                 }
+
+                                let usage = data.get("usage").and_then(|u| {
+                                    let input_tokens = u.get("prompt_tokens")?.as_u64()? as u32;
+                                    let output_tokens =
+                                        u.get("completion_tokens")?.as_u64()? as u32;
+                                    Some(Usage {
+                                        input_tokens,
+                                        output_tokens,
+                                        total_tokens: input_tokens + output_tokens,
+                                        cache_read_input_tokens: u.get("prompt_tokens_details")
+                                            .and_then(|d| d.get("cached_tokens"))
+                                            .and_then(|t| t.as_u64())
+                                            .unwrap_or(0) as u32,
+                                        cache_creation_input_tokens: 0,
+                                    })
+                                });
+
                                 events.push(Ok(crate::provider_v2::SSEEvent::MessageDelta {
                                     stop_reason: Some(finish_reason.to_string()),
-                                    usage: None,
+                                    usage,
                                 }));
                             }
                         }

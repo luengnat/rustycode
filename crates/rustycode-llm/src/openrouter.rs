@@ -560,14 +560,20 @@ impl LLMProvider for OpenRouterProvider {
             });
         }
 
-        // Convert bytes stream to SSE stream
         let bytes_stream = response.bytes_stream();
+        let done_sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        // Parse SSE events from byte stream
-        let sse_stream = bytes_stream.map(|chunk_result| -> StreamChunk {
-            let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+        let sse_stream = bytes_stream.flat_map(move |chunk_result| {
+            let done_sent = done_sent.clone();
+
+            let chunk = match chunk_result {
+                Ok(c) => c,
+                Err(e) => {
+                    return futures::stream::iter(vec![Err(ProviderError::Network(e.to_string()))]);
+                }
+            };
             let text = String::from_utf8_lossy(&chunk);
-            let mut chunks = Vec::new();
+            let mut events = Vec::new();
 
             for line in text.lines() {
                 if line.is_empty() {
@@ -575,8 +581,10 @@ impl LLMProvider for OpenRouterProvider {
                 }
                 if line.starts_with("data: ") {
                     let json_str = line.trim_start_matches("data: ").trim();
-                    // OpenRouter sends "data: [DONE]" when complete
                     if json_str == "[DONE]" {
+                        if !done_sent.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                            events.push(Ok(crate::provider_v2::SSEEvent::MessageStop));
+                        }
                         continue;
                     }
                     if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
@@ -585,8 +593,41 @@ impl LLMProvider for OpenRouterProvider {
                                 if let Some(delta) = choice.get("delta") {
                                     if let Some(content) = delta.get("content") {
                                         if let Some(content_str) = content.as_str() {
-                                            chunks.push(content_str.to_string());
+                                            if !content_str.is_empty() {
+                                                events.push(Ok(crate::provider_v2::SSEEvent::Text {
+                                                    text: content_str.to_string(),
+                                                }));
+                                            }
                                         }
+                                    }
+                                }
+
+                                if let Some(finish_reason) =
+                                    choice.get("finish_reason").and_then(|f| f.as_str())
+                                {
+                                    let usage = data.get("usage").and_then(|u| {
+                                        let input_tokens = u.get("prompt_tokens")?.as_u64()? as u32;
+                                        let output_tokens =
+                                            u.get("completion_tokens")?.as_u64()? as u32;
+                                        Some(Usage {
+                                            input_tokens,
+                                            output_tokens,
+                                            total_tokens: input_tokens + output_tokens,
+                                            cache_read_input_tokens: u.get("prompt_tokens_details")
+                                                .and_then(|d| d.get("cached_tokens"))
+                                                .and_then(|t| t.as_u64())
+                                                .unwrap_or(0) as u32,
+                                            cache_creation_input_tokens: 0,
+                                        })
+                                    });
+
+                                    events.push(Ok(crate::provider_v2::SSEEvent::MessageDelta {
+                                        stop_reason: Some(finish_reason.to_string()),
+                                        usage,
+                                    }));
+
+                                    if !done_sent.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                                        events.push(Ok(crate::provider_v2::SSEEvent::MessageStop));
                                     }
                                 }
                             }
@@ -595,9 +636,7 @@ impl LLMProvider for OpenRouterProvider {
                 }
             }
 
-            Ok(crate::provider_v2::SSEEvent::Text {
-                text: chunks.join(""),
-            })
+            futures::stream::iter(events)
         });
 
         Ok(Box::pin(sse_stream))
