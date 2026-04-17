@@ -18,6 +18,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::borrow::Cow;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthStr;
@@ -1242,10 +1243,9 @@ impl<'a> BrutalistRenderer<'a> {
             ]));
         }
 
-        // Working directory (Goose pattern: show cwd on welcome)
-        // Use services.cwd() (respects path argument) not env::current_dir()
+        // Working directory
         {
-            let cwd = self.services.cwd();
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             let cwd_str = cwd.display().to_string();
             // Replace home dir with ~ for brevity
             let display = if let Ok(home) = std::env::var("HOME") {
