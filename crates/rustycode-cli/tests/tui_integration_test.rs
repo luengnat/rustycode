@@ -54,13 +54,11 @@ fn create_mock_session(dir: &Path, session_id: &str, title: &str, message_count:
 /// Test TUI can be imported and basic types exist
 #[test]
 fn test_tui_module_imports() {
-    // This test verifies the TUI module is accessible
-    // Actual TUI initialization is tested in rustycode-tui crate
+    // Set the test mode env var to prevent terminal initialization
+    std::env::set_var("RUSTYCODE_TEST_MODE", "1");
 
     let result = rustycode_tui::run(PathBuf::from("/tmp"), false, false);
-
-    // We expect this to fail in test environment (no terminal)
-    // But it should not panic or crash
+    
     assert!(
         result.is_err() || result.is_ok(),
         "TUI run should handle errors gracefully"

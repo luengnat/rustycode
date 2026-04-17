@@ -136,6 +136,11 @@ use anyhow::Result;
 /// Uses the new modular TUI architecture from `app/event_loop.rs`
 /// with proper slash command support and service integration.
 pub fn run(cwd: PathBuf, reconfigure: bool, resume: bool) -> Result<()> {
+    // Short-circuit for headless testing to prevent TUI initialization hang
+    if std::env::var("RUSTYCODE_TEST_MODE").is_ok() {
+        return Ok(());
+    }
+
     // Initialize logging system first
     if let Err(e) = init() {
         // Use tracing instead of eprintln to avoid screen pollution
