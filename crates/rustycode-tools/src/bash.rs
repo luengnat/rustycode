@@ -33,7 +33,7 @@ fn detect_shell() -> (&'static str, Option<&'static str>, bool) {
 
     #[cfg(not(windows))]
     {
-        for (shell, flag) in [("bash", Some("-i")), ("zsh", Some("-i")), ("sh", None)] {
+        for (shell, flag) in [("bash", None), ("zsh", None), ("sh", None)] {
             if which_sh(shell) {
                 return (shell, flag, false);
             }
