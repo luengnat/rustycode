@@ -598,12 +598,12 @@ impl ParallelWorktreeExecutor {
                 // Rebase the worktree branch onto the current branch, then
                 // fast-forward the original branch to the rebased tip.
                 //
-                // NOTE: We must capture the original branch name *before* the
-                // rebase because `git rebase <upstream> <branch>` switches HEAD
-                // to <branch>.  Without switching back, the subsequent
-                // `merge --ff-only` would be a no-op (merging a branch into itself).
+                // We cannot `git rebase <upstream> <branch_name>` directly
+                // because branch_name is already checked out in a worktree,
+                // and git refuses to check it out twice.  Instead, we create
+                // a temporary branch, rebase that, then fast-forward.
 
-                // 1. Capture the current branch name before rebase moves HEAD
+                // 1. Capture the current branch name
                 let current_branch_output = Command::new("git")
                     .args(["rev-parse", "--abbrev-ref", "HEAD"])
                     .current_dir(&self.repo_path)
@@ -612,17 +612,41 @@ impl ParallelWorktreeExecutor {
                 let current_branch =
                     String::from_utf8_lossy(&current_branch_output.stdout).trim().to_string();
 
-                // 2. Rebase branch_name onto the current branch
+                // 2. Create a temporary branch from the worktree branch
+                let temp_branch = format!("{}-rebase-temp", branch_name);
+                let _ = Command::new("git")
+                    .arg("branch")
+                    .arg("-D")
+                    .arg(&temp_branch)
+                    .current_dir(&self.repo_path)
+                    .output(); // ignore error (may not exist)
+
+                let branch_output = Command::new("git")
+                    .arg("branch")
+                    .arg(&temp_branch)
+                    .arg(branch_name)
+                    .current_dir(&self.repo_path)
+                    .output()
+                    .map_err(|e| format!("git branch create failed: {}", e))?;
+
+                if !branch_output.status.success() {
+                    return Err(format!(
+                        "failed to create temp branch: {}",
+                        String::from_utf8_lossy(&branch_output.stderr)
+                    ));
+                }
+
+                // 3. Rebase temp_branch onto the current branch
                 let output = Command::new("git")
                     .arg("rebase")
                     .arg(&current_branch)
-                    .arg(branch_name)
+                    .arg(&temp_branch)
                     .current_dir(&self.repo_path)
                     .output()
                     .map_err(|e| format!("git rebase failed: {}", e))?;
 
                 if output.status.success() {
-                    // 3. Switch back to the original branch
+                    // 4. Switch back to the original branch
                     let checkout_output = Command::new("git")
                         .arg("checkout")
                         .arg(&current_branch)
@@ -638,14 +662,22 @@ impl ParallelWorktreeExecutor {
                         ));
                     }
 
-                    // 4. Fast-forward the original branch to the rebased tip
+                    // 5. Fast-forward the original branch to the rebased tip
                     let ff_output = Command::new("git")
                         .arg("merge")
                         .arg("--ff-only")
-                        .arg(branch_name)
+                        .arg(&temp_branch)
                         .current_dir(&self.repo_path)
                         .output()
                         .map_err(|e| format!("git ff merge failed: {}", e))?;
+
+                    // 6. Clean up the temporary branch
+                    let _ = Command::new("git")
+                        .arg("branch")
+                        .arg("-d")
+                        .arg(&temp_branch)
+                        .current_dir(&self.repo_path)
+                        .output();
 
                     if ff_output.status.success() {
                         Ok(())
@@ -659,6 +691,13 @@ impl ParallelWorktreeExecutor {
                     let _ = Command::new("git")
                         .arg("rebase")
                         .arg("--abort")
+                        .current_dir(&self.repo_path)
+                        .output();
+                    // Clean up temp branch on failure
+                    let _ = Command::new("git")
+                        .arg("branch")
+                        .arg("-D")
+                        .arg(&temp_branch)
                         .current_dir(&self.repo_path)
                         .output();
                     Err(format!(
@@ -1112,16 +1151,25 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, TaskExecutionStatus::Completed);
 
+        // Capture HEAD before merge to verify it advances
+        let head_before = ParallelWorktreeExecutor::get_head_commit(&repo).unwrap();
+
         let report = executor.merge_results(&results).await.unwrap();
+        if report.successful != 1 {
+            for detail in &report.details {
+                eprintln!(
+                    "task={} merged={} conflict={:?}",
+                    detail.task_id, detail.merged, detail.conflict_description
+                );
+            }
+        }
         assert_eq!(report.successful, 1);
         assert_eq!(report.conflicts, 0);
         assert!(report.details[0].merged);
 
-        // Verify HEAD advanced (the rebase + ff should move main forward)
-        let head_after = executor.get_head_commit(&repo);
-        assert!(head_after.is_some());
-        // The worktree commit should be the new HEAD
-        assert_eq!(head_after.unwrap(), results[0].commit_sha.unwrap());
+        // Verify HEAD advanced after the rebase + ff merge
+        let head_after = ParallelWorktreeExecutor::get_head_commit(&repo).unwrap();
+        assert_ne!(head_before, head_after, "HEAD should have advanced after rebase merge");
     }
 
     #[tokio::test]

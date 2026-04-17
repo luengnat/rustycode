@@ -271,6 +271,43 @@ fn test_r15_allows_normal_sized_content() {
     assert_ne!(res.permission_decision.as_deref(), Some("deny"));
 }
 
+// ── R04: Outside workspace ─────────────────────────────────────────
+
+#[test]
+fn test_r04_blocks_outside_workspace() {
+    let input = make_input(
+        "Write",
+        json!({"path": "/etc/passwd", "content": "hacked"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+#[test]
+fn test_r04_allows_inside_workspace() {
+    let input = make_input(
+        "Write",
+        json!({"path": "/workspace/project/src/lib.rs", "content": "pub fn hi() {}"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_ne!(res.permission_decision.as_deref(), Some("deny"));
+}
+
+// ── R06: Force push variants ────────────────────────────────────────
+
+#[test]
+fn test_r06_blocks_force_push_shorthand() {
+    let input = make_input(
+        "Bash",
+        json!({"command": "git push -f origin feature"}),
+        Some("/workspace/project"),
+    );
+    let res = pre_tool::evaluate(&input);
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+}
+
 // ── Post-tool ──────────────────────────────────────────────────────
 
 #[test]

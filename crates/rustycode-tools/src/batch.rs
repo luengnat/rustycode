@@ -262,7 +262,6 @@ impl Tool for BatchTool {
             "failure_count": failure_count,
             "execution_time_ms": execution_time.as_millis(),
             "continue_on_error": continue_on_error,
-            "speedup_estimate": format!("{}x", num_calls as f64 / 2.0) // Rough estimate
         });
 
         Ok(ToolOutput::with_structured(output, metadata))
@@ -427,5 +426,101 @@ mod tests {
         assert!(output.text.contains("Batch Execution"));
         assert!(output.text.contains("calls completed"));
         assert!(output.text.contains("Summary:"));
+    }
+
+    #[test]
+    fn test_batch_mixed_success_and_failure() {
+        let tool = create_batch_tool();
+        let ctx = ToolContext::new("/tmp");
+
+        let result = tool.execute(
+            json!({
+                "calls": [
+                    {"tool": "nonexistent_tool_xyz", "parameters": {}},
+                    {"tool": "glob", "parameters": {"pattern": "*.toml"}}
+                ]
+            }),
+            &ctx,
+        );
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        // One call should fail (unknown tool), one may succeed
+        assert!(output.text.contains("FAILED") || output.text.contains("SUCCESS"));
+    }
+
+    #[test]
+    fn test_batch_results_order_preserved() {
+        let tool = create_batch_tool();
+        let ctx = ToolContext::new("/tmp");
+
+        let result = tool.execute(
+            json!({
+                "calls": [
+                    {"tool": "glob", "parameters": {"pattern": "a*.rs"}},
+                    {"tool": "glob", "parameters": {"pattern": "b*.rs"}},
+                    {"tool": "glob", "parameters": {"pattern": "c*.rs"}}
+                ]
+            }),
+            &ctx,
+        );
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        // Results should be numbered 1, 2, 3 in order
+        let pos1 = output.text.find("### 1.").expect("should have result 1");
+        let pos2 = output.text.find("### 2.").expect("should have result 2");
+        let pos3 = output.text.find("### 3.").expect("should have result 3");
+        assert!(pos1 < pos2 && pos2 < pos3, "results should be in order");
+    }
+
+    #[test]
+    fn test_batch_exactly_2_calls_accepted() {
+        let tool = create_batch_tool();
+        let ctx = ToolContext::new("/tmp");
+
+        let result = tool.execute(
+            json!({
+                "calls": [
+                    {"tool": "glob", "parameters": {"pattern": "*.rs"}},
+                    {"tool": "glob", "parameters": {"pattern": "*.toml"}}
+                ]
+            }),
+            &ctx,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_batch_exactly_20_calls_accepted() {
+        let tool = create_batch_tool();
+        let ctx = ToolContext::new("/tmp");
+
+        let mut calls = vec![];
+        for i in 0..20 {
+            calls.push(json!({
+                "tool": "glob",
+                "parameters": {"pattern": format!("{}.rs", i)}
+            }));
+        }
+
+        let result = tool.execute(json!({ "calls": calls }), &ctx);
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.text.contains("20 calls completed"));
+    }
+
+    #[test]
+    fn test_batch_non_array_calls_rejected() {
+        let tool = create_batch_tool();
+        let ctx = ToolContext::new("/tmp");
+
+        let result = tool.execute(
+            json!({"calls": "not an array"}),
+            &ctx,
+        );
+
+        assert!(result.is_err());
     }
 }
