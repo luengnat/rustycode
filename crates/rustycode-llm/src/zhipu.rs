@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::time::Duration;
 
-const ZHIPU_DEFAULT_ENDPOINT: &str = "https://api.z.ai/api/paas/v4";
+const ZHIPU_DEFAULT_ENDPOINT: &str = "https://api.z.ai/api/coding/paas/v4";
 
 #[derive(Serialize)]
 struct ZhipuRequest {
