@@ -281,7 +281,10 @@ impl EventAggregator {
             return false;
         }
 
-        let oldest = self.current_events.first().unwrap();
+        let oldest = self
+            .current_events
+            .first()
+            .expect("checked is_empty above; current_events is non-empty");
         let age = (Utc::now() - oldest.timestamp).num_milliseconds().max(0) as u64;
         age >= self.aggregation_window_ms || self.current_events.len() >= self.max_events
     }

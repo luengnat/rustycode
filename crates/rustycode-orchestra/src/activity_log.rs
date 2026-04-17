@@ -493,6 +493,8 @@ mod tests {
 
     #[test]
     fn test_clear_activity_log_state() {
+        let _guard = test_lock().lock();
+        clear_activity_log_state();
         // Create some state
         let temp_dir = TempDir::new().unwrap();
         let project_root = temp_dir.path();
