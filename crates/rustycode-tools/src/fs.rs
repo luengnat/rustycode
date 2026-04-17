@@ -55,7 +55,11 @@ fn detect_binary(path: &Path) -> bool {
 fn is_blocked_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| BLOCKED_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+        .map(|ext| {
+            // BLOCKED_EXTENSIONS entries include the leading dot (e.g., ".env", ".exe")
+            let dotted = format!(".{}", ext.to_lowercase());
+            BLOCKED_EXTENSIONS.contains(&dotted.as_str())
+        })
         .unwrap_or(false)
 }
 
@@ -1249,13 +1253,13 @@ mod tests {
         let encoded = STANDARD.encode(bytes);
         let res = tool.execute(
             json!({
-                "path": "out.bin",
+                "path": "out.dat",
                 "content_base64": encoded
             }),
             &ctx,
         );
-        assert!(res.is_ok());
-        let written = fs::read(workspace.path().join("out.bin")).expect("read written binary");
+        assert!(res.is_ok(), "write failed: {:?}", res.err());
+        let written = fs::read(workspace.path().join("out.dat")).expect("read written binary");
         assert_eq!(written, bytes);
     }
 
@@ -1681,5 +1685,288 @@ mod tests {
     fn test_web_fetch_max_chars_constant() {
         // Verify the constant is set to expected value
         assert_eq!(WEB_FETCH_MAX_CHARS, 50_000);
+    }
+
+    // ── detect_language tests ─────────────
+
+    #[test]
+    fn test_detect_language_rust() {
+        assert_eq!(detect_language(Path::new("main.rs")), Some("rust"));
+    }
+
+    #[test]
+    fn test_detect_language_python() {
+        assert_eq!(detect_language(Path::new("app.py")), Some("python"));
+    }
+
+    #[test]
+    fn test_detect_language_javascript() {
+        assert_eq!(detect_language(Path::new("index.js")), Some("javascript"));
+        assert_eq!(detect_language(Path::new("app.mjs")), Some("javascript"));
+        assert_eq!(detect_language(Path::new("app.cjs")), Some("javascript"));
+    }
+
+    #[test]
+    fn test_detect_language_typescript() {
+        assert_eq!(detect_language(Path::new("app.ts")), Some("typescript"));
+        assert_eq!(detect_language(Path::new("app.mts")), Some("typescript"));
+    }
+
+    #[test]
+    fn test_detect_language_go() {
+        assert_eq!(detect_language(Path::new("main.go")), Some("go"));
+    }
+
+    #[test]
+    fn test_detect_language_case_insensitive() {
+        assert_eq!(detect_language(Path::new("MAIN.RS")), Some("rust"));
+        assert_eq!(detect_language(Path::new("App.PY")), Some("python"));
+    }
+
+    #[test]
+    fn test_detect_language_unknown_extension_returns_text() {
+        // Extensions not in the match table map to "text"
+        assert_eq!(detect_language(Path::new("config.xyz")), Some("text"));
+        assert_eq!(detect_language(Path::new("data.dat")), Some("text"));
+    }
+
+    #[test]
+    fn test_detect_language_no_extension_returns_none() {
+        // No extension at all → None
+        assert_eq!(detect_language(Path::new("Dockerfile")), None);
+        assert_eq!(detect_language(Path::new("Makefile")), None);
+    }
+
+    // ── detect_binary tests ─────────────
+
+    #[test]
+    fn test_detect_binary_images() {
+        assert!(detect_binary(Path::new("photo.png")));
+        assert!(detect_binary(Path::new("photo.jpg")));
+        assert!(detect_binary(Path::new("photo.jpeg")));
+        assert!(detect_binary(Path::new("photo.gif")));
+        assert!(detect_binary(Path::new("photo.webp")));
+        assert!(detect_binary(Path::new("photo.svg")));
+    }
+
+    #[test]
+    fn test_detect_binary_archives() {
+        assert!(detect_binary(Path::new("archive.zip")));
+        assert!(detect_binary(Path::new("archive.tar")));
+        assert!(detect_binary(Path::new("archive.gz")));
+        assert!(detect_binary(Path::new("archive.7z")));
+    }
+
+    #[test]
+    fn test_detect_binary_executables() {
+        assert!(detect_binary(Path::new("app.exe")));
+        assert!(detect_binary(Path::new("lib.so")));
+        assert!(detect_binary(Path::new("lib.dylib")));
+    }
+
+    #[test]
+    fn test_detect_binary_not_text() {
+        assert!(!detect_binary(Path::new("main.rs")));
+        assert!(!detect_binary(Path::new("app.py")));
+        assert!(!detect_binary(Path::new("README.md")));
+        assert!(!detect_binary(Path::new("config.toml")));
+    }
+
+    #[test]
+    fn test_detect_binary_no_extension() {
+        assert!(!detect_binary(Path::new("Makefile")));
+    }
+
+    // ── is_blocked_extension tests ─────────────
+
+    #[test]
+    fn test_is_blocked_extension_env() {
+        // ".env" as a filename has no extension (hidden file)
+        assert!(!is_blocked_extension(Path::new(".env")));
+        // "local.env" has extension "env" → matches ".env" in BLOCKED_EXTENSIONS
+        assert!(is_blocked_extension(Path::new("local.env")));
+    }
+
+    #[test]
+    fn test_is_blocked_extension_secrets() {
+        assert!(is_blocked_extension(Path::new("id_rsa.key")));
+        assert!(is_blocked_extension(Path::new("cert.pem")));
+        assert!(is_blocked_extension(Path::new("app.exe")));
+        assert!(is_blocked_extension(Path::new("lib.so")));
+        assert!(is_blocked_extension(Path::new("lib.dylib")));
+    }
+
+    #[test]
+    fn test_is_blocked_extension_not_text() {
+        assert!(!is_blocked_extension(Path::new("main.rs")));
+        assert!(!is_blocked_extension(Path::new("app.py")));
+        assert!(!is_blocked_extension(Path::new("README.md")));
+    }
+
+    // ── count_comment_lines tests ─────────────
+
+    #[test]
+    fn test_count_comment_lines_rust() {
+        let lines = vec!["// comment", "fn main() {", "/* block */", "* mid", "code"];
+        assert_eq!(count_comment_lines(&lines, Some("rust")), 3);
+    }
+
+    #[test]
+    fn test_count_comment_lines_python() {
+        let lines = vec!["# comment", "def foo():", "# another", "    pass"];
+        assert_eq!(count_comment_lines(&lines, Some("python")), 2);
+    }
+
+    #[test]
+    fn test_count_comment_lines_json() {
+        let lines = vec!["{", "\"key\": \"value\"", "}"];
+        assert_eq!(count_comment_lines(&lines, Some("json")), 0);
+    }
+
+    #[test]
+    fn test_count_comment_lines_markdown() {
+        let lines = vec!["<!-- html comment -->", "regular text", "<!-- another -->"];
+        assert_eq!(count_comment_lines(&lines, Some("markdown")), 2);
+    }
+
+    #[test]
+    fn test_count_comment_lines_unknown_language() {
+        let lines = vec!["line one", "line two"];
+        assert_eq!(count_comment_lines(&lines, None), 0);
+        assert_eq!(count_comment_lines(&lines, Some("unknown")), 0);
+    }
+
+    #[test]
+    fn test_count_comment_lines_yaml() {
+        let lines = vec!["# config", "key: value", "# another comment"];
+        assert_eq!(count_comment_lines(&lines, Some("yaml")), 2);
+    }
+
+    // ── estimate_complexity tests ─────────────
+
+    #[test]
+    fn test_estimate_complexity_simple() {
+        assert_eq!(estimate_complexity(10, 2), "simple");
+        assert_eq!(estimate_complexity(49, 0), "simple");
+    }
+
+    #[test]
+    fn test_estimate_complexity_medium() {
+        // 100 lines, 20 comments → 80% code ratio, < 200 lines → "medium"
+        assert_eq!(estimate_complexity(100, 20), "medium");
+        // 100 lines, 50 comments → 50% code ratio, < 200 lines → "simple"
+        assert_eq!(estimate_complexity(100, 50), "simple");
+    }
+
+    #[test]
+    fn test_estimate_complexity_high() {
+        // 300 lines, < 40% comments → high
+        assert_eq!(estimate_complexity(300, 50), "high"); // 250 code lines, 83% ratio
+    }
+
+    #[test]
+    fn test_estimate_complexity_very_high() {
+        assert_eq!(estimate_complexity(600, 10), "very_high");
+        assert_eq!(estimate_complexity(1000, 0), "very_high");
+    }
+
+    #[test]
+    fn test_estimate_complexity_zero_lines() {
+        assert_eq!(estimate_complexity(0, 0), "simple");
+    }
+
+    // ── truncate_to_char_boundary tests ─────────────
+
+    #[test]
+    fn test_truncate_to_char_boundary_ascii() {
+        let content = "hello world";
+        assert_eq!(truncate_to_char_boundary(content, 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_to_char_boundary_within_bounds() {
+        let content = "hello";
+        assert_eq!(truncate_to_char_boundary(content, 100), "hello");
+    }
+
+    #[test]
+    fn test_truncate_to_char_boundary_empty() {
+        assert_eq!(truncate_to_char_boundary("", 10), "");
+    }
+
+    // ── truncate_bytes_to_boundary tests ─────────────
+
+    #[test]
+    fn test_truncate_bytes_within_bounds() {
+        let bytes = b"hello";
+        assert_eq!(truncate_bytes_to_boundary(bytes, 100), bytes);
+    }
+
+    #[test]
+    fn test_truncate_bytes_exact() {
+        let bytes = b"hello";
+        assert_eq!(truncate_bytes_to_boundary(bytes, 5), bytes);
+    }
+
+    #[test]
+    fn test_truncate_bytes_empty() {
+        assert_eq!(truncate_bytes_to_boundary(b"", 10), b"");
+    }
+
+    // ── required_string / optional_string tests ─────────────
+
+    #[test]
+    fn test_required_string_present() {
+        let v = json!({"name": "alice"});
+        assert_eq!(required_string(&v, "name").unwrap(), "alice");
+    }
+
+    #[test]
+    fn test_required_string_missing() {
+        let v = json!({"age": 30});
+        assert!(required_string(&v, "name").is_err());
+    }
+
+    #[test]
+    fn test_required_string_wrong_type() {
+        let v = json!({"name": 42});
+        assert!(required_string(&v, "name").is_err());
+    }
+
+    #[test]
+    fn test_optional_string_present() {
+        let v = json!({"name": "alice"});
+        assert_eq!(optional_string(&v, "name"), Some("alice"));
+    }
+
+    #[test]
+    fn test_optional_string_missing() {
+        let v = json!({"age": 30});
+        assert_eq!(optional_string(&v, "name"), None);
+    }
+
+    #[test]
+    fn test_optional_string_wrong_type() {
+        let v = json!({"name": 42});
+        assert_eq!(optional_string(&v, "name"), None);
+    }
+
+    // ── get_last_modified tests ─────────────
+
+    #[test]
+    fn test_get_last_modified_existing_file() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.txt");
+        fs::write(&file, "hello").unwrap();
+        let result = get_last_modified(&file);
+        assert_ne!(result, "unknown");
+        // Should be a numeric timestamp
+        assert!(result.parse::<u64>().is_ok(), "expected timestamp, got: {result}");
+    }
+
+    #[test]
+    fn test_get_last_modified_missing_file() {
+        let result = get_last_modified(Path::new("/nonexistent/file.txt"));
+        assert_eq!(result, "unknown");
     }
 }
