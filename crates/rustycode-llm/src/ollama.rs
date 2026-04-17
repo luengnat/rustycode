@@ -83,11 +83,15 @@ struct OllamaMessageContent {
 
 /// Ollama-specific streaming response structure
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OllamaStreamResponse {
     message: Option<OllamaMessageContent>,
+    #[allow(dead_code)]
     model: String,
     done: bool,
+    #[serde(default)]
+    prompt_eval_count: Option<u32>,
+    #[serde(default)]
+    eval_count: Option<u32>,
 }
 
 /// OllamaProvider handles local LLM inference via Ollama
@@ -487,29 +491,84 @@ impl LLMProvider for OllamaProvider {
             });
         }
 
-        // Convert bytes stream to SSE stream (Ollama uses newline-delimited JSON)
         let bytes_stream = response.bytes_stream();
 
-        let stream = bytes_stream.map(|chunk_result| -> StreamChunk {
-            let chunk =
-                chunk_result.map_err(|e| ProviderError::Network(format!("Stream error: {}", e)))?;
-            let text = String::from_utf8_lossy(&chunk);
+        let accumulated_content = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let prompt_eval_count = std::sync::Arc::new(std::sync::Mutex::new(Option::<u32>::None));
+        let eval_count = std::sync::Arc::new(std::sync::Mutex::new(Option::<u32>::None));
+        let done_sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-            // Parse each line as JSON
+        let stream = bytes_stream.flat_map(move |chunk_result| {
+            let accumulated_content = accumulated_content.clone();
+            let prompt_eval_count = prompt_eval_count.clone();
+            let eval_count = eval_count.clone();
+            let done_sent = done_sent.clone();
+
+            let chunk = match chunk_result {
+                Ok(c) => c,
+                Err(e) => {
+                    return futures::stream::iter(vec![Err(ProviderError::Network(format!(
+                        "Stream error: {}",
+                        e
+                    )))]);
+                }
+            };
+            let text = String::from_utf8_lossy(&chunk);
+            let mut events = Vec::new();
+
             for line in text.lines() {
                 if line.is_empty() {
                     continue;
                 }
                 if let Ok(data) = serde_json::from_str::<OllamaStreamResponse>(line) {
+                    if let Some(prompt_tokens) = data.prompt_eval_count {
+                        *prompt_eval_count.lock().unwrap() = Some(prompt_tokens);
+                    }
+                    if let Some(output_tokens) = data.eval_count {
+                        *eval_count.lock().unwrap() = Some(output_tokens);
+                    }
+
+                    let mut content_buffer = accumulated_content.lock().unwrap();
                     if let Some(message) = data.message {
                         if !message.content.is_empty() {
-                            return Ok(crate::provider_v2::SSEEvent::text(message.content));
+                            content_buffer.push_str(&message.content);
+                            events.push(Ok(crate::provider_v2::SSEEvent::Text {
+                                text: message.content,
+                            }));
                         }
+                    }
+
+                    if data.done && !done_sent.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        let _final_content = std::mem::take(&mut *content_buffer);
+                        drop(content_buffer);
+
+                        let usage = {
+                            let prompt = *prompt_eval_count.lock().unwrap();
+                            let output = *eval_count.lock().unwrap();
+                            if let (Some(input_tokens), Some(output_tokens)) = (prompt, output) {
+                                Some(Usage {
+                                    input_tokens,
+                                    output_tokens,
+                                    total_tokens: input_tokens + output_tokens,
+                                    cache_read_input_tokens: 0,
+                                    cache_creation_input_tokens: 0,
+                                })
+                            } else {
+                                None
+                            }
+                        };
+
+                        events.push(Ok(crate::provider_v2::SSEEvent::MessageDelta {
+                            stop_reason: Some("stop".to_string()),
+                            usage,
+                        }));
+
+                        events.push(Ok(crate::provider_v2::SSEEvent::MessageStop));
                     }
                 }
             }
 
-            Ok(crate::provider_v2::SSEEvent::text(String::new()))
+            futures::stream::iter(events)
         });
 
         Ok(Box::pin(stream))
