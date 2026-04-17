@@ -57,8 +57,39 @@ pub fn default_litert_lm_install_dir() -> PathBuf {
 }
 
 pub fn default_litert_lm_binary_url() -> String {
-    "https://github.com/luengnat/LiteRT-LM/releases/download/v0.10.2/litert-lm-0.10.2-macos-arm64.tar.gz"
-        .to_string()
+    let arch = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "macos-arm64"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "macos-x64"
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        "linux-x64"
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        "linux-arm64"
+    } else if cfg!(target_os = "windows") {
+        "windows-x64"
+    } else {
+        "macos-arm64" // fallback
+    };
+
+    format!(
+        "https://github.com/luengnat/LiteRT-LM/releases/download/{}/litert-lm-{}-{}.tar.gz",
+        DEFAULT_VERSION,
+        DEFAULT_VERSION.trim_start_matches('v'),
+        arch
+    )
+}
+
+impl Default for LiteRtLmInstallConfig {
+    fn default() -> Self {
+        Self {
+            version: DEFAULT_VERSION.to_string(),
+            binary_url: default_litert_lm_binary_url(),
+            model_url: default_gemma_e4b_model_url(),
+            install_dir: default_litert_lm_install_dir(),
+            binary_filename: DEFAULT_BINARY_FILENAME.to_string(),
+            model_filename: DEFAULT_MODEL_FILENAME.to_string(),
+        }
+    }
 }
 
 pub fn default_gemma_e4b_model_url() -> String {

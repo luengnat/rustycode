@@ -7,7 +7,7 @@
 //! - Estimate costs for different model tiers
 
 use clap::Subcommand;
-use rustycode_litert::ensure_litert_lm_runtime;
+use rustycode_litert::{ensure_litert_lm_runtime, LiteRtLmInstallConfig};
 use rustycode_llm::{provider_helpers, ModelTier};
 
 #[derive(Debug, Subcommand)]
@@ -357,7 +357,8 @@ async fn cmd_show_catalog() -> anyhow::Result<()> {
 async fn cmd_install_provider(provider: &str) -> anyhow::Result<()> {
     match provider {
         "litert-lm" | "litertlm" | "litert_lm" => {
-            let result = ensure_litert_lm_runtime(None).await?;
+            let config = LiteRtLmInstallConfig::default();
+            let result = ensure_litert_lm_runtime(&config).await?;
             println!("\n📦 LiteRT-LM installed successfully:\n");
             println!("Install dir: {}", result.install_dir.display());
             println!("Binary:      {}", result.binary_path.display());
