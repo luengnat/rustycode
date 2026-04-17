@@ -20,6 +20,7 @@ pub mod image_detect;
 pub mod json_repair;
 pub mod lifecycle;
 mod multiedit;
+mod native_tools;
 pub mod permission;
 pub mod permission_store;
 mod plan_management;
