@@ -2269,6 +2269,13 @@ pub async fn run_headless_task_with_iteration(
                 || cmd.contains("uv sync")
                 // Running any Node.js script after edits
                 || cmd.contains("node ") && cmd.contains(".js")
+                // Common simulators and test runners (CoreWars, games, etc.)
+                || cmd.contains("pmars")
+                // Running any installed program as verification (e.g., pytest, mypy, ruff)
+                || cmd.contains("pytest") || cmd.contains("mypy") || cmd.contains("ruff")
+                || cmd.contains("pylint") || cmd.contains("flake8")
+                // Running the project's CLI tool
+                || cmd.contains("cli_tool")
         });
         if has_verification && last_modification_turn.is_some() {
             verified_after_last_mod = true;
@@ -3929,7 +3936,8 @@ mod tests {
                 || cmd.contains("npm test")
                 || cmd.contains("python ") && cmd.contains(".py")
                 || cmd.contains("python3 ") && cmd.contains(".py")
-                || cmd.contains("uv run");
+                || cmd.contains("uv run")
+                || cmd.contains("uv sync");
             assert!(
                 is_verification,
                 "Should detect as verification: {}",
