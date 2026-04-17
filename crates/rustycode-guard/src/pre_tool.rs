@@ -1,0 +1,206 @@
+use crate::codec::{HookInput, HookResult};
+use crate::rules::{all_rules, GuardAction, GuardRule};
+
+// PreToolUse evaluation with short-circuit rules
+pub fn evaluate(input: &HookInput) -> HookResult {
+    for r in all_rules() {
+        if matches_rule(r, input) {
+            return match r.action {
+                GuardAction::Deny => HookResult::deny(format!(
+                    "{} triggered {}: {}",
+                    input.tool_name, r.id, r.description
+                )),
+                GuardAction::Ask => HookResult::ask(format!(
+                    "{} requires confirmation: {} - {}",
+                    input.tool_name, r.id, r.description
+                )),
+                GuardAction::Warn => HookResult::warn(format!(
+                    "{} warning: {} - {}",
+                    input.tool_name, r.id, r.description
+                )),
+            };
+        }
+    }
+    HookResult::allow()
+}
+
+#[allow(clippy::too_many_lines)]
+fn matches_rule(rule: &GuardRule, input: &HookInput) -> bool {
+    // Simple per-rule matching helpers to keep logic in one place.
+    let tool = input.tool_name.to_lowercase();
+    let tf = input
+        .tool_input
+        .as_object()
+        .cloned()
+        .unwrap_or_else(serde_json::Map::new);
+    let cmd = tf
+        .get("command")
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string);
+    let path = tf
+        .get("path")
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string);
+    let content = tf
+        .get("content")
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string);
+
+    match rule.id {
+        // R01: Block sudo commands
+        "R01" => {
+            if tool.contains("bash") {
+                if let Some(c) = &cmd {
+                    return c.contains("sudo");
+                }
+            }
+            false
+        }
+        // R02: Block writes to protected paths (.git, .env, credentials, keys)
+        "R02" => {
+            if tool.contains("write") || tool.contains("edit") {
+                if let Some(p) = path {
+                    return protected_path_contains(&p);
+                }
+            }
+            false
+        }
+        // R03: Bash writes to protected paths via redirection
+        "R03" => {
+            if tool.contains("bash") {
+                if let Some(c) = &cmd {
+                    if c.contains('>') || c.contains("=>") {
+                        if let Some(p) = path {
+                            return protected_path_contains(&p);
+                        }
+                        return protected_path_contains(c);
+                    }
+                }
+            }
+            false
+        }
+        // R04: Outside of cwd
+        "R04" => {
+            if let Some(p) = path {
+                if let Some(cwd) = &input.cwd {
+                    return !p.starts_with(cwd);
+                }
+            }
+            false
+        }
+        // R05: rm -rf
+        "R05" => {
+            if tool.contains("bash") {
+                if let Some(c) = &cmd {
+                    return c.contains("rm -rf");
+                }
+            }
+            false
+        }
+        // R06: git push --force or -f
+        "R06" => {
+            if tool.contains("bash") {
+                if let Some(c) = &cmd {
+                    return c.contains("git push --force") || c.contains("git push -f");
+                }
+            }
+            false
+        }
+        // R07: Secrets in content
+        "R07" => {
+            if let Some(ct) = &content {
+                let s = ct.to_lowercase();
+                return s.contains("sk-")
+                    || s.contains("ghp_")
+                    || s.contains("aki a")
+                    || s.contains("-----begin rsa private key-----");
+            }
+            false
+        }
+        // R08: Binary write extensions
+        "R08" => {
+            if let Some(p) = &path {
+                let ex = p.rsplit('.').next().unwrap_or("");
+                let blocked = ["exe", "dll", "so", "dylib", "bin", "db", "sqlite"];
+                return blocked.contains(&ex);
+            }
+            false
+        }
+        // R09: Path traversal
+        "R09" => {
+            if let Some(p) = &path {
+                return p.contains("..");
+            }
+            false
+        }
+        // R10: no-verify / no-gpg-sign in Bash
+        "R10" => {
+            if tool.contains("bash") {
+                if let Some(c) = &cmd {
+                    return c.contains("--no-verify") || c.contains("--no-gpg-sign");
+                }
+            }
+            false
+        }
+        // R11: git reset --hard main/master
+        "R11" => {
+            if tool.contains("bash") {
+                if let Some(c) = &cmd {
+                    return c.contains("git reset --hard")
+                        && (c.contains("main") || c.contains("master"));
+                }
+            }
+            false
+        }
+        // R12: git push origin main/master
+        "R12" => {
+            if tool.contains("bash") {
+                if let Some(c) = &cmd {
+                    return c.contains("git push origin main")
+                        || c.contains("git push origin master");
+                }
+            }
+            false
+        }
+        // R13: config edits
+        "R13" => {
+            if let Some(p) = &path {
+                let lowered = p.to_lowercase();
+                return lowered.contains("settings.json")
+                    || lowered.contains("claude/settings")
+                    || lowered.contains(".eslintrc")
+                    || lowered.contains("tsconfig");
+            }
+            false
+        }
+        // R14: symlink in path
+        "R14" => {
+            if let Some(p) = &path {
+                return p.contains("symlink");
+            }
+            false
+        }
+        // R15: content length > 10MB
+        "R15" => {
+            if let Some(ct) = &content {
+                return ct.len() > 10_000_000;
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn protected_path_contains(p: &str) -> bool {
+    let restricted = [
+        ".git/",
+        ".env",
+        "credentials",
+        ".key",
+        ".pem",
+        "/etc/",
+        "/proc/",
+        "/sys/",
+    ];
+    restricted.iter().any(|r| p.contains(r))
+}

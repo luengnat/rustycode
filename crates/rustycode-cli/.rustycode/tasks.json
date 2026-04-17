@@ -1,0 +1,26 @@
+{
+  "tasks": [
+    {
+      "id": "01KP7H0ESEAP1N24N4PQ0Z8V67",
+      "description": "Run the clippy command to check for warnings in your workspace",
+      "status": "Pending",
+      "created_at": {
+        "secs_since_epoch": 1776221698,
+        "nanos_since_epoch": 862555000
+      },
+      "dependencies": []
+    },
+    {
+      "id": "01KP7JAPCD1M4Y5ZW0DW20DW0P",
+      "description": "Run the tests for the rustycode-shared-runtime package",
+      "status": "Pending",
+      "created_at": {
+        "secs_since_epoch": 1776223082,
+        "nanos_since_epoch": 894212000
+      },
+      "dependencies": []
+    }
+  ],
+  "todos": [],
+  "active_agents": []
+}

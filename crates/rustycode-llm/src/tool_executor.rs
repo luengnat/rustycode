@@ -1,0 +1,409 @@
+//! Tool execution integration for LLM providers
+//!
+//! This module bridges LLM provider tool calling with the rustycode-tools execution system.
+//! It handles:
+//! - Converting tool calls from LLM responses to ToolCall format
+//! - Executing tools via ToolExecutor
+//! - Converting tool results back to LLM message format
+//! - Error handling and retries
+
+use crate::provider_v2::{ChatMessage, MessageRole};
+use anyhow::Result;
+use rustycode_protocol::ToolCall;
+use rustycode_tools::ToolExecutor;
+use serde_json::Value;
+use std::path::PathBuf;
+use tracing::{debug, instrument};
+
+/// Parsed tool call from LLM response
+#[derive(Debug, Clone)]
+pub struct ParsedToolCall {
+    pub name: String,
+    pub arguments: Value,
+    pub id: Option<String>,
+}
+
+/// Result of tool execution
+#[derive(Debug)]
+pub struct ToolExecutionResult {
+    pub tool_name: String,
+    pub success: bool,
+    pub output: String,
+    pub error: Option<String>,
+}
+
+/// Tool execution manager for LLM providers
+pub struct LLMToolExecutor {
+    executor: ToolExecutor,
+}
+
+impl LLMToolExecutor {
+    /// Create a new tool executor for LLM providers
+    pub fn new(cwd: PathBuf) -> Self {
+        Self {
+            executor: ToolExecutor::new(cwd),
+        }
+    }
+
+    /// Create a new tool executor with custom tool registry
+    pub fn with_executor(_cwd: PathBuf, executor: ToolExecutor) -> Self {
+        Self { executor }
+    }
+
+    /// Get the underlying tool executor
+    pub fn executor(&self) -> &ToolExecutor {
+        &self.executor
+    }
+
+    /// Parse tool calls from Anthropic response content
+    ///
+    /// Anthropic returns tool_use blocks in content array:
+    /// {"type": "tool_use", "id": "...", "name": "bash", "input": {...}}
+    pub fn parse_anthropic_tool_calls(&self, content: &str) -> Result<Vec<ParsedToolCall>> {
+        let mut tool_calls = Vec::new();
+
+        // Try to parse as JSON array first (structured content)
+        if let Ok(json_value) = serde_json::from_str::<Value>(content) {
+            if let Some(blocks) = json_value.as_array() {
+                for block in blocks {
+                    if let Some(content_type) = block.get("type").and_then(|t| t.as_str()) {
+                        if content_type == "tool_use" {
+                            let name = block
+                                .get("name")
+                                .and_then(|n| n.as_str())
+                                .ok_or_else(|| anyhow::anyhow!("tool_use missing 'name'"))?
+                                .to_string();
+
+                            let arguments = block
+                                .get("input")
+                                .cloned()
+                                .unwrap_or_else(|| Value::Object(Default::default()));
+
+                            let id = block
+                                .get("id")
+                                .and_then(|i| i.as_str())
+                                .map(|s| s.to_string());
+
+                            tool_calls.push(ParsedToolCall {
+                                name,
+                                arguments,
+                                id,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try to extract from ```tool code blocks
+        for line in content.lines() {
+            if let Some(json_str) = line
+                .strip_prefix("```tool")
+                .or_else(|| line.strip_prefix("tool:"))
+            {
+                let json_str = json_str.trim_start_matches("```").trim();
+                if let Ok(json_value) = serde_json::from_str::<Value>(json_str) {
+                    if let Some(array) = json_value.as_array() {
+                        for item in array {
+                            if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+                                let arguments = item
+                                    .get("arguments")
+                                    .cloned()
+                                    .unwrap_or_else(|| Value::Object(Default::default()));
+
+                                tool_calls.push(ParsedToolCall {
+                                    name: name.to_string(),
+                                    arguments,
+                                    id: None,
+                                });
+                            }
+                        }
+                    } else if let Some(name) = json_value.get("name").and_then(|n| n.as_str()) {
+                        let arguments = json_value
+                            .get("arguments")
+                            .cloned()
+                            .unwrap_or_else(|| Value::Object(Default::default()));
+
+                        tool_calls.push(ParsedToolCall {
+                            name: name.to_string(),
+                            arguments,
+                            id: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(tool_calls)
+    }
+
+    /// Parse tool calls from OpenAI function calling response
+    ///
+    /// OpenAI returns tool_calls array in response:
+    /// {"tool_calls": [{"id": "...", "function": {"name": "bash", "arguments": "{...}"}}]}
+    pub fn parse_openai_tool_calls(&self, content: &str) -> Result<Vec<ParsedToolCall>> {
+        let mut tool_calls = Vec::new();
+
+        if let Ok(json_value) = serde_json::from_str::<Value>(content) {
+            if let Some(tool_calls_array) = json_value.get("tool_calls").and_then(|t| t.as_array())
+            {
+                for tool_call in tool_calls_array {
+                    let id = tool_call
+                        .get("id")
+                        .and_then(|i| i.as_str())
+                        .map(|s| s.to_string());
+
+                    if let Some(function) = tool_call.get("function") {
+                        let name = function
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .ok_or_else(|| anyhow::anyhow!("function call missing 'name'"))?
+                            .to_string();
+
+                        let arguments_str = function
+                            .get("arguments")
+                            .and_then(|a| a.as_str())
+                            .unwrap_or("{}");
+
+                        let arguments = serde_json::from_str::<Value>(arguments_str)
+                            .unwrap_or_else(|_| Value::Object(Default::default()));
+
+                        tool_calls.push(ParsedToolCall {
+                            name,
+                            arguments,
+                            id,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(tool_calls)
+    }
+
+    /// Execute a parsed tool call
+    #[instrument(skip(self, tool_call), fields(tool_name = %tool_call.name))]
+    pub async fn execute_tool_call(
+        &self,
+        tool_call: &ParsedToolCall,
+    ) -> Result<ToolExecutionResult> {
+        debug!("Executing tool: {}", tool_call.name);
+
+        let call_id = tool_call
+            .id
+            .clone()
+            .unwrap_or_else(|| format!("tool-{}", uuid::Uuid::new_v4()));
+
+        let tool_call = ToolCall {
+            call_id,
+            name: tool_call.name.clone(),
+            arguments: tool_call.arguments.clone(),
+        };
+
+        let result = self.executor.execute(&tool_call);
+
+        Ok(ToolExecutionResult {
+            tool_name: tool_call.name.clone(),
+            success: result.is_success(),
+            output: result.output,
+            error: result.error,
+        })
+    }
+
+    /// Execute multiple tool calls concurrently
+    pub async fn execute_tool_calls(
+        &self,
+        tool_calls: &[ParsedToolCall],
+    ) -> Result<Vec<ToolExecutionResult>> {
+        let mut results = Vec::new();
+
+        for tool_call in tool_calls {
+            let result = self.execute_tool_call(tool_call).await?;
+            results.push(result);
+        }
+
+        Ok(results)
+    }
+
+    /// Convert tool execution result to ChatMessage for Anthropic
+    pub fn result_to_anthropic_message(
+        &self,
+        result: &ToolExecutionResult,
+        tool_use_id: Option<String>,
+    ) -> ChatMessage {
+        let content = if let Some(id) = tool_use_id {
+            // Anthropic tool result format
+            serde_json::json!({
+                "type": "tool_result",
+                "tool_use_id": id,
+                "content": result.output
+            })
+            .to_string()
+        } else {
+            // Fallback: just output text
+            result.output.clone()
+        };
+
+        ChatMessage {
+            role: MessageRole::User, // Tool results sent as user role in Anthropic
+            content: rustycode_protocol::MessageContent::simple(content),
+        }
+    }
+
+    /// Convert tool execution result to ChatMessage for OpenAI
+    pub fn result_to_openai_message(
+        &self,
+        result: &ToolExecutionResult,
+        tool_call_id: Option<String>,
+    ) -> ChatMessage {
+        let content = if let Some(id) = tool_call_id {
+            // OpenAI tool message format - use structured content
+            let tool_result = serde_json::json!({
+                "tool_call_id": id,
+                "content": result.output
+            });
+            tool_result.to_string()
+        } else {
+            // Fallback: just output text
+            result.output.clone()
+        };
+
+        ChatMessage {
+            role: MessageRole::Tool(result.tool_name.clone()),
+            content: rustycode_protocol::MessageContent::simple(content),
+        }
+    }
+
+    /// Execute tool calls and convert results to messages (Anthropic format)
+    pub async fn execute_and_format_anthropic(
+        &self,
+        tool_calls: &[ParsedToolCall],
+    ) -> Result<Vec<ChatMessage>> {
+        let results = self.execute_tool_calls(tool_calls).await?;
+        let messages = tool_calls
+            .iter()
+            .zip(results.iter())
+            .map(|(call, result)| self.result_to_anthropic_message(result, call.id.clone()))
+            .collect();
+
+        Ok(messages)
+    }
+
+    /// Execute tool calls and convert results to messages (OpenAI format)
+    pub async fn execute_and_format_openai(
+        &self,
+        tool_calls: &[ParsedToolCall],
+    ) -> Result<Vec<ChatMessage>> {
+        let results = self.execute_tool_calls(tool_calls).await?;
+        let messages = tool_calls
+            .iter()
+            .zip(results.iter())
+            .map(|(call, result)| self.result_to_openai_message(result, call.id.clone()))
+            .collect();
+
+        Ok(messages)
+    }
+
+    /// Get tool definitions for Anthropic format
+    pub fn get_anthropic_tool_definitions(&self) -> Vec<Value> {
+        self.executor
+            .list()
+            .into_iter()
+            .map(|tool| {
+                serde_json::json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.parameters_schema
+                })
+            })
+            .collect()
+    }
+
+    /// Get tool definitions for OpenAI format
+    pub fn get_openai_tool_definitions(&self) -> Vec<Value> {
+        self.executor
+            .list()
+            .into_iter()
+            .map(|tool| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters_schema
+                    }
+                })
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn create_executor() -> LLMToolExecutor {
+        LLMToolExecutor::new(PathBuf::from("."))
+    }
+
+    #[test]
+    fn test_parse_anthropic_tool_calls() {
+        let executor = create_executor();
+
+        let content = r#"[
+            {"type": "text", "text": "I'll help you with that."},
+            {"type": "tool_use", "id": "toolu_123", "name": "bash", "input": {"command": "ls"}}
+        ]"#;
+
+        let tool_calls = executor.parse_anthropic_tool_calls(content).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "bash");
+        assert_eq!(tool_calls[0].id.as_ref().unwrap(), "toolu_123");
+    }
+
+    #[test]
+    fn test_parse_openai_tool_calls() {
+        let executor = create_executor();
+
+        let content = r#"{
+            "tool_calls": [
+                {
+                    "id": "call_123",
+                    "function": {
+                        "name": "bash",
+                        "arguments": "{\"command\": \"ls\"}"
+                    }
+                }
+            ]
+        }"#;
+
+        let tool_calls = executor.parse_openai_tool_calls(content).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "bash");
+        assert_eq!(tool_calls[0].id.as_ref().unwrap(), "call_123");
+    }
+
+    #[test]
+    fn test_get_anthropic_tool_definitions() {
+        let executor = create_executor();
+        let tools = executor.get_anthropic_tool_definitions();
+
+        assert!(!tools.is_empty());
+        let tool = &tools[0];
+        assert!(tool.get("name").is_some());
+        assert!(tool.get("description").is_some());
+        assert!(tool.get("input_schema").is_some());
+    }
+
+    #[test]
+    fn test_get_openai_tool_definitions() {
+        let executor = create_executor();
+        let tools = executor.get_openai_tool_definitions();
+
+        assert!(!tools.is_empty());
+        let tool = &tools[0];
+        assert_eq!(tool.get("type").unwrap().as_str().unwrap(), "function");
+        assert!(tool.get("function").is_some());
+    }
+}

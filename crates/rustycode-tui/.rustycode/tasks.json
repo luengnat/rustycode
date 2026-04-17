@@ -1,0 +1,17 @@
+{
+  "tasks": [],
+  "todos": [],
+  "active_agents": [
+    {
+      "id": "01KNGJKJS8KK7FW21XGJ02G2S0",
+      "task": "Test agent task",
+      "status": "Running",
+      "created_at": {
+        "secs_since_epoch": 1775451622,
+        "nanos_since_epoch": 184602000
+      }
+    }
+  ]
+}: [],
+  "active_agents": []
+}

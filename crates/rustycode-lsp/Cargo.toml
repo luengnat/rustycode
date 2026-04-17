@@ -1,0 +1,20 @@
+[package]
+name = "rustycode-lsp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+which.workspace = true
+tokio.workspace = true
+lsp-types.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

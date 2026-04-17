@@ -1,0 +1,22 @@
+[package]
+name = "rustycode-learning"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+rustycode-session = { path = "../rustycode-session" }
+dirs.workspace = true
+regex.workspace = true
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

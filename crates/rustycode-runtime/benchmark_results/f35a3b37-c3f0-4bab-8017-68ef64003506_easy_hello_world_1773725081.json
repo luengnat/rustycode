@@ -1,0 +1,101 @@
+{
+  "task": {
+    "id": "easy_hello_world",
+    "name": "Hello World Function",
+    "description": "Create a simple 'Hello, World!' function in Rust that returns a string",
+    "difficulty": "Easy",
+    "category": "CodeGeneration",
+    "expected_outputs": [
+      "src/hello.rs"
+    ],
+    "success_criteria": {
+      "required_files": [
+        "src/hello.rs"
+      ],
+      "functionality_tests": [
+        "Function returns 'Hello, World!'"
+      ],
+      "quality_standards": {
+        "must_compile": true,
+        "no_warnings": true,
+        "follows_style": true,
+        "has_documentation": false,
+        "error_handling": false
+      },
+      "min_test_coverage": 0.0
+    },
+    "initial_state": null,
+    "reference_solution": "pub fn hello() -> String { String::from(\"Hello, World!\") }",
+    "time_limit": {
+      "secs": 300,
+      "nanos": 0
+    }
+  },
+  "result": {
+    "task_id": "easy_hello_world",
+    "start_time": "2026-03-17T05:24:41.121613Z",
+    "end_time": "2026-03-17T05:24:41.223665Z",
+    "duration": {
+      "secs": 0,
+      "nanos": 102051042
+    },
+    "success": true,
+    "files_created": [
+      "src/hello.rs"
+    ],
+    "files_modified": [],
+    "tests_passed": 1,
+    "tests_total": 1,
+    "quality_score": {
+      "functionality": 35,
+      "style": 15,
+      "error_handling": 15,
+      "documentation": 8,
+      "testing": 9,
+      "overall": 82
+    },
+    "performance_score": {
+      "speed": 25,
+      "efficiency": 22,
+      "resource_usage": 15,
+      "scalability": 15,
+      "overall": 77
+    },
+    "comparison_score": {
+      "time_ratio": 0.8,
+      "quality_ratio": 0.95,
+      "cost_effectiveness": 1.2,
+      "overall": 85
+    },
+    "errors": [],
+    "agent_iterations": 3,
+    "tokens_consumed": 1500
+  },
+  "overall_score": 41,
+  "breakdown": {
+    "completion": 30,
+    "quality": 82,
+    "performance": 17,
+    "efficiency": 20,
+    "overall": 41
+  },
+  "baseline_comparison": {
+    "manual_time": {
+      "secs": 900,
+      "nanos": 0
+    },
+    "automated_time": {
+      "secs": 0,
+      "nanos": 102051042
+    },
+    "speedup_ratio": 8819.116222252782,
+    "quality_comparison": {
+      "manual_quality": 85,
+      "automated_quality": 82,
+      "quality_ratio": 0.9647058823529412
+    }
+  },
+  "recommendations": [
+    "Consider optimizing agent iteration count to improve performance"
+  ]
+}

@@ -1,0 +1,92 @@
+[package]
+name = "rustycode-tools"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+glob = "0.3"
+handlebars.workspace = true
+log = "0.4"
+rand.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+toml.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+walkdir.workspace = true
+ignore.workspace = true
+shell-words.workspace = true
+html2md = "0.2"
+rustycode-config = { path = "../rustycode-config" }
+rustycode-lsp = { path = "../rustycode-lsp" }
+rustycode-protocol = { path = "../rustycode-protocol" }
+rustycode-bus = { path = "../rustycode-bus" }
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "signal"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["registry"] }
+lsp-types.workspace = true
+once_cell.workspace = true
+rustycode_shared_runtime = { path = "../rustycode-shared-runtime" }
+rustycode-thread-guard = { path = "../rustycode-thread-guard" }
+rustycode-storage = { path = "../rustycode-storage" }
+rustycode-vector-memory = { path = "../rustycode-vector-memory", optional = true }
+reqwest = { workspace = true, features = ["blocking"] }
+governor = "0.6"
+lru.workspace = true
+parking_lot.workspace = true
+uuid.workspace = true
+urlencoding.workspace = true
+ahash = "0.8"
+dashmap = "6"
+dirs.workspace = true
+shellexpand.workspace = true
+tree-sitter = "0.24"
+tree-sitter-rust = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-typescript = "0.23"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = { version = "0.4", optional = true }
+
+[features]
+default = []
+# Enable ToolExecutor integration for AutoToolContext
+executor = []
+# Enable Landlock support on Linux (requires kernel 5.13+)
+landlock = ["dep:landlock"]
+vector-memory = ["dep:rustycode-vector-memory"]
+
+[dev-dependencies]
+tempfile.workspace = true
+criterion.workspace = true
+futures.workspace = true
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "macros", "time", "signal"] }
+rustycode-storage = { path = "../rustycode-storage" }
+rustycode-llm = { path = "../rustycode-llm" }
+rustycode-protocol = { path = "../rustycode-protocol" }
+rustycode-session = { path = "../rustycode-session" }
+
+[[bench]]
+name = "cache_benchmarks"
+harness = false
+
+[[bench]]
+name = "tool_benchmarks"
+harness = false
+
+[[bench]]
+name = "optimization_benchmarks"
+harness = false
+
+# Note: sandbox_benchmarks and sandbox_performance will be added when implemented

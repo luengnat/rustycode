@@ -1,0 +1,1134 @@
+use anyhow::Result;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+use tracing::debug;
+
+// Custom serialization for SystemTime as ISO 8601 string
+mod system_time_serde {
+    use super::*;
+
+    pub fn serialize<S>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let duration = time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_else(|e| {
+                // System time is before UNIX epoch — use 0 as fallback
+                tracing::warn!("system time before UNIX epoch: {e}, falling back to 0");
+                std::time::Duration::ZERO
+            });
+        let secs = duration.as_secs();
+        serializer.serialize_str(&secs.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let secs: u64 = s.parse().map_err(serde::de::Error::custom)?;
+        Ok(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+    }
+
+    pub mod option {
+        use super::*;
+
+        pub fn serialize<S>(time: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            match time {
+                Some(t) => super::serialize(t, serializer),
+                None => serializer.serialize_none(),
+            }
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let opt = Option::<String>::deserialize(deserializer)?;
+            match opt {
+                Some(s) => {
+                    let secs: u64 = s.parse().map_err(serde::de::Error::custom)?;
+                    Ok(Some(
+                        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs),
+                    ))
+                }
+                None => Ok(None),
+            }
+        }
+    }
+}
+
+/// Memory domain for categorization
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum MemoryDomain {
+    CodeStyle,
+    Testing,
+    Git,
+    Debugging,
+    Workflow,
+    Architecture,
+    ProjectSpecific,
+}
+
+/// Memory scope - project-specific or global
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum MemoryScope {
+    Project,
+    Global,
+}
+
+/// Source of a memory entry
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum MemorySource {
+    SessionObservation,
+    UserExplicit,
+    ProjectAnalysis,
+    ManualEntry,
+}
+
+/// Observation that contributed to a memory entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Observation {
+    pub timestamp: SystemTime,
+    pub pattern_type: String,
+    pub description: String,
+    pub confidence_boost: f32,
+}
+
+/// Enhanced memory entry with confidence scoring and metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEntry {
+    /// Unique identifier for this entry
+    pub id: String,
+    /// When this memory becomes relevant (trigger condition)
+    pub trigger: String,
+    /// Confidence score (0.3 - 0.9)
+    #[serde(default = "default_confidence")]
+    pub confidence: f32,
+    /// Domain categorization
+    pub domain: MemoryDomain,
+    /// Source of this memory
+    pub source: MemorySource,
+    /// Scope - project-specific or global
+    pub scope: MemoryScope,
+    /// Project ID (if project-scoped)
+    pub project_id: Option<String>,
+    /// Action to take when triggered
+    pub action: String,
+    /// Evidence that created this memory
+    #[serde(default)]
+    pub evidence: Vec<Observation>,
+    /// When this entry was created
+    #[serde(with = "system_time_serde")]
+    pub created_at: SystemTime,
+    /// When this entry was last used
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(with = "system_time_serde::option")]
+    pub last_used: Option<SystemTime>,
+    /// How many times this entry has been used
+    #[serde(default)]
+    pub use_count: usize,
+}
+
+fn default_confidence() -> f32 {
+    0.5
+}
+
+/// Configuration for creating a MemoryEntry
+pub struct MemoryEntryConfig {
+    pub id: String,
+    pub trigger: String,
+    pub confidence: f32,
+    pub domain: MemoryDomain,
+    pub source: MemorySource,
+    pub scope: MemoryScope,
+    pub project_id: Option<String>,
+    pub action: String,
+}
+
+impl MemoryEntry {
+    /// Create a new memory entry
+    pub fn new(config: MemoryEntryConfig) -> Self {
+        let clamped_confidence = config.confidence.clamp(0.3, 0.9);
+
+        Self {
+            id: config.id,
+            trigger: config.trigger,
+            confidence: clamped_confidence,
+            domain: config.domain,
+            source: config.source,
+            scope: config.scope,
+            project_id: config.project_id,
+            action: config.action,
+            evidence: Vec::new(),
+            created_at: SystemTime::now(),
+            last_used: None,
+            use_count: 0,
+        }
+    }
+
+    /// Boost confidence when entry is used
+    pub fn boost_confidence(&mut self, amount: f32) {
+        self.confidence = (self.confidence + amount).min(0.9);
+        self.last_used = Some(SystemTime::now());
+        self.use_count += 1;
+    }
+
+    /// Decay confidence if contradicted
+    pub fn decay_confidence(&mut self, amount: f32) {
+        self.confidence = (self.confidence - amount).max(0.0);
+    }
+
+    /// Check if this entry should be pruned
+    pub fn should_prune(&self) -> bool {
+        if self.confidence < 0.3 {
+            if let Some(last_used) = self.last_used {
+                let days_since_use = last_used.elapsed().unwrap_or_default().as_secs() / 86400;
+                return days_since_use > 30;
+            }
+        }
+        false
+    }
+
+    /// Calculate relevance score for a query
+    pub fn calculate_relevance(&self, query: &str, current_domain: &MemoryDomain) -> f32 {
+        let mut score = 0.0;
+
+        // Domain match: high boost
+        if &self.domain == current_domain {
+            score += 0.5;
+        }
+
+        // Trigger keyword match
+        if query.to_lowercase().contains(&self.trigger.to_lowercase()) {
+            score += 0.3;
+        }
+
+        // Confidence weighting
+        score *= self.confidence;
+
+        // Recency boost (used recently)
+        if let Some(last_used) = self.last_used {
+            let days_since_use = last_used.elapsed().unwrap_or_default().as_secs() / 86400;
+            if days_since_use < 7 {
+                score += 0.1;
+            }
+        }
+
+        score
+    }
+}
+
+/// Project detection context
+#[derive(Debug, Clone)]
+pub struct ProjectContext {
+    pub id: String,
+    pub name: String,
+    pub path: PathBuf,
+}
+
+/// Detect project context from git repository
+pub fn detect_project_context(cwd: &Path) -> Option<ProjectContext> {
+    // Try git remote URL first (portable across machines)
+    if let Some(remote_url) = get_git_remote(cwd) {
+        let project_id = hash_remote_url(&remote_url);
+        return Some(ProjectContext {
+            id: project_id,
+            name: extract_project_name(&remote_url),
+            path: cwd.to_path_buf(),
+        });
+    }
+
+    // Fallback to git toplevel path (machine-specific)
+    if let Some(toplevel) = get_git_toplevel(cwd) {
+        let project_id = hash_path(&toplevel);
+        return Some(ProjectContext {
+            id: project_id,
+            name: toplevel.file_name()?.to_string_lossy().to_string(),
+            path: toplevel,
+        });
+    }
+
+    None
+}
+
+/// Get git remote URL for repository
+fn get_git_remote(cwd: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", cwd.to_str()?, "remote", "get-url", "origin"])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
+/// Get git toplevel path
+fn get_git_toplevel(cwd: &Path) -> Option<PathBuf> {
+    let output = std::process::Command::new("git")
+        .args(["-C", cwd.to_str()?, "rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Some(PathBuf::from(path))
+    } else {
+        None
+    }
+}
+
+/// Hash remote URL to create portable project ID
+fn hash_remote_url(url: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(url.as_bytes());
+    let result = hasher.finalize();
+    // Convert first 12 bytes to hex string
+    result[..12].iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// Hash path to create machine-specific project ID
+fn hash_path(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(path.to_string_lossy().as_bytes());
+    let result = hasher.finalize();
+    // Convert first 12 bytes to hex string
+    result[..12].iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// Extract project name from remote URL
+fn extract_project_name(url: &str) -> String {
+    // Remove .git suffix if present
+    let url = url.trim_end_matches(".git");
+
+    // Extract last path component
+    url.split('/').next_back().unwrap_or("unknown").to_string()
+}
+
+/// Get memory directory for current context
+pub fn get_memory_dir(cwd: &Path) -> PathBuf {
+    if let Some(project) = detect_project_context(cwd) {
+        // Project-scoped memory
+        PathBuf::from(".rustycode")
+            .join("projects")
+            .join(&project.id)
+            .join("memory")
+    } else {
+        // Global memory
+        PathBuf::from(".rustycode").join("memory")
+    }
+}
+
+/// Legacy memory entry for backward compatibility
+#[derive(Debug, Clone, Serialize)]
+pub struct LegacyMemoryEntry {
+    pub path: String,
+    pub preview: String,
+}
+
+/// Load memory entries from directory (supports both YAML and legacy formats)
+pub fn load(memory_dir: &Path) -> Result<Vec<MemoryEntry>> {
+    if !memory_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut entries = Vec::new();
+
+    // Look for memory.yaml (new format) or notes.md (legacy format)
+    let yaml_path = memory_dir.join("memory.yaml");
+    let legacy_path = memory_dir.join("notes.md");
+
+    if yaml_path.exists() {
+        // Load new YAML format
+        let content = fs::read_to_string(&yaml_path)?;
+
+        // Parse YAML documents separated by '---'
+        for doc_str in content.split("---") {
+            let doc_str = doc_str.trim();
+            if doc_str.is_empty() {
+                continue;
+            }
+
+            match serde_yaml::from_str::<MemoryEntry>(doc_str) {
+                Ok(entry) => entries.push(entry),
+                Err(e) => debug!(
+                    "failed to parse memory entry YAML chunk: {} err: {}",
+                    doc_str, e
+                ),
+            }
+        }
+    } else if legacy_path.exists() {
+        // Convert legacy format to new format
+        let legacy_content = fs::read_to_string(&legacy_path)?;
+
+        // Each line is a memory fact
+        for (i, line) in legacy_content.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            // Remove leading "- " if present
+            let fact = line.strip_prefix("- ").unwrap_or(line);
+
+            // Create a simple memory entry from legacy fact
+            entries.push(MemoryEntry {
+                id: format!("legacy-{}", i),
+                trigger: fact
+                    .split_whitespace()
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                confidence: 0.5,
+                domain: MemoryDomain::ProjectSpecific,
+                source: MemorySource::ManualEntry,
+                scope: MemoryScope::Global,
+                project_id: None,
+                action: fact.to_string(),
+                evidence: Vec::new(),
+                created_at: SystemTime::now(),
+                last_used: None,
+                use_count: 0,
+            });
+        }
+
+        // Migrate to YAML format
+        save_entries(&yaml_path, &entries)?;
+    }
+
+    Ok(entries)
+}
+
+/// Save memory entries to YAML file
+pub fn save_entries(path: &Path, entries: &[MemoryEntry]) -> Result<()> {
+    // Pre-allocate YAML content string with estimated capacity
+    let mut yaml_content = String::with_capacity(entries.len() * 512);
+
+    for entry in entries {
+        yaml_content.push_str("---\n");
+        yaml_content.push_str(&serde_yaml::to_string(entry)?);
+        yaml_content.push('\n');
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    fs::write(path, yaml_content)?;
+    Ok(())
+}
+
+/// Add a new memory entry
+pub fn add_entry(memory_dir: &Path, entry: MemoryEntry) -> Result<()> {
+    fs::create_dir_all(memory_dir)?;
+
+    let yaml_path = memory_dir.join("memory.yaml");
+    let mut entries = load(memory_dir)?;
+
+    // Check if entry with same ID exists, update if so
+    if let Some(existing) = entries.iter_mut().find(|e| e.id == entry.id) {
+        *existing = entry;
+    } else {
+        entries.push(entry);
+    }
+
+    save_entries(&yaml_path, &entries)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use uuid::Uuid;
+
+    fn temp_dir() -> PathBuf {
+        let path = std::env::temp_dir().join(format!("rustycode-memory-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn loads_yaml_format() {
+        let dir = temp_dir();
+
+        // Create a YAML memory file
+        let yaml_content = r#"---
+id: test-entry-1
+trigger: "when writing async code"
+confidence: 0.8
+domain: code-style
+source: manual-entry
+scope: global
+project_id: ~
+action: "Use async/await pattern for asynchronous code"
+evidence: []
+created_at: "1740940800"
+last_used: ~
+use_count: 0
+"#;
+        let yaml_path = dir.join("memory.yaml");
+        fs::write(&yaml_path, yaml_content).unwrap();
+
+        let entries = load(&dir).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "test-entry-1");
+        assert_eq!(entries[0].trigger, "when writing async code");
+        assert_eq!(entries[0].confidence, 0.8);
+    }
+
+    #[test]
+    fn migrates_legacy_format() {
+        let dir = temp_dir();
+
+        // Create a legacy notes.md file
+        let legacy_content = r#"# Project Notes
+- User prefers async/await pattern
+- Database is PostgreSQL
+- Testing uses Jest
+"#;
+        fs::write(dir.join("notes.md"), legacy_content).unwrap();
+
+        let entries = load(&dir).unwrap();
+
+        // Should migrate 3 facts
+        assert!(entries.len() >= 3);
+
+        // YAML file should be created
+        assert!(dir.join("memory.yaml").exists());
+    }
+
+    #[test]
+    fn loads_yaml_without_last_used() {
+        let dir = temp_dir();
+
+        // Create a YAML memory file without `last_used` field
+        let yaml_content = r#"---
+id: test-entry-no-last-used
+trigger: "when writing async code"
+confidence: 0.7
+domain: code-style
+source: manual-entry
+scope: global
+project_id: ~
+action: "Use async/await pattern for asynchronous code"
+evidence: []
+created_at: "1740940800"
+use_count: 0
+"#;
+
+        let yaml_path = dir.join("memory.yaml");
+        fs::write(&yaml_path, yaml_content).unwrap();
+
+        let entries = load(&dir).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "test-entry-no-last-used");
+        assert_eq!(entries[0].confidence, 0.7);
+        // last_used should be None but parsing must succeed
+        assert!(entries[0].last_used.is_none());
+    }
+
+    #[test]
+    fn add_entry_and_load_roundtrip() {
+        let dir = temp_dir();
+
+        let entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "roundtrip-1".to_string(),
+            trigger: "trigger me".to_string(),
+            confidence: 0.6,
+            domain: MemoryDomain::Testing,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "Do something".to_string(),
+        });
+
+        add_entry(&dir, entry.clone()).unwrap();
+
+        let entries = load(&dir).unwrap();
+        assert!(!entries.is_empty());
+        // Find our entry
+        let found = entries.iter().find(|e| e.id == entry.id);
+        assert!(found.is_some());
+        let f = found.unwrap();
+        assert_eq!(f.trigger, "trigger me");
+        assert_eq!(f.domain, MemoryDomain::Testing);
+    }
+
+    #[test]
+    fn confidence_clamping() {
+        let config = MemoryEntryConfig {
+            id: "test".to_string(),
+            trigger: "test trigger".to_string(),
+            confidence: 1.5, // Too high
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "test action".to_string(),
+        };
+        let entry = MemoryEntry::new(config);
+
+        assert_eq!(entry.confidence, 0.9); // Clamped to max
+    }
+
+    #[test]
+    fn confidence_boost_and_decay() {
+        let config = MemoryEntryConfig {
+            id: "test".to_string(),
+            trigger: "test trigger".to_string(),
+            confidence: 0.5,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "test action".to_string(),
+        };
+        let mut entry = MemoryEntry::new(config);
+
+        entry.boost_confidence(0.2);
+        assert!((entry.confidence - 0.7).abs() < 0.001);
+        assert_eq!(entry.use_count, 1);
+
+        entry.decay_confidence(0.3);
+        assert!((entry.confidence - 0.4).abs() < 0.001);
+    }
+
+    #[test]
+    fn relevance_calculation() {
+        let config = MemoryEntryConfig {
+            id: "test".to_string(),
+            trigger: "async code".to_string(),
+            confidence: 0.8,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "Use async/await".to_string(),
+        };
+        let entry = MemoryEntry::new(config);
+
+        let score = entry.calculate_relevance("writing async code", &MemoryDomain::CodeStyle);
+        assert!(score > 0.0); // Should match domain and trigger
+    }
+
+    #[test]
+    fn memory_domain_serde_roundtrip() {
+        for domain in &[
+            MemoryDomain::CodeStyle,
+            MemoryDomain::Testing,
+            MemoryDomain::Git,
+            MemoryDomain::Debugging,
+            MemoryDomain::Workflow,
+            MemoryDomain::Architecture,
+            MemoryDomain::ProjectSpecific,
+        ] {
+            let yaml = serde_yaml::to_string(domain).unwrap();
+            let decoded: MemoryDomain = serde_yaml::from_str(&yaml).unwrap();
+            assert_eq!(*domain, decoded);
+        }
+    }
+
+    #[test]
+    fn memory_scope_serde_roundtrip() {
+        let yaml = serde_yaml::to_string(&MemoryScope::Project).unwrap();
+        let decoded: MemoryScope = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(MemoryScope::Project, decoded);
+    }
+
+    #[test]
+    fn memory_source_serde_roundtrip() {
+        for source in &[
+            MemorySource::SessionObservation,
+            MemorySource::UserExplicit,
+            MemorySource::ProjectAnalysis,
+            MemorySource::ManualEntry,
+        ] {
+            let yaml = serde_yaml::to_string(source).unwrap();
+            let decoded: MemorySource = serde_yaml::from_str(&yaml).unwrap();
+            assert_eq!(*source, decoded);
+        }
+    }
+
+    #[test]
+    fn confidence_clamped_below_min() {
+        let config = MemoryEntryConfig {
+            id: "low".to_string(),
+            trigger: "t".to_string(),
+            confidence: 0.1, // Below min
+            domain: MemoryDomain::Debugging,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Project,
+            project_id: Some("proj".to_string()),
+            action: "a".to_string(),
+        };
+        let entry = MemoryEntry::new(config);
+        assert!((entry.confidence - 0.3).abs() < 0.001);
+        assert_eq!(entry.project_id.as_deref(), Some("proj"));
+    }
+
+    #[test]
+    fn boost_confidence_caps_at_max() {
+        let config = MemoryEntryConfig {
+            id: "cap".to_string(),
+            trigger: "t".to_string(),
+            confidence: 0.85,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        };
+        let mut entry = MemoryEntry::new(config);
+        entry.boost_confidence(0.5);
+        assert!((entry.confidence - 0.9).abs() < 0.001); // Capped at 0.9
+    }
+
+    #[test]
+    fn decay_confidence_floors_at_zero() {
+        let config = MemoryEntryConfig {
+            id: "floor".to_string(),
+            trigger: "t".to_string(),
+            confidence: 0.3,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        };
+        let mut entry = MemoryEntry::new(config);
+        entry.decay_confidence(1.0);
+        assert!((entry.confidence - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn relevance_no_domain_match_lower_score() {
+        let config = MemoryEntryConfig {
+            id: "cross".to_string(),
+            trigger: "async".to_string(),
+            confidence: 0.8,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        };
+        let entry = MemoryEntry::new(config);
+        let score_same = entry.calculate_relevance("async", &MemoryDomain::CodeStyle);
+        let score_diff = entry.calculate_relevance("async", &MemoryDomain::Testing);
+        assert!(score_same > score_diff);
+    }
+
+    #[test]
+    fn get_memory_dir_returns_rustycode_path() {
+        let cwd = Path::new("/tmp/myproject");
+        let dir = get_memory_dir(cwd);
+        assert!(dir.starts_with(".rustycode"));
+    }
+
+    #[test]
+    fn extract_project_name_from_https_url() {
+        assert_eq!(
+            extract_project_name("https://github.com/user/my-project.git"),
+            "my-project"
+        );
+    }
+
+    #[test]
+    fn extract_project_name_without_git_suffix() {
+        assert_eq!(
+            extract_project_name("https://github.com/user/my-project"),
+            "my-project"
+        );
+    }
+
+    #[test]
+    fn extract_project_name_from_ssh_url() {
+        assert_eq!(extract_project_name("git@github.com:user/repo.git"), "repo");
+    }
+
+    #[test]
+    fn extract_project_name_single_component() {
+        assert_eq!(extract_project_name("my-repo"), "my-repo");
+    }
+
+    #[test]
+    fn hash_remote_url_deterministic() {
+        let h1 = hash_remote_url("https://github.com/user/repo.git");
+        let h2 = hash_remote_url("https://github.com/user/repo.git");
+        assert_eq!(h1, h2);
+        assert_eq!(h1.len(), 24); // 12 bytes = 24 hex chars
+    }
+
+    #[test]
+    fn hash_remote_url_different_urls() {
+        let h1 = hash_remote_url("https://github.com/user/repo1.git");
+        let h2 = hash_remote_url("https://github.com/user/repo2.git");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn hash_path_deterministic() {
+        let h1 = hash_path(Path::new("/tmp/project"));
+        let h2 = hash_path(Path::new("/tmp/project"));
+        assert_eq!(h1, h2);
+        assert_eq!(h1.len(), 24);
+    }
+
+    #[test]
+    fn hash_path_different_paths() {
+        let h1 = hash_path(Path::new("/tmp/project-a"));
+        let h2 = hash_path(Path::new("/tmp/project-b"));
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn should_prune_low_confidence_no_last_used() {
+        let entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "prune-test".to_string(),
+            trigger: "t".to_string(),
+            confidence: 0.2,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        });
+        // Below threshold but no last_used — not pruned
+        assert!(!entry.should_prune());
+    }
+
+    #[test]
+    fn should_prune_high_confidence() {
+        let mut entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "keep".to_string(),
+            trigger: "t".to_string(),
+            confidence: 0.7,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        });
+        entry.last_used = Some(SystemTime::UNIX_EPOCH);
+        // High confidence — never pruned regardless of last_used
+        assert!(!entry.should_prune());
+    }
+
+    #[test]
+    fn observation_serialization() {
+        let obs = Observation {
+            timestamp: SystemTime::UNIX_EPOCH,
+            pattern_type: "test-pattern".to_string(),
+            description: "observed something".to_string(),
+            confidence_boost: 0.1,
+        };
+        let yaml = serde_yaml::to_string(&obs).unwrap();
+        let decoded: Observation = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(decoded.pattern_type, "test-pattern");
+        assert_eq!(decoded.description, "observed something");
+        assert!((decoded.confidence_boost - 0.1).abs() < 0.001);
+    }
+
+    #[test]
+    fn legacy_memory_entry_serialization() {
+        let entry = LegacyMemoryEntry {
+            path: "src/main.rs".to_string(),
+            preview: "fn main() {}".to_string(),
+        };
+        let yaml = serde_yaml::to_string(&entry).unwrap();
+        assert!(yaml.contains("src/main.rs"));
+        assert!(yaml.contains("fn main()"));
+    }
+
+    #[test]
+    fn add_entry_updates_existing() {
+        let dir = temp_dir();
+
+        let entry1 = MemoryEntry::new(MemoryEntryConfig {
+            id: "update-test".to_string(),
+            trigger: "old trigger".to_string(),
+            confidence: 0.5,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "old action".to_string(),
+        });
+        add_entry(&dir, entry1).unwrap();
+
+        let entry2 = MemoryEntry::new(MemoryEntryConfig {
+            id: "update-test".to_string(),
+            trigger: "new trigger".to_string(),
+            confidence: 0.7,
+            domain: MemoryDomain::Testing,
+            source: MemorySource::UserExplicit,
+            scope: MemoryScope::Project,
+            project_id: Some("proj-1".to_string()),
+            action: "new action".to_string(),
+        });
+        add_entry(&dir, entry2).unwrap();
+
+        let entries = load(&dir).unwrap();
+        assert_eq!(entries.len(), 1); // Updated, not duplicated
+        assert_eq!(entries[0].trigger, "new trigger");
+        assert_eq!(entries[0].confidence, 0.7);
+        assert_eq!(entries[0].domain, MemoryDomain::Testing);
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let dir = temp_dir();
+        let path = dir.join("memory.yaml");
+
+        let entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "roundtrip-rt".to_string(),
+            trigger: "round trip trigger".to_string(),
+            confidence: 0.65,
+            domain: MemoryDomain::Architecture,
+            source: MemorySource::ProjectAnalysis,
+            scope: MemoryScope::Project,
+            project_id: Some("proj-42".to_string()),
+            action: "Refactor module X".to_string(),
+        });
+
+        save_entries(&path, std::slice::from_ref(&entry)).unwrap();
+        let loaded = load(&dir).unwrap();
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "roundtrip-rt");
+        assert_eq!(loaded[0].trigger, "round trip trigger");
+        assert_eq!(loaded[0].domain, MemoryDomain::Architecture);
+        assert_eq!(loaded[0].source, MemorySource::ProjectAnalysis);
+        assert_eq!(loaded[0].scope, MemoryScope::Project);
+        assert_eq!(loaded[0].project_id.as_deref(), Some("proj-42"));
+        assert_eq!(loaded[0].action, "Refactor module X");
+    }
+
+    #[test]
+    fn calculate_relevance_no_trigger_match() {
+        let entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "no-match".to_string(),
+            trigger: "async code".to_string(),
+            confidence: 0.8,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        });
+        // Query doesn't contain trigger text
+        let score = entry.calculate_relevance("database migrations", &MemoryDomain::CodeStyle);
+        // Should still have domain match score but no trigger bonus
+        assert!(score > 0.0);
+        assert!(score < 0.5); // Domain only, no trigger
+    }
+
+    #[test]
+    fn memory_entry_config_fields() {
+        let entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "cfg-test".to_string(),
+            trigger: "my trigger".to_string(),
+            confidence: 0.55,
+            domain: MemoryDomain::Workflow,
+            source: MemorySource::SessionObservation,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "Run tests first".to_string(),
+        });
+        assert_eq!(entry.id, "cfg-test");
+        assert_eq!(entry.trigger, "my trigger");
+        assert!((entry.confidence - 0.55).abs() < 0.001);
+        assert_eq!(entry.domain, MemoryDomain::Workflow);
+        assert_eq!(entry.source, MemorySource::SessionObservation);
+        assert!(entry.evidence.is_empty());
+        assert_eq!(entry.use_count, 0);
+        assert!(entry.last_used.is_none());
+    }
+
+    #[test]
+    fn project_context_construction() {
+        let ctx = ProjectContext {
+            id: "abc123".to_string(),
+            name: "my-project".to_string(),
+            path: PathBuf::from("/home/user/my-project"),
+        };
+        assert_eq!(ctx.id, "abc123");
+        assert_eq!(ctx.name, "my-project");
+        assert_eq!(ctx.path, PathBuf::from("/home/user/my-project"));
+    }
+
+    #[test]
+    fn load_empty_directory() {
+        let dir = temp_dir();
+        let entries = load(&dir).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn load_nonexistent_directory() {
+        let dir = temp_dir().join("no-such-dir");
+        let entries = load(&dir).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn boost_confidence_updates_last_used_and_count() {
+        let mut entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "boost-track".to_string(),
+            trigger: "t".to_string(),
+            confidence: 0.5,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        });
+        assert!(entry.last_used.is_none());
+        assert_eq!(entry.use_count, 0);
+
+        entry.boost_confidence(0.1);
+        assert!(entry.last_used.is_some());
+        assert_eq!(entry.use_count, 1);
+
+        entry.boost_confidence(0.1);
+        assert_eq!(entry.use_count, 2);
+    }
+
+    #[test]
+    fn memory_entry_evidence_with_observations() {
+        let mut entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "evidence-test".to_string(),
+            trigger: "t".to_string(),
+            confidence: 0.5,
+            domain: MemoryDomain::Testing,
+            source: MemorySource::SessionObservation,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        });
+
+        entry.evidence.push(Observation {
+            timestamp: SystemTime::now(),
+            pattern_type: "test-failure".to_string(),
+            description: "Test failed due to missing mock".to_string(),
+            confidence_boost: 0.1,
+        });
+
+        assert_eq!(entry.evidence.len(), 1);
+        assert_eq!(entry.evidence[0].pattern_type, "test-failure");
+    }
+
+    #[test]
+    fn save_entries_creates_parent_dirs() {
+        let dir = temp_dir();
+        let nested = dir.join("deep").join("nested").join("path");
+        let path = nested.join("memory.yaml");
+
+        let entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "deep-test".to_string(),
+            trigger: "t".to_string(),
+            confidence: 0.5,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        });
+
+        save_entries(&path, &[entry]).unwrap();
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn save_entries_empty_list() {
+        let dir = temp_dir();
+        let path = dir.join("memory.yaml");
+        save_entries(&path, &[]).unwrap();
+        assert!(path.exists());
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.is_empty());
+    }
+
+    #[test]
+    fn decay_confidence_floored_at_0() {
+        let mut entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "decay-test".to_string(),
+            trigger: "t".to_string(),
+            confidence: 0.4,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        });
+        entry.decay_confidence(0.5); // would go to -0.1
+        assert!((entry.confidence - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn calculate_relevance_domain_and_trigger() {
+        let entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "rel-both".to_string(),
+            trigger: "async code".to_string(),
+            confidence: 0.8,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        });
+        let score = entry.calculate_relevance("async code patterns", &MemoryDomain::CodeStyle);
+        // Both domain match (0.5) and trigger match (0.3) = 0.8 * confidence 0.8 = 0.64
+        assert!(score > 0.5);
+    }
+
+    #[test]
+    fn hash_different_urls_different_hashes() {
+        let hash1 = super::hash_remote_url("https://github.com/user/repo-a.git");
+        let hash2 = super::hash_remote_url("https://github.com/user/repo-b.git");
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn add_entry_to_directory() {
+        let dir = temp_dir();
+        let entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "add-test".to_string(),
+            trigger: "t".to_string(),
+            confidence: 0.6,
+            domain: MemoryDomain::Workflow,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "Do the thing".to_string(),
+        });
+
+        add_entry(&dir, entry).unwrap();
+        let entries = load(&dir).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "add-test");
+    }
+}

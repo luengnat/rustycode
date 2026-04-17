@@ -1,0 +1,22 @@
+{
+  "servers": {
+    "filesystem": {
+      "server_id": "filesystem",
+      "name": "Filesystem Server",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "enable_tools": true,
+      "enable_resources": false,
+      "enable_prompts": false
+    },
+    "git": {
+      "server_id": "git",
+      "name": "Git Server",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-git"],
+      "enable_tools": true,
+      "enable_resources": false,
+      "enable_prompts": false
+    }
+  }
+}

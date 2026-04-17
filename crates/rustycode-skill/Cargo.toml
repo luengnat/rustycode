@@ -1,0 +1,24 @@
+[package]
+name = "rustycode-skill"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+once_cell.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+walkdir.workspace = true
+chrono.workspace = true
+tokio = { workspace = true, features = ["fs"] }
+notify = "6.1"
+tracing.workspace = true
+rustycode-protocol = { path = "../rustycode-protocol" }
+
+[dev-dependencies]
+uuid.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

@@ -1,0 +1,125 @@
+.harness*
+.sparv
+**/target
+crates/rustycode-web/target/
+crates/rustycode-web/dist/
+/target/
+/dist/
+/.rustycode/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+crates/.DS_Store
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.tmp
+
+# Benchmark baselines and reports
+benches/report/
+criterion/
+*.baseline
+
+# Credentials and secrets
+.env
+.env.local
+credentials.json
+*.credentials.json
+config.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+
+# Test artifacts and binaries
+*.rlib
+test_ext
+test_todo_system
+test_tool_selector
+test_config
+test_import
+*.exp
+*.tar.gz
+
+# Stray root-level test scripts and binaries
+/test_*.rs
+/test_*.sh
+/test_*.txt
+/test_profile
+/test.txt
+/greet.py
+/hello.py
+/show_themes.py
+
+# Logs
+*.log
+
+# ── Orchestra runtime noise (auto-generated, never commit) ──
+.orchestra/.lock
+.orchestra/activity.logl
+.orchestra/STATE.md
+.orchestra.orchestra.db
+.orchestra.orchestra.db-*
+.orchestra/metrics.json
+.orchestra/completed-units.json
+.orchestra/DISCUSSION-MANIFEST.json
+.orchestra/auto.lock
+.orchestra/runtime/
+.orchestra/forensics/
+*~
+*.code-workspace
+.env.*
+!.env.example
+node_modules/
+.next/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+venv/
+target/
+vendor/
+coverage/
+.cache/
+tmp/
+rust_out
+.worktrees/
+
+# Fastembed cache
+.fastembed_cache/
+crates/rustycode-tools/.fastembed_cache/
+
+# Claude Code session data
+.claude/
+
+# Agent memory/planning systems
+.serena/
+.sisyphus/
+
+# Incomplete/unfinished modules (development in progress)
+# (orchestration module was completed)
+
+# Session compaction snapshots (runtime artifacts)
+crates/rustycode-session/sessions/
+
+# Stray binary packages
+*.deb
+
+# Local command history
+.rustycode_command_history
+
+# Benchmark results
+crates/rustycode-runtime/benchmark_results/
+
+# Task output files
+jobs/
+harbor-agent/

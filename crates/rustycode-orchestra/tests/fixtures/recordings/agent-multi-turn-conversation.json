@@ -1,0 +1,58 @@
+{
+  "name": "agent-multi-turn-conversation",
+  "description": "Multi-turn conversation where agent reads a file, then modifies it",
+  "turns": [
+    {
+      "role": "user",
+      "content": "Read the file config.toml"
+    },
+    {
+      "role": "assistant",
+      "content": "I'll read the config.toml file for you.",
+      "tool_uses": [
+        {
+          "name": "read_file",
+          "input": {
+            "file_path": "config.toml"
+          },
+          "output": "[settings]\nport = 8080\ndebug = false"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Now enable debug mode and change the port to 9000"
+    },
+    {
+      "role": "assistant",
+      "content": "I'll update the configuration file with debug mode enabled and port 9000.",
+      "tool_uses": [
+        {
+          "name": "write_file",
+          "input": {
+            "file_path": "config.toml",
+            "content": "[settings]\nport = 9000\ndebug = true"
+          },
+          "output": "File updated successfully"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Verify the changes"
+    },
+    {
+      "role": "assistant",
+      "content": "I'll read the file to verify the changes.",
+      "tool_uses": [
+        {
+          "name": "read_file",
+          "input": {
+            "file_path": "config.toml"
+          },
+          "output": "[settings]\nport = 9000\ndebug = true"
+        }
+      ]
+    }
+  ]
+}

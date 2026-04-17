@@ -1,0 +1,59 @@
+[package]
+name = "rustycode-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+orchestra-v2 = []
+vector-memory = [
+    "dep:rustycode-vector-memory",
+    "rustycode-core/vector-memory",
+    "rustycode-tui/vector-memory",
+    "rustycode-tools/vector-memory",
+    "rustycode-llm/vector-memory",
+]
+
+[[bin]]
+name = "rustycode-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_yaml.workspace = true
+toml.workspace = true
+regex.workspace = true
+dirs.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+num_cpus.workspace = true
+rustycode-bench = { path = "../rustycode-bench" }
+rustycode-bus = { path = "../rustycode-bus" }
+rustycode-core = { path = "../rustycode-core", default-features = false }
+rustycode-runtime = { path = "../rustycode-runtime" }
+rustycode-protocol = { path = "../rustycode-protocol" }
+rustycode-tui = { path = "../rustycode-tui", default-features = false }
+rustycode-llm = { path = "../rustycode-llm" }
+rustycode-providers = { path = "../rustycode-providers" }
+rustycode-tools = { path = "../rustycode-tools", default-features = false }
+rustycode-orchestra = { path = "../rustycode-orchestra" }
+rustycode-memory = { path = "../rustycode-memory" }
+rustycode-storage = { path = "../rustycode-storage" }
+rustycode-vector-memory = { path = "../rustycode-vector-memory", optional = true }
+secrecy.workspace = true
+uuid.workspace = true
+axum.workspace = true
+tower-http = { workspace = true, features = ["fs"] }
+futures-util.workspace = true
+colored.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

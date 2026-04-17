@@ -1,0 +1,13 @@
+---
+id: fact-38bfe378-1fa4-4fcb-91e3-eafea2ca2204
+trigger: team prefers small
+confidence: 0.5
+domain: project-specific
+source: manual-entry
+scope: global
+project_id: null
+action: team prefers small focused PRs
+evidence: []
+created_at: '1773392870'
+use_count: 0
+

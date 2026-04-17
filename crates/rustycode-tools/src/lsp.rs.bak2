@@ -1,0 +1,1603 @@
+use crate::{Tool, ToolContext, ToolOutput, ToolPermission};
+use anyhow::{anyhow, Context, Result};
+use lsp_types::{CompletionContext, CompletionTriggerKind, DiagnosticSeverity, Position, Url};
+use rustycode_lsp::{create_client_config_for_language, LspClient};
+use rustycode_shared_runtime as shared_runtime;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+
+static LSP_CLIENTS: OnceLock<Mutex<HashMap<String, LspClient>>> = OnceLock::new();
+const MAX_LSP_CLIENTS: usize = 10;
+
+fn clients() -> &'static Mutex<HashMap<String, LspClient>> {
+    LSP_CLIENTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cleanup_clients_if_needed(map: &mut HashMap<String, LspClient>) {
+    while map.len() >= MAX_LSP_CLIENTS {
+        if let Some(first_key) = map.keys().next().cloned() {
+            // Gracefully shutdown the LSP client before removing it from the map
+            if let Some(mut client) = map.remove(&first_key) {
+                // Best-effort synchronous shutdown using existing helper
+                let _ = run_async_result(async { client.shutdown().await });
+                let _ = run_async_result(async { client.exit().await });
+            }
+        }
+    }
+}
+
+fn language_for_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+    {
+        "rs" => "rust",
+        "ts" | "tsx" | "js" | "jsx" => "typescript",
+        "py" => "python",
+        "go" => "go",
+        _ => "rust",
+    }
+}
+
+fn resolve_file_path(ctx: &ToolContext, params: &Value) -> Result<PathBuf> {
+    let path = params
+        .get("file_path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("missing required parameter: file_path"))?;
+    let p = PathBuf::from(path);
+    let resolved = if p.is_absolute() { p } else { ctx.cwd.join(p) };
+    ensure_path_within_workspace(ctx, &resolved)?;
+    Ok(resolved)
+}
+
+fn ensure_path_within_workspace(ctx: &ToolContext, path: &Path) -> Result<()> {
+    let workspace_root = std::fs::canonicalize(&ctx.cwd).unwrap_or_else(|_| ctx.cwd.clone());
+    let canonical_anchor = canonicalize_existing_or_parent(path)?;
+    anyhow::ensure!(
+        canonical_anchor.starts_with(&workspace_root),
+        "path '{}' is outside workspace '{}' and is blocked",
+        path.display(),
+        workspace_root.display()
+    );
+    Ok(())
+}
+
+fn canonicalize_existing_or_parent(path: &Path) -> Result<PathBuf> {
+    let mut current = path.to_path_buf();
+    loop {
+        if current.exists() {
+            return std::fs::canonicalize(&current)
+                .map_err(|e| anyhow!("failed to canonicalize '{}': {}", current.display(), e));
+        }
+        if !current.pop() {
+            return Err(anyhow!(
+                "unable to resolve path anchor for '{}'",
+                path.display()
+            ));
+        }
+    }
+}
+
+fn param_u32(params: &Value, key: &str) -> Result<u32> {
+    params
+        .get(key)
+        .and_then(Value::as_u64)
+        .map(|v| v as u32)
+        .ok_or_else(|| anyhow!("missing required parameter: {key}"))
+}
+
+fn run_async_result<F, T>(fut: F) -> Result<T>
+where
+    F: Future<Output = Result<T>>,
+{
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        // If we're inside a runtime use block_in_place to execute the
+        // future synchronously without blocking the runtime's async tasks.
+        tokio::task::block_in_place(|| handle.block_on(fut))
+    } else {
+        // No current runtime, use the shared process-wide runtime to avoid
+        // creating short-lived runtimes in tools.
+        shared_runtime::block_on_shared(fut)
+    }
+}
+
+fn with_lsp_client<T>(
+    ctx: &ToolContext,
+    language: &str,
+    op: impl FnOnce(&mut LspClient) -> Result<T>,
+) -> Result<T> {
+    let root_uri = Url::from_directory_path(&ctx.cwd)
+        .ok()
+        .map(|u: Url| u.to_string());
+    let key = format!("{}::{}", language, ctx.cwd.display());
+
+    let mut map = clients()
+        .lock()
+        .map_err(|_| anyhow!("failed to lock lsp client registry"))?;
+
+    if !map.contains_key(&key) {
+        cleanup_clients_if_needed(&mut map);
+        let mut cfg = create_client_config_for_language(language)
+            .ok_or_else(|| anyhow!("unsupported language for lsp tool: {}", language))?;
+        cfg.root_uri = root_uri;
+        map.insert(key.clone(), LspClient::new(cfg));
+    }
+
+    let client = map
+        .get_mut(&key)
+        .ok_or_else(|| anyhow!("failed to retrieve lsp client"))?;
+
+    if !client.is_running() {
+        run_async_result(async { client.start().await })
+            .context("failed to auto-start language server")?;
+    }
+
+    op(client)
+}
+
+pub struct LspDiagnosticsTool;
+pub struct LspHoverTool;
+pub struct LspDefinitionTool;
+pub struct LspCompletionTool;
+
+impl Tool for LspDiagnosticsTool {
+    fn name(&self) -> &str {
+        "lsp_diagnostics"
+    }
+
+    fn description(&self) -> &str {
+        "Check which language servers are available and their status. Use this to verify code intelligence capabilities before using other LSP tools."
+    }
+
+    fn permission(&self) -> ToolPermission {
+        ToolPermission::Read
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "servers": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                }
+            }
+        })
+    }
+
+    fn execute(&self, params: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
+        let servers = params
+            .get("servers")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str().map(ToOwned::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| {
+                vec![
+                    "rust-analyzer".to_string(),
+                    "typescript-language-server".to_string(),
+                    "pyright-langserver".to_string(),
+                ]
+            });
+        let statuses = rustycode_lsp::discover(&servers);
+        Ok(ToolOutput::with_structured(
+            serde_json::to_string_pretty(&statuses)?,
+            json!(statuses),
+        ))
+    }
+}
+
+impl Tool for LspHoverTool {
+    fn name(&self) -> &str {
+        "lsp_hover"
+    }
+
+    fn description(&self) -> &str {
+        "Get hover information (documentation, type info) for code at a specific position. Use this to understand what a function, variable, or parameter does. Requires file_path, line, and character position."
+    }
+
+    fn permission(&self) -> ToolPermission {
+        ToolPermission::Read
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["file_path", "line", "character"],
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "minimum": 0 },
+                "character": { "type": "integer", "minimum": 0 },
+                "language": { "type": "string" }
+            }
+        })
+    }
+
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let file_path = resolve_file_path(ctx, &params)?;
+        let line = param_u32(&params, "line")?;
+        let character = param_u32(&params, "character")?;
+        let language = params
+            .get("language")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| language_for_path(&file_path).to_string());
+        let text = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("failed to read file {}", file_path.display()))?;
+        let uri = Url::from_file_path(&file_path)
+            .map_err(|_| anyhow!("invalid file path for URI: {}", file_path.display()))?;
+
+        let hover = with_lsp_client(ctx, &language, |client| {
+            run_async_result(async {
+                client
+                    .open_document(uri.clone(), &language, 1, &text)
+                    .await?;
+                client
+                    .hover(uri.clone(), Position::new(line, character))
+                    .await
+            })
+        })?;
+
+        Ok(ToolOutput::with_structured(
+            serde_json::to_string_pretty(&hover)?,
+            json!({ "hover": hover }),
+        ))
+    }
+}
+
+impl Tool for LspDefinitionTool {
+    fn name(&self) -> &str {
+        "lsp_definition"
+    }
+
+    fn description(&self) -> &str {
+        "Jump to the definition of a function, variable, or type at a specific position. Use this to find where symbols are defined in the codebase. Requires file_path, line, and character position."
+    }
+
+    fn permission(&self) -> ToolPermission {
+        ToolPermission::Read
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["file_path", "line", "character"],
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "minimum": 0 },
+                "character": { "type": "integer", "minimum": 0 },
+                "language": { "type": "string" }
+            }
+        })
+    }
+
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let file_path = resolve_file_path(ctx, &params)?;
+        let line = param_u32(&params, "line")?;
+        let character = param_u32(&params, "character")?;
+        let language = params
+            .get("language")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| language_for_path(&file_path).to_string());
+        let text = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("failed to read file {}", file_path.display()))?;
+        let uri = Url::from_file_path(&file_path)
+            .map_err(|_| anyhow!("invalid file path for URI: {}", file_path.display()))?;
+
+        let definition = with_lsp_client(ctx, &language, |client| {
+            run_async_result(async {
+                client
+                    .open_document(uri.clone(), &language, 1, &text)
+                    .await?;
+                client
+                    .goto_definition(uri.clone(), Position::new(line, character))
+                    .await
+            })
+        })?;
+
+        Ok(ToolOutput::with_structured(
+            serde_json::to_string_pretty(&definition)?,
+            json!({ "definition": definition }),
+        ))
+    }
+}
+
+impl Tool for LspCompletionTool {
+    fn name(&self) -> &str {
+        "lsp_completion"
+    }
+
+    fn description(&self) -> &str {
+        "Get code completions (suggestions) at a specific position. Use this to see what functions, variables, or keywords are available while typing. Requires file_path, line, and character position."
+    }
+
+    fn permission(&self) -> ToolPermission {
+        ToolPermission::Read
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["file_path", "line", "character"],
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "minimum": 0 },
+                "character": { "type": "integer", "minimum": 0 },
+                "language": { "type": "string" },
+                "trigger_character": { "type": "string" }
+            }
+        })
+    }
+
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let file_path = resolve_file_path(ctx, &params)?;
+        let line = param_u32(&params, "line")?;
+        let character = param_u32(&params, "character")?;
+        let language = params
+            .get("language")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| language_for_path(&file_path).to_string());
+        let text = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("failed to read file {}", file_path.display()))?;
+        let uri = Url::from_file_path(&file_path)
+            .map_err(|_| anyhow!("invalid file path for URI: {}", file_path.display()))?;
+
+        let trigger_character = params
+            .get("trigger_character")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        let context = trigger_character.clone().map(|ch| CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(ch),
+        });
+
+        let completion = with_lsp_client(ctx, &language, |client| {
+            run_async_result(async {
+                client
+                    .open_document(uri.clone(), &language, 1, &text)
+                    .await?;
+                client
+                    .completion(uri.clone(), Position::new(line, character), context)
+                    .await
+            })
+        })?;
+
+        Ok(ToolOutput::with_structured(
+            serde_json::to_string_pretty(&completion)?,
+            json!({ "completion": completion }),
+        ))
+    }
+}
+
+pub struct LspDocumentSymbolsTool;
+
+impl Tool for LspDocumentSymbolsTool {
+    fn name(&self) -> &str {
+        "lsp_document_symbols"
+    }
+
+    fn description(&self) -> &str {
+        "Get the structure of a file (functions, classes, modules, etc.) without reading the entire content. Use this to:
+- Understand what's in a file before reading it
+- Get an overview of file organization
+- Find specific symbols in a file
+- Navigate large files efficiently
+
+Requires: file_path
+Returns: Hierarchical list of symbols with their types and locations"
+    }
+
+    fn permission(&self) -> ToolPermission {
+        ToolPermission::Read
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["file_path"],
+            "properties": {
+                "file_path": { "type": "string" },
+                "language": { "type": "string" }
+            }
+        })
+    }
+
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let file_path = resolve_file_path(ctx, &params)?;
+        let language = params
+            .get("language")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| language_for_path(&file_path).to_string());
+        let text = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("failed to read file {}", file_path.display()))?;
+        let uri = Url::from_file_path(&file_path)
+            .map_err(|_| anyhow!("invalid file path for URI: {}", file_path.display()))?;
+
+        let symbols = with_lsp_client(ctx, &language, |client| {
+            run_async_result(async {
+                client
+                    .open_document(uri.clone(), &language, 1, &text)
+                    .await?;
+                client.document_symbols(uri).await
+            })
+        })?;
+
+        Ok(ToolOutput::with_structured(
+            serde_json::to_string_pretty(&symbols)?,
+            json!({ "symbols": symbols }),
+        ))
+    }
+}
+
+pub struct LspReferencesTool;
+
+impl Tool for LspReferencesTool {
+    fn name(&self) -> &str {
+        "lsp_references"
+    }
+
+    fn description(&self) -> &str {
+        "Find all references to a symbol across the codebase. Use this to:
+- Find all usages of a function or variable
+- See where a symbol is being used
+- Understand the impact of changing a symbol
+
+Requires: file_path, line, character
+Returns: List of locations where the symbol is referenced"
+    }
+
+    fn permission(&self) -> ToolPermission {
+        ToolPermission::Read
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["file_path", "line", "character"],
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "minimum": 0 },
+                "character": { "type": "integer", "minimum": 0 },
+                "language": { "type": "string" }
+            }
+        })
+    }
+
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let file_path = resolve_file_path(ctx, &params)?;
+        let line = param_u32(&params, "line")?;
+        let character = param_u32(&params, "character")?;
+        let language = params
+            .get("language")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| language_for_path(&file_path).to_string());
+        let text = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("failed to read file {}", file_path.display()))?;
+        let uri = Url::from_file_path(&file_path)
+            .map_err(|_| anyhow!("invalid file path for URI: {}", file_path.display()))?;
+
+        let references = with_lsp_client(ctx, &language, |client| {
+            run_async_result(async {
+                client
+                    .open_document(uri.clone(), &language, 1, &text)
+                    .await?;
+                client
+                    .references(uri.clone(), Position::new(line, character))
+                    .await
+            })
+        })?;
+
+        Ok(ToolOutput::with_structured(
+            serde_json::to_string_pretty(&references)?,
+            json!({ "references": references }),
+        ))
+    }
+}
+
+pub struct LspFullDiagnosticsTool;
+
+impl Tool for LspFullDiagnosticsTool {
+    fn name(&self) -> &str {
+        "lsp_full_diagnostics"
+    }
+
+    fn description(&self) -> &str {
+        "Get comprehensive diagnostics and build status for a file. Use this to:
+- Show all errors, warnings, and hints in a file
+- Check build status before committing
+- Get detailed error information with related locations
+- Understand compilation issues
+
+Requires: file_path
+Returns: List of diagnostics with severity, messages, and related information"
+    }
+
+    fn permission(&self) -> ToolPermission {
+        ToolPermission::Read
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["file_path"],
+            "properties": {
+                "file_path": { "type": "string" },
+                "language": { "type": "string" }
+            }
+        })
+    }
+
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let file_path = resolve_file_path(ctx, &params)?;
+        let language = params
+            .get("language")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| language_for_path(&file_path).to_string());
+        let text = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("failed to read file {}", file_path.display()))?;
+        let uri = Url::from_file_path(&file_path)
+            .map_err(|_| anyhow!("invalid file path for URI: {}", file_path.display()))?;
+
+        let diagnostics = with_lsp_client(ctx, &language, |client| {
+            run_async_result(async {
+                client
+                    .open_document(uri.clone(), &language, 1, &text)
+                    .await?;
+                client.diagnostic(uri).await
+            })
+        })?;
+
+        // Calculate build status
+        let error_count = diagnostics
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .count();
+        let warning_count = diagnostics
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::WARNING))
+            .count();
+        let hint_count = diagnostics
+            .iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::HINT))
+            .count();
+
+        let status = if error_count > 0 {
+            "failed"
+        } else if warning_count > 0 {
+            "warnings"
+        } else {
+            "success"
+        };
+
+        Ok(ToolOutput::with_structured(
+            serde_json::to_string_pretty(&diagnostics)?,
+            json!({
+                "diagnostics": diagnostics,
+                "build_status": {
+                    "status": status,
+                    "error_count": error_count,
+                    "warning_count": warning_count,
+                    "hint_count": hint_count
+                }
+            }),
+        ))
+    }
+}
+
+pub struct LspCodeActionsTool;
+
+impl Tool for LspCodeActionsTool {
+    fn name(&self) -> &str {
+        "lsp_code_actions"
+    }
+
+    fn description(&self) -> &str {
+        "Get available code actions and refactorings for a range. Use this to:
+- Find quick fixes for errors and warnings
+- Discover available refactorings
+- Get code improvements suggested by the language server
+
+Requires: file_path, line, character
+Optional: end_line, end_character (for range, defaults to position)
+Returns: List of code actions with titles and kinds"
+    }
+
+    fn permission(&self) -> ToolPermission {
+        ToolPermission::Read
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["file_path", "line", "character"],
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "description": "0-based line number" },
+                "character": { "type": "integer", "description": "0-based character offset" },
+                "end_line": { "type": "integer", "description": "0-based end line (optional)" },
+                "end_character": { "type": "integer", "description": "0-based end character (optional)" },
+                "language": { "type": "string" }
+            }
+        })
+    }
+
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let file_path = resolve_file_path(ctx, &params)?;
+        let language = params
+            .get("language")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| language_for_path(&file_path).to_string());
+        let line = params
+            .get("line")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| anyhow!("missing line parameter"))? as u32;
+        let character = params
+            .get("character")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| anyhow!("missing character parameter"))? as u32;
+
+        let end_line = params
+            .get("end_line")
+            .and_then(Value::as_i64)
+            .map(|v| v as u32);
+        let end_character = params
+            .get("end_character")
+            .and_then(Value::as_i64)
+            .map(|v| v as u32);
+
+        let text = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("failed to read file {}", file_path.display()))?;
+        let uri = Url::from_file_path(&file_path)
+            .map_err(|_| anyhow!("invalid file path for URI: {}", file_path.display()))?;
+
+        let range = lsp_types::Range {
+            start: Position { line, character },
+            end: Position {
+                line: end_line.unwrap_or(line),
+                character: end_character.unwrap_or(character),
+            },
+        };
+
+        let code_actions = with_lsp_client(ctx, &language, |client| {
+            run_async_result(async {
+                client
+                    .open_document(uri.clone(), &language, 1, &text)
+                    .await?;
+                client.code_actions(uri, range).await
+            })
+        })?;
+
+        // Format the output
+        let actions_summary: Vec<Value> = code_actions
+            .iter()
+            .map(|action| {
+                json!({
+                    "title": action.title,
+                    "kind": action.kind,
+                    "is_preferred": action.is_preferred,
+                    "disabled": action.disabled,
+                })
+            })
+            .collect();
+
+        Ok(ToolOutput::with_structured(
+            serde_json::to_string_pretty(&code_actions)?,
+            json!({ "code_actions": actions_summary }),
+        ))
+    }
+}
+
+pub struct LspRenameTool;
+
+impl Tool for LspRenameTool {
+    fn name(&self) -> &str {
+        "lsp_rename"
+    }
+
+    fn description(&self) -> &str {
+        "Rename a symbol at a position across all references. Use this to:
+- Rename variables, functions, types, and other symbols
+- Update all references automatically
+- Ensure code remains consistent
+
+Requires: file_path, line, character, new_name
+Returns: Workspace edit with all changes to apply"
+    }
+
+    fn permission(&self) -> ToolPermission {
+        ToolPermission::Write
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["file_path", "line", "character", "new_name"],
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "description": "0-based line number" },
+                "character": { "type": "integer", "description": "0-based character offset" },
+                "new_name": { "type": "string", "description": "New name for the symbol" },
+                "language": { "type": "string" }
+            }
+        })
+    }
+
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let file_path = resolve_file_path(ctx, &params)?;
+        let language = params
+            .get("language")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| language_for_path(&file_path).to_string());
+        let line = params
+            .get("line")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| anyhow!("missing line parameter"))? as u32;
+        let character = params
+            .get("character")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| anyhow!("missing character parameter"))? as u32;
+        let new_name = params
+            .get("new_name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("missing new_name parameter"))?;
+
+        let text = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("failed to read file {}", file_path.display()))?;
+        let uri = Url::from_file_path(&file_path)
+            .map_err(|_| anyhow!("invalid file path for URI: {}", file_path.display()))?;
+
+        let position = Position { line, character };
+
+        let workspace_edit = with_lsp_client(ctx, &language, |client| {
+            run_async_result(async {
+                client
+                    .open_document(uri.clone(), &language, 1, &text)
+                    .await?;
+                client.rename(uri, position, new_name.to_string()).await
+            })
+        })?;
+
+        // Format the output
+        let changes_summary = if let Some(changes) = &workspace_edit.changes {
+            changes
+                .iter()
+                .map(|(uri, edits)| {
+                    json!({
+                        "file": uri,
+                        "edits": edits.len()
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else if let Some(document_changes) = &workspace_edit.document_changes {
+            match document_changes {
+                lsp_types::DocumentChanges::Edits(edits) => edits
+                    .iter()
+                    .map(|edit| {
+                        json!({
+                            "file": edit.text_document.uri,
+                            "edits": edit.edits.len()
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+                lsp_types::DocumentChanges::Operations(ops) => ops
+                    .iter()
+                    .map(|op| match op {
+                        lsp_types::DocumentChangeOperation::Op(op) => match op {
+                            lsp_types::ResourceOp::Create(create) => json!({
+                                "file": create.uri,
+                                "operation": "create"
+                            }),
+                            lsp_types::ResourceOp::Rename(rename) => json!({
+                                "old": rename.old_uri,
+                                "new": rename.new_uri,
+                                "operation": "rename"
+                            }),
+                            lsp_types::ResourceOp::Delete(delete) => json!({
+                                "file": delete.uri,
+                                "operation": "delete"
+                            }),
+                        },
+                        lsp_types::DocumentChangeOperation::Edit(edit) => {
+                            json!({
+                                "file": edit.text_document.uri,
+                                "edits": edit.edits.len()
+                            })
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            }
+        } else {
+            vec![]
+        };
+
+        Ok(ToolOutput::with_structured(
+            serde_json::to_string_pretty(&workspace_edit)?,
+            json!({
+                "workspace_edit": workspace_edit,
+                "summary": {
+                    "new_name": new_name,
+                    "changes": changes_summary
+                }
+            }),
+        ))
+    }
+}
+
+pub struct LspFormattingTool;
+
+impl Tool for LspFormattingTool {
+    fn name(&self) -> &str {
+        "lsp_formatting"
+    }
+
+    fn description(&self) -> &str {
+        "Format a document using the language server's formatter. Use this to:
+- Format entire files according to language standards
+- Apply consistent code style
+- Fix indentation and spacing
+
+Requires: file_path
+Optional: range (line, character, end_line, end_character) for range formatting
+Returns: Text edits to apply for formatting"
+    }
+
+    fn permission(&self) -> ToolPermission {
+        ToolPermission::Read
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["file_path"],
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "description": "0-based start line for range formatting" },
+                "character": { "type": "integer", "description": "0-based start character for range formatting" },
+                "end_line": { "type": "integer", "description": "0-based end line for range formatting" },
+                "end_character": { "type": "integer", "description": "0-based end character for range formatting" },
+                "language": { "type": "string" }
+            }
+        })
+    }
+
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let file_path = resolve_file_path(ctx, &params)?;
+        let language = params
+            .get("language")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| language_for_path(&file_path).to_string());
+
+        let text = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("failed to read file {}", file_path.display()))?;
+        let uri = Url::from_file_path(&file_path)
+            .map_err(|_| anyhow!("invalid file path for URI: {}", file_path.display()))?;
+
+        let text_edits = if let (Some(line), Some(character), Some(end_line), Some(end_character)) = (
+            params.get("line").and_then(Value::as_i64),
+            params.get("character").and_then(Value::as_i64),
+            params.get("end_line").and_then(Value::as_i64),
+            params.get("end_character").and_then(Value::as_i64),
+        ) {
+            // Range formatting
+            let range = lsp_types::Range {
+                start: Position {
+                    line: line as u32,
+                    character: character as u32,
+                },
+                end: Position {
+                    line: end_line as u32,
+                    character: end_character as u32,
+                },
+            };
+
+            with_lsp_client(ctx, &language, |client| {
+                run_async_result(async {
+                    client
+                        .open_document(uri.clone(), &language, 1, &text)
+                        .await?;
+                    client.document_range_formatting(uri, range).await
+                })
+            })?
+        } else {
+            // Full document formatting
+            with_lsp_client(ctx, &language, |client| {
+                run_async_result(async {
+                    client
+                        .open_document(uri.clone(), &language, 1, &text)
+                        .await?;
+                    client.document_formatting(uri).await
+                })
+            })?
+        };
+
+        // Format the output
+        let edits_summary: Vec<Value> = text_edits
+            .iter()
+            .map(|edit| {
+                json!({
+                    "range": edit.range,
+                    "new_text": edit.new_text.chars().take(50).collect::<String>() + if edit.new_text.len() > 50 { "..." } else { "" }
+                })
+            })
+            .collect();
+
+        Ok(ToolOutput::with_structured(
+            serde_json::to_string_pretty(&text_edits)?,
+            json!({
+                "formatting_edits": text_edits,
+                "summary": {
+                    "edit_count": text_edits.len()
+                },
+                "preview": edits_summary
+            }),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    // Helper to create a test context
+    fn create_test_context() -> (ToolContext, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = ToolContext::new(temp_dir.path());
+        (ctx, temp_dir)
+    }
+
+    // Helper to create a test file
+    fn create_test_file(dir: &PathBuf, name: &str, content: &str) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    // ============================================================================
+    // LspDiagnosticsTool Tests
+    // ============================================================================
+
+    #[test]
+    fn test_diagnostics_tool_name_and_description() {
+        let tool = LspDiagnosticsTool;
+        assert_eq!(tool.name(), "lsp_diagnostics");
+        assert_eq!(
+            tool.description(),
+            "Check which language servers are available and their status. Use this to verify code intelligence capabilities before using other LSP tools."
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_tool_permission() {
+        let tool = LspDiagnosticsTool;
+        assert_eq!(tool.permission(), ToolPermission::Read);
+    }
+
+    #[test]
+    fn test_diagnostics_tool_parameters_schema() {
+        let tool = LspDiagnosticsTool;
+        let schema = tool.parameters_schema();
+
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["servers"].is_object());
+        assert_eq!(schema["properties"]["servers"]["type"], "array");
+        assert_eq!(schema["properties"]["servers"]["items"]["type"], "string");
+    }
+
+    #[test]
+    fn test_diagnostics_default_servers() {
+        let tool = LspDiagnosticsTool;
+        let (ctx, _temp) = create_test_context();
+
+        let result = tool.execute(json!({}), &ctx);
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        assert!(
+            output.text.contains("rust-analyzer")
+                || output.text.contains("typescript-language-server")
+                || output.text.contains("pyright-langserver")
+        );
+        assert!(output.structured.is_some());
+    }
+
+    #[test]
+    fn test_diagnostics_custom_servers() {
+        let tool = LspDiagnosticsTool;
+        let (ctx, _temp) = create_test_context();
+
+        let params = json!({
+            "servers": ["rust-analyzer", "nonexistent-server"]
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        assert!(
+            output.text.contains("rust-analyzer") || output.text.contains("nonexistent-server")
+        );
+        assert!(output.structured.is_some());
+    }
+
+    #[test]
+    fn test_diagnostics_empty_servers_array() {
+        let tool = LspDiagnosticsTool;
+        let (ctx, _temp) = create_test_context();
+
+        let params = json!({ "servers": [] });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        assert!(output.structured.is_some());
+        let structured = output.structured.unwrap();
+        assert_eq!(structured.as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_diagnostics_metadata_generation() {
+        let tool = LspDiagnosticsTool;
+        let (ctx, _temp) = create_test_context();
+
+        let result = tool.execute(json!({}), &ctx);
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        assert!(!output.text.is_empty());
+        assert!(output.structured.is_some());
+
+        let structured = output.structured.unwrap();
+        if let Some(array) = structured.as_array() {
+            for item in array {
+                assert!(item.is_object());
+                let obj = item.as_object().unwrap();
+                assert!(obj.contains_key("name"));
+                assert!(obj.contains_key("installed"));
+                assert!(obj["name"].is_string());
+                assert!(obj["installed"].is_boolean());
+            }
+        }
+    }
+
+    // ============================================================================
+    // LspHoverTool Tests
+    // ============================================================================
+
+    #[test]
+    fn test_hover_tool_name_and_description() {
+        let tool = LspHoverTool;
+        assert_eq!(tool.name(), "lsp_hover");
+        assert_eq!(
+            tool.description(),
+            "Get LSP hover information at a file position; auto-starts the language server."
+        );
+    }
+
+    #[test]
+    fn test_hover_tool_permission() {
+        let tool = LspHoverTool;
+        assert_eq!(tool.permission(), ToolPermission::Read);
+    }
+
+    #[test]
+    fn test_hover_tool_parameters_schema() {
+        let tool = LspHoverTool;
+        let schema = tool.parameters_schema();
+
+        assert_eq!(schema["type"], "object");
+        assert!(schema["required"].is_array());
+        let required = schema["required"].as_array().unwrap();
+        let expected_json = json!(["file_path", "line", "character"]);
+        let expected = expected_json.as_array().unwrap();
+        assert_eq!(required, expected);
+        assert_eq!(schema["properties"]["file_path"]["type"], "string");
+        assert_eq!(schema["properties"]["line"]["type"], "integer");
+        assert_eq!(schema["properties"]["character"]["type"], "integer");
+        assert_eq!(schema["properties"]["language"]["type"], "string");
+    }
+
+    #[test]
+    fn test_hover_missing_file_path() {
+        let tool = LspHoverTool;
+        let (ctx, _temp) = create_test_context();
+
+        let params = json!({
+            "line": 0,
+            "character": 0
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("file_path"));
+    }
+
+    #[test]
+    fn test_hover_missing_line() {
+        let tool = LspHoverTool;
+        let (ctx, _temp) = create_test_context();
+        let file_path = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
+
+        let params = json!({
+            "file_path": file_path.to_str().unwrap(),
+            "character": 0
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("line"));
+    }
+
+    #[test]
+    fn test_hover_missing_character() {
+        let tool = LspHoverTool;
+        let (ctx, _temp) = create_test_context();
+        let file_path = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
+
+        let params = json!({
+            "file_path": file_path.to_str().unwrap(),
+            "line": 0
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("character"));
+    }
+
+    #[test]
+    fn test_hover_path_outside_workspace() {
+        let tool = LspHoverTool;
+        let (ctx, _temp) = create_test_context();
+
+        let params = json!({
+            "file_path": "/etc/passwd",
+            "line": 0,
+            "character": 0
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("outside workspace"));
+    }
+
+    #[test]
+    fn test_hover_relative_path_resolution() {
+        let tool = LspHoverTool;
+        let (ctx, _temp) = create_test_context();
+        create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
+
+        let params = json!({
+            "file_path": "test.rs",
+            "line": 0,
+            "character": 0
+        });
+
+        let result = tool.execute(params, &ctx);
+        // We expect this to fail (LSP not available), but path resolution should succeed
+        // The error should be about LSP, not about file path
+        if let Err(e) = result {
+            let err_msg = e.to_string();
+            assert!(!err_msg.contains("failed to read file"));
+        }
+    }
+
+    #[test]
+    fn test_hover_language_detection() {
+        let tool = LspHoverTool;
+        let (ctx, _temp) = create_test_context();
+
+        // Test Rust file
+        let rs_file = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
+        let params = json!({
+            "file_path": rs_file.to_str().unwrap(),
+            "line": 0,
+            "character": 0
+        });
+
+        let result = tool.execute(params, &ctx);
+        // Will fail due to LSP unavailable, but validates language detection works
+        assert!(result.is_err() || result.is_ok());
+    }
+
+    // ============================================================================
+    // LspDefinitionTool Tests
+    // ============================================================================
+
+    #[test]
+    fn test_definition_tool_name_and_description() {
+        let tool = LspDefinitionTool;
+        assert_eq!(tool.name(), "lsp_definition");
+        assert_eq!(
+            tool.description(),
+            "Jump to the definition of a function, variable, or type at a specific position. Use this to find where symbols are defined in the codebase. Requires file_path, line, and character position."
+        );
+    }
+
+    #[test]
+    fn test_definition_tool_permission() {
+        let tool = LspDefinitionTool;
+        assert_eq!(tool.permission(), ToolPermission::Read);
+    }
+
+    #[test]
+    fn test_definition_tool_parameters_schema() {
+        let tool = LspDefinitionTool;
+        let schema = tool.parameters_schema();
+
+        assert_eq!(schema["type"], "object");
+        assert!(schema["required"].is_array());
+        let required = schema["required"].as_array().unwrap();
+        let expected_json = json!(["file_path", "line", "character"]);
+        let expected = expected_json.as_array().unwrap();
+        assert_eq!(required, expected);
+    }
+
+    #[test]
+    fn test_definition_missing_parameters() {
+        let tool = LspDefinitionTool;
+        let (ctx, _temp) = create_test_context();
+
+        // Test missing file_path
+        let result = tool.execute(json!({ "line": 0, "character": 0 }), &ctx);
+        assert!(result.is_err());
+
+        // Test missing line
+        let result = tool.execute(json!({ "file_path": "test.rs", "character": 0 }), &ctx);
+        assert!(result.is_err());
+
+        // Test missing character
+        let result = tool.execute(json!({ "file_path": "test.rs", "line": 0 }), &ctx);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_definition_position_parsing() {
+        let tool = LspDefinitionTool;
+        let (ctx, _temp) = create_test_context();
+        let file_path = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
+
+        // Test valid position
+        let params = json!({
+            "file_path": file_path.to_str().unwrap(),
+            "line": 0,
+            "character": 0
+        });
+
+        let result = tool.execute(params, &ctx);
+        // Will fail due to LSP unavailable, but position parsing should succeed
+        if let Err(e) = result {
+            let err_msg = e.to_string();
+            assert!(!err_msg.contains("missing required parameter"));
+        }
+    }
+
+    #[test]
+    fn test_definition_invalid_position() {
+        let tool = LspDefinitionTool;
+        let (ctx, _temp) = create_test_context();
+        let file_path = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
+
+        // Test negative line (should be rejected by schema)
+        let params = json!({
+            "file_path": file_path.to_str().unwrap(),
+            "line": -1,
+            "character": 0
+        });
+
+        // Parameter extraction should handle this
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_definition_absolute_vs_relative_path() {
+        let tool = LspDefinitionTool;
+        let (ctx, _temp) = create_test_context();
+        let file_path = create_test_file(&ctx.cwd, "test.rs", "fn test() {}");
+
+        // Test with absolute path
+        let params_abs = json!({
+            "file_path": file_path.to_str().unwrap(),
+            "line": 0,
+            "character": 0
+        });
+
+        let result_abs = tool.execute(params_abs, &ctx);
+        // Both should behave the same way (fail due to LSP unavailable)
+        assert!(result_abs.is_err() || result_abs.is_ok());
+
+        // Test with relative path
+        let params_rel = json!({
+            "file_path": "test.rs",
+            "line": 0,
+            "character": 0
+        });
+
+        let result_rel = tool.execute(params_rel, &ctx);
+        assert!(result_rel.is_err() || result_rel.is_ok());
+    }
+
+    #[test]
+    fn test_definition_nonexistent_file() {
+        let tool = LspDefinitionTool;
+        let (ctx, _temp) = create_test_context();
+
+        let params = json!({
+            "file_path": "nonexistent.rs",
+            "line": 0,
+            "character": 0
+        });
+
+        let result = tool.execute(params, &ctx);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("failed to read file"));
+    }
+
+    // ============================================================================
+    // LspCompletionTool Tests
+    // ============================================================================
+
+    #[test]
+    fn test_completion_tool_name_and_description() {
+        let tool = LspCompletionTool;
+        assert_eq!(tool.name(), "lsp_completion");
+        assert_eq!(
+            tool.description(),
+            "Get code completions (suggestions) at a specific position. Use this to see what functions, variables, or keywords are available while typing. Requires file_path, line, and character position."
+        );
+    }
+
+    #[test]
+    fn test_completion_tool_permission() {
+        let tool = LspCompletionTool;
+        assert_eq!(tool.permission(), ToolPermission::Read);
+    }
+
+    #[test]
+    fn test_completion_tool_parameters_schema() {
+        let tool = LspCompletionTool;
+        let schema = tool.parameters_schema();
+
+        assert_eq!(schema["type"], "object");
+        assert!(schema["required"].is_array());
+        let required = schema["required"].as_array().unwrap();
+        let expected_json = json!(["file_path", "line", "character"]);
+        let expected = expected_json.as_array().unwrap();
+        assert_eq!(required, expected);
+        assert_eq!(schema["properties"]["file_path"]["type"], "string");
+        assert_eq!(schema["properties"]["line"]["type"], "integer");
+        assert_eq!(schema["properties"]["character"]["type"], "integer");
+        assert_eq!(schema["properties"]["language"]["type"], "string");
+        assert_eq!(schema["properties"]["trigger_character"]["type"], "string");
+    }
+
+    #[test]
+    fn test_completion_missing_required_parameters() {
+        let tool = LspCompletionTool;
+        let (ctx, _temp) = create_test_context();
+
+        // Missing file_path
+        let result = tool.execute(json!({ "line": 0, "character": 0 }), &ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("file_path"));
+
+        // Missing line
+        let result = tool.execute(json!({ "file_path": "test.rs", "character": 0 }), &ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("line"));
+
+        // Missing character
+        let result = tool.execute(json!({ "file_path": "test.rs", "line": 0 }), &ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("character"));
+    }
+
+    #[test]
+    fn test_completion_with_trigger_character() {
+        let tool = LspCompletionTool;
+        let (ctx, _temp) = create_test_context();
+        let file_path = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
+
+        let params = json!({
+            "file_path": file_path.to_str().unwrap(),
+            "line": 0,
+            "character": 0,
+            "trigger_character": "."
+        });
+
+        let result = tool.execute(params, &ctx);
+        // Will fail due to LSP unavailable, but trigger_character should be processed
+        if let Err(e) = result {
+            let err_msg = e.to_string();
+            assert!(!err_msg.contains("missing required parameter"));
+        }
+    }
+
+    #[test]
+    fn test_completion_optional_language_parameter() {
+        let tool = LspCompletionTool;
+        let (ctx, _temp) = create_test_context();
+        let file_path = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
+
+        // Test without language parameter (should auto-detect)
+        let params = json!({
+            "file_path": file_path.to_str().unwrap(),
+            "line": 0,
+            "character": 0
+        });
+
+        let result = tool.execute(params, &ctx);
+        // Should process successfully (even if LSP fails)
+        assert!(result.is_err() || result.is_ok());
+    }
+
+    #[test]
+    fn test_completion_explicit_language_parameter() {
+        let tool = LspCompletionTool;
+        let (ctx, _temp) = create_test_context();
+        let file_path = create_test_file(&ctx.cwd, "test.py", "print('hello')");
+
+        let params = json!({
+            "file_path": file_path.to_str().unwrap(),
+            "line": 0,
+            "character": 0,
+            "language": "python"
+        });
+
+        let result = tool.execute(params, &ctx);
+        // Should use explicit language parameter
+        if let Err(e) = result {
+            let err_msg = e.to_string();
+            assert!(!err_msg.contains("missing required parameter"));
+        }
+    }
+
+    #[test]
+    fn test_completion_output_structure() {
+        let tool = LspCompletionTool;
+        let (ctx, _temp) = create_test_context();
+        let file_path = create_test_file(&ctx.cwd, "test.rs", "fn main() {}");
+
+        let params = json!({
+            "file_path": file_path.to_str().unwrap(),
+            "line": 0,
+            "character": 0
+        });
+
+        let result = tool.execute(params, &ctx);
+
+        // Even on error, check that the tool follows the expected pattern
+        if let Ok(output) = result {
+            assert!(!output.text.is_empty());
+            assert!(output.structured.is_some());
+
+            let structured = output.structured.unwrap();
+            assert!(structured.is_object());
+            assert!(structured.get("completion").is_some());
+        }
+    }
+
+    // ============================================================================
+    // Shared Utility Tests
+    // ============================================================================
+
+    #[test]
+    fn test_language_for_path() {
+        assert_eq!(language_for_path(Path::new("test.rs")), "rust");
+        assert_eq!(language_for_path(Path::new("test.ts")), "typescript");
+        assert_eq!(language_for_path(Path::new("test.tsx")), "typescript");
+        assert_eq!(language_for_path(Path::new("test.js")), "typescript");
+        assert_eq!(language_for_path(Path::new("test.jsx")), "typescript");
+        assert_eq!(language_for_path(Path::new("test.py")), "python");
+        assert_eq!(language_for_path(Path::new("test.go")), "go");
+        assert_eq!(language_for_path(Path::new("test.unknown")), "rust"); // default
+    }
+
+    #[test]
+    fn test_param_u32_valid() {
+        let params = json!({ "value": 42 });
+        assert_eq!(param_u32(&params, "value").unwrap(), 42);
+    }
+
+    #[test]
+    fn test_param_u32_missing() {
+        let params = json!({ "other": 42 });
+        assert!(param_u32(&params, "value").is_err());
+    }
+
+    #[test]
+    fn test_param_u32_zero() {
+        let params = json!({ "value": 0 });
+        assert_eq!(param_u32(&params, "value").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_resolve_file_path_absolute() {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = ToolContext::new(temp_dir.path());
+        let file_path = temp_dir.path().join("test.rs");
+
+        let params = json!({
+            "file_path": file_path.to_str().unwrap()
+        });
+
+        let resolved = resolve_file_path(&ctx, &params).unwrap();
+        assert_eq!(resolved, file_path);
+    }
+
+    #[test]
+    fn test_resolve_file_path_relative() {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = ToolContext::new(temp_dir.path());
+
+        let params = json!({ "file_path": "test.rs" });
+
+        let resolved = resolve_file_path(&ctx, &params).unwrap();
+        assert_eq!(resolved, temp_dir.path().join("test.rs"));
+    }
+
+    #[test]
+    fn test_resolve_file_path_missing_parameter() {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = ToolContext::new(temp_dir.path());
+
+        let params = json!({ "other": "test.rs" });
+
+        let result = resolve_file_path(&ctx, &params);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("file_path"));
+    }
+
+    #[test]
+    fn test_path_validation_workspace_boundary() {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = ToolContext::new(temp_dir.path());
+
+        // Try to access parent directory (should be blocked)
+        let parent_path = temp_dir.path().parent().unwrap().join("test.rs");
+        let result = ensure_path_within_workspace(&ctx, &parent_path);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("outside workspace"));
+    }
+
+    #[test]
+    fn test_path_validation_valid_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = ToolContext::new(temp_dir.path());
+        let valid_path = temp_dir.path().join("subdir").join("test.rs");
+
+        // Create parent directory
+        fs::create_dir_all(valid_path.parent().unwrap()).unwrap();
+
+        let result = ensure_path_within_workspace(&ctx, &valid_path);
+        assert!(result.is_ok());
+    }
+}

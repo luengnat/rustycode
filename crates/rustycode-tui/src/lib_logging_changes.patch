@@ -1,0 +1,248 @@
+--- a/crates/rustycode-tui/src/lib.rs
++++ b/crates/rustycode-tui/src/lib.rs
+@@ -173,7 +173,8 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+         eprintln!("Warning: Failed to initialize logging: {}", e);
+     } else {
+         info_log!("RustyCode TUI starting");
+         info_log!("Working directory: {}", cwd.display());
++        debug_log!("Log level: {:?}", log_level());
+     }
+
+     use crate::ui::input::{InputHandler, InputAction};
+@@ -235,7 +236,10 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+     ).unwrap_or_else(|_| "You are RustyCode, an AI coding assistant.".to_string());
+
+     // Welcome message - minimal
+-    messages.push(format!("Ready ({})", model_name));
++    debug_log!("Provider initialized: {}", model_name);
++    if is_debug_enabled() {
++        messages.push(format!("Ready ({})", model_name));
++    }
+
+     // Load workspace context for display
+     let _workspace_info = load_workspace_context(&cwd, FILE_PREVIEW_MAX_LINES, STATUS_MAX_LINES);
+@@ -311,13 +315,22 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+                         }).collect();
+
+                         match save_current_session("TUI Session", &serialized_messages) {
+-                            Ok(path) => messages.push(format!("[✓ Session saved: {}]", path.display())),
++                            Ok(path) => {
++                                info_log!("Session saved: {}", path.display());
++                                if is_debug_enabled() {
++                                    messages.push(format!("[✓ Session saved: {}]", path.display()));
++                                }
++                            }
+                             Err(e) => {
+                                 let user_error = crate::error_messages::user_friendly_error(&e);
++                                error_log!("Session save failed: {}", user_error.display_short());
+                                 messages.push(format!("[✗ Session save failed]\n{}\n", user_error.display_short()));
+                             }
+                         }
+                     }
++                    // Ctrl+L - list sessions
++                    (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
++                        let sessions = load_session_history_list("Current", 0);
++                        debug_log!("Loaded {} sessions", sessions.len());
++                        if is_debug_enabled() {
++                            messages.push("\n[Available Sessions]".to_string());
++                            for session in sessions.iter().take(10) {
++                                messages.push(format!("  • {} ({})", session.title,
++                                    format_timestamp(session.timestamp)));
++                            }
++                        } else {
++                            messages.push(format!("[Loaded {} sessions]", sessions.len()));
++                        }
++                    }
+                     // Ctrl+M - cycle mode
+                     (KeyCode::Char('m'), KeyModifiers::CONTROL) => {
+                         current_mode = match current_mode {
+@@ -335,7 +348,10 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+                             AiMode::Yolo => AiMode::Ask,
+                         };
+                         let mode_str = get_mode_str(current_mode);
+-                        messages.push(format!("[Mode changed to: {}]", mode_str));
++                        debug_log!("Mode changed to: {}", mode_str);
++                        if is_debug_enabled() {
++                            messages.push(format!("[Mode changed to: {}]", mode_str));
++                        }
+                     }
+                     // Other keys - pass to input handler
+                     _ => {
+@@ -371,6 +387,7 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+                                     .with_system_prompt(system_prompt.clone())
+                                     .with_tools(tool_definitions.clone());
+
++                                    debug_log!("Sending request to LLM (model: {})", model_name);
+                                     // Send the request
+                                     messages.push("AI: ".to_string());
+
+@@ -380,6 +397,7 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+                                     });
+
+                                     match result {
++                                        debug_log!("LLM response received: {} chars", response.content.len());
+                                         Ok(response) => {
+                                             messages.push(response.content.clone());
+
+@@ -387,16 +405,22 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+                                             let mut current_response = response.content.clone();
+                                             let mut tool_loop_iteration = 0;
+                                             const MAX_TOOL_ITERATIONS: usize = 10;
+
+                                             loop {
+                                                 let tool_payloads = extract_tool_payloads(&current_response);
+                                                 if tool_payloads.is_empty() {
++                                                    debug_log!("No more tool calls found, ending tool loop");
+                                                     // No more tool calls, we're done
+                                                     break;
+                                                 }
+
+                                                 tool_loop_iteration += 1;
+                                                 if tool_loop_iteration > MAX_TOOL_ITERATIONS {
++                                                    error_log!("Too many tool iterations ({}), stopping", tool_loop_iteration);
+                                                     messages.push("\n[ERROR: Too many tool iterations, stopping]".to_string());
+                                                     break;
+                                                 }
+
++                                                debug_log!("Tool loop iteration {}, found {} tool calls", tool_loop_iteration, tool_payloads.len());
++
+                                                 // Collect all tool calls first (minimal output)
+                                                 let mut all_tool_calls: Vec<(ParsedToolCall, ToolCall, String)> = Vec::new();
+
+@@ -433,6 +457,7 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+
+                                                 for (parsed_call, call, call_id) in all_tool_calls {
++                                                    debug_log!("Spawning tool worker: {}", parsed_call.name);
+                                                     let (rx, _handle) = spawn_tool_worker(
+                                                         call.clone(),
+                                                         cwd.clone(),
+@@ -456,11 +481,13 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+                             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                                 // Check timeout without UI update (avoid flicker)
+                                 if start_time.elapsed() > timeout {
++                                    error_log!("Tool {} timed out after {:?}", pending.parsed_call.name, timeout);
+                                     messages.push(format!("✗ {} timed out", pending.parsed_call.name));
+                                     break None;
+                                 }
+                                 continue;
+                             }
+                             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
++                                debug_log!("Tool {} disconnected", pending.parsed_call.name);
+                                 break None;
+                             }
+                         }
+@@ -471,16 +498,22 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+                                                     if let Some(result) = result {
+                                                         let parsed_call = pending.parsed_call;
+                                                         if result.success {
++                                                            debug_log!("Tool {} succeeded ({} chars output)", parsed_call.name, result.output.len());
+                                                             // Only show failures, not successes (reduce noise)
+                                                             conversation_history.push(ChatMessage::tool_result(
+                                                                 result.output.clone(),
+                                                                 pending.call_id.clone(),
+                                                             ));
+                                                             tool_results_added = true;
+                                                         } else {
+                                                             // Tool execution failed - show user-friendly error
+                                                             let error_msg = if result.output.trim().is_empty() {
+                                                                 "Tool execution failed with no output".to_string()
+                                                             } else {
+                                                                 result.output.clone()
+                                                             };
++                                                            error_log!("Tool {} failed: {}", parsed_call.name, error_msg);
+                                                             let user_error = crate::error_messages::user_friendly_error(
+                                                                 anyhow::anyhow!(error_msg).as_ref()
+                                                             );
+@@ -500,17 +533,19 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+
+                                                 // Send tool results back to LLM for continuation
+                                                 if !tool_results_added {
++                                                    debug_log!("No tool results added, breaking tool loop");
+                                                     break;
+                                                 }
+
++                                                debug_log!("Sending continuation request to LLM");
+                                                 // Create continuation request with tool results
+                                                 let mut history_messages = conversation_history.clone();
+                                                 if history_messages.len() > 10 {
+                                                     history_messages = history_messages.split_off(history_messages.len() - 10);
+                                                 }
+
+@@ -525,14 +560,16 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+
+                                                 match continuation_result {
+                                                     Ok(continuation) => {
++                                                        debug_log!("Continuation response received: {} chars", continuation.content.len());
+                                                         current_response = continuation.content.clone();
+
+                                                         // Check if continuation has more tool calls
+                                                         let more_tool_payloads = extract_tool_payloads(&continuation.content);
+
+                                                         // Add continuation to conversation history
+                                                         conversation_history.push(ChatMessage::assistant(continuation.content.clone()));
+
+                                                         // If no more tools, show the final response and break
+                                                         if more_tool_payloads.is_empty() {
++                                                            debug_log!("No more tool calls in continuation, showing final response");
+                                                             messages.push(format!("AI: {}", continuation.content));
+                                                             terminal.draw(|f| {
+                                                                 draw_ui_with_context(f, &messages, &input_handler, &git_branch, &cwd, get_mode_str(current_mode), &model_name);
+@@ -542,10 +579,12 @@ pub fn run(cwd: PathBuf) -> Result<()> {
+                                                         }
+                                                     }
+                                                     Err(e) => {
++                                                        error_log!("LLM continuation error: {:?}", e);
+                                                         let user_error = crate::error_messages::user_friendly_error(&e);
+                                                         messages.push(format!("[LLM Error: {}]", user_error.display_short()));
+                                                         break;
+                                                     }
+                                                 }
+                                             }
+                                         }
+                                         Err(e) => {
++                                            error_log!("LLM request error: {:?}", e);
+                                             let user_error = crate::error_messages::user_friendly_error(&e);
+                                             messages.push(format!("[LLM Error: {}]", user_error.display_short()));
+                                         }
+@@ -816,13 +855,13 @@ fn initialize_provider(_cwd: &PathBuf) -> Result<(Box<dyn LLMProvider>, String)>
+         match AnthropicProvider::new_without_validation(config, model.clone()) {
+             Ok(provider) => {
+-                tracing::info!("Using Anthropic provider with model: {}", model);
++                info_log!("Using Anthropic provider with model: {}", model);
+                 return Ok((Box::new(provider), model));
+             }
+             Err(e) => {
+-                tracing::warn!("Failed to initialize Anthropic: {}", e);
++                warn_log!("Failed to initialize Anthropic: {}", e);
+             }
+         }
+     }
+
+@@ -837,13 +876,13 @@ fn initialize_provider(_cwd: &PathBuf) -> Result<(Box<dyn LLMProvider>, String)>
+         match OpenAiProvider::new_without_validation(config, "gpt-4o".to_string()) {
+             Ok(provider) => {
+-                tracing::info!("Using OpenAI provider");
++                info_log!("Using OpenAI provider");
+                 return Ok((Box::new(provider), "gpt-4o".to_string()));
+             }
+             Err(e) => {
+-                tracing::warn!("Failed to initialize OpenAI: {}", e);
++                warn_log!("Failed to initialize OpenAI: {}", e);
+             }
+         }
+     }
+
+@@ -858,13 +897,13 @@ fn initialize_provider(_cwd: &PathBuf) -> Result<(Box<dyn LLMProvider>, String)>
+         match GeminiProvider::new_without_validation(config) {
+             Ok(provider) => {
+-                tracing::info!("Using Gemini provider");
++                info_log!("Using Gemini provider");
+                 return Ok((Box::new(provider), "gemini-2.5-pro".to_string()));
+             }
+             Err(e) => {
+-                tracing::warn!("Failed to initialize Gemini: {}", e);
++                warn_log!("Failed to initialize Gemini: {}", e);
+             }
+         }
+     }
+
