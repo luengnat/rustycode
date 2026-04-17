@@ -86,6 +86,7 @@
 pub mod allowlist;
 pub mod client;
 pub mod enterprise;
+pub mod headers_helper;
 pub mod manager;
 pub mod oauth;
 pub mod protocol;

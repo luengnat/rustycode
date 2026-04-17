@@ -322,3 +322,55 @@ fn test_post_tool_allows_by_default() {
     // Should not have a warning either (no false-positive fatigue)
     assert!(res.additional_context.is_none());
 }
+
+// ── Codec: HookResult constructors ──────────────────────────────────
+
+#[test]
+fn test_hook_result_deny_has_correct_fields() {
+    use rustycode_guard::codec::HookResult;
+    let res = HookResult::deny("test reason");
+    assert_eq!(res.permission_decision.as_deref(), Some("deny"));
+    assert_eq!(res.permission_decision_reason.as_deref(), Some("test reason"));
+    assert!(res.updated_input.is_none());
+}
+
+#[test]
+fn test_hook_result_allow_has_no_decision() {
+    use rustycode_guard::codec::HookResult;
+    let res = HookResult::allow();
+    assert!(res.permission_decision.is_none());
+    assert!(res.permission_decision_reason.is_none());
+    assert!(res.additional_context.is_none());
+}
+
+#[test]
+fn test_hook_result_ask_has_ask_decision() {
+    use rustycode_guard::codec::HookResult;
+    let res = HookResult::ask("confirm this");
+    assert_eq!(res.permission_decision.as_deref(), Some("ask"));
+    assert_eq!(res.permission_decision_reason.as_deref(), Some("confirm this"));
+}
+
+#[test]
+fn test_hook_result_warn_has_context() {
+    use rustycode_guard::codec::HookResult;
+    let res = HookResult::warn("be careful");
+    assert!(res.permission_decision.is_none());
+    assert_eq!(res.additional_context.as_deref(), Some("be careful"));
+}
+
+#[test]
+fn test_hook_input_parse_valid_json() {
+    use rustycode_guard::codec::{parse_input, HookInput};
+    let json = r#"{"session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp"}"#;
+    let input: HookInput = parse_input(json).unwrap();
+    assert_eq!(input.tool_name, "Bash");
+    assert_eq!(input.cwd.as_deref(), Some("/tmp"));
+}
+
+#[test]
+fn test_hook_input_parse_invalid_json() {
+    use rustycode_guard::codec::parse_input;
+    let result = parse_input("not json");
+    assert!(result.is_err());
+}
