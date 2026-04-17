@@ -42,6 +42,20 @@ pub fn handle_undo_command(_parts: &[&str], ctx: CommandContext<'_>) -> Result<C
 
 /// Handle /diff command - show git diff of uncommitted changes
 pub fn handle_diff_command(_parts: &[&str], ctx: CommandContext<'_>) -> Result<CommandEffect> {
+    let git_check = std::process::Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(ctx.cwd)
+        .output();
+
+    match git_check {
+        Ok(out) if out.status.success() => {}
+        _ => {
+            return Ok(CommandEffect::SystemMessage(
+                "Not a git repository — /diff requires a git repo".to_string(),
+            ));
+        }
+    }
+
     let output = std::process::Command::new("git")
         .arg("diff")
         .current_dir(ctx.cwd)
