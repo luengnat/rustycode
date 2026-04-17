@@ -156,28 +156,74 @@ pub struct FeaturesConfig {
     pub agents: Vec<String>,
 }
 
+/// MCP transport type
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransportType {
+    Stdio,
+    Http,
+    Sse,
+}
+
+/// OAuth configuration for remote MCP servers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpOAuthConfig {
+    pub client_id: String,
+    #[serde(default)]
+    pub scopes: Option<String>,
+    #[serde(default)]
+    pub callback_port: Option<u16>,
+}
+
 /// MCP server configuration with detailed settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MCPServerConfig {
     /// Server name/ID
     pub name: String,
 
-    /// Command to start the MCP server
-    pub command: String,
+    /// Transport type — auto-detected if omitted (command → stdio, url → http)
+    #[serde(default, rename = "type")]
+    pub transport_type: Option<McpTransportType>,
 
-    /// Arguments to pass to the command
+    /// Command to start the MCP server (stdio)
+    #[serde(default)]
+    pub command: Option<String>,
+
+    /// Arguments to pass to the command (stdio)
     #[serde(default)]
     pub args: Vec<String>,
 
-    /// Environment variables for the server
+    /// Environment variables for the server (stdio)
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
+
+    /// Remote server URL (http/sse)
+    #[serde(default)]
+    pub url: Option<String>,
+
+    /// HTTP headers for remote servers
+    #[serde(default)]
+    pub headers: Option<std::collections::HashMap<String, String>>,
+
+    /// Path to script that outputs dynamic headers as JSON
+    #[serde(default)]
+    pub headers_helper: Option<String>,
+
+    /// Server description
+    #[serde(default)]
+    pub description: Option<String>,
+
+    /// OAuth configuration for remote servers
+    #[serde(default)]
+    pub oauth: Option<McpOAuthConfig>,
 
     /// Whether the server is enabled
     #[serde(default = "default_mcp_enabled")]
     pub enabled: bool,
 
-    /// Transport type (stdio or sse)
+    /// Transport type (legacy field, superseded by transport_type)
     #[serde(default)]
     pub transport: Option<String>,
 }
@@ -641,11 +687,14 @@ mod tests {
         let json = r#"{"name":"test","command":"npx"}"#;
         let config: MCPServerConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.name, "test");
-        assert_eq!(config.command, "npx");
+        assert_eq!(config.command.unwrap(), "npx");
         assert!(config.args.is_empty());
         assert!(config.env.is_empty());
         assert!(config.enabled); // default true
         assert!(config.transport.is_none());
+        assert!(config.url.is_none());
+        assert!(config.headers.is_none());
+        assert!(config.description.is_none());
     }
 
     #[test]
