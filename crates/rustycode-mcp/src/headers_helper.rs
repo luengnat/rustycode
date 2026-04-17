@@ -163,4 +163,18 @@ mod tests {
         let result = resolve_headers("/nonexistent/path/script.sh").await;
         assert!(result.is_empty());
     }
+
+    #[tokio::test]
+    async fn test_resolve_headers_large_output_rejected() {
+        // Generate output exceeding MAX_OUTPUT_BYTES
+        let script = format!("head -c {} < /dev/zero | tr '\\0' 'x'", MAX_OUTPUT_BYTES + 1);
+        let result = resolve_headers(&script).await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_merge_headers_no_helper_no_static() {
+        let result = merge_headers(&HashMap::new(), None).await;
+        assert!(result.is_empty());
+    }
 }
