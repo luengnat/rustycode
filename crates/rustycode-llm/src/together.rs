@@ -45,6 +45,7 @@ use crate::provider_v2::{
 
 // Import macros exported at crate root
 use crate::{build_request, get_api_key, shared_client};
+use crate::retry::extract_retry_after_ms;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use secrecy::ExposeSecret;
@@ -342,7 +343,7 @@ impl LLMProvider for TogetherProvider {
 
         if !response.status().is_success() {
             // Capture headers early so we can parse Retry-After for rate limits
-            let _headers = response.headers().clone();
+            let headers = response.headers().clone();
             let status = response.status();
             let error_text = response
                 .text()
@@ -355,7 +356,9 @@ impl LLMProvider for TogetherProvider {
                     error_text
                 )),
                 404 => ProviderError::InvalidModel(format!("model not found: {}", error_text)),
-                429 => ProviderError::RateLimited { retry_delay: None },
+                429 => ProviderError::RateLimited {
+                    retry_delay: extract_retry_after_ms(&headers).map(Duration::from_millis),
+                },
                 502..=504 => ProviderError::Network(format!(
                     "Together AI service temporarily unavailable ({}). Please retry in a few seconds.",
                     error_text
@@ -463,6 +466,7 @@ impl LLMProvider for TogetherProvider {
 
         if !response.status().is_success() {
             let status = response.status();
+            let headers = response.headers().clone();
             let error_text = response
                 .text()
                 .await
@@ -473,7 +477,9 @@ impl LLMProvider for TogetherProvider {
                     error_text
                 )),
                 404 => ProviderError::InvalidModel(format!("model not found: {}", error_text)),
-                429 => ProviderError::RateLimited { retry_delay: None },
+                429 => ProviderError::RateLimited {
+                    retry_delay: extract_retry_after_ms(&headers).map(Duration::from_millis),
+                },
                 502..=504 => ProviderError::Network(format!(
                     "Together AI service temporarily unavailable ({}). Please retry in a few seconds.",
                     error_text

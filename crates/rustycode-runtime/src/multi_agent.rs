@@ -670,7 +670,7 @@ impl MultiAgentOrchestrator {
         let cached_messages = CachingStrategy::SystemPrompts.apply_to_messages(messages);
 
         let request = CompletionRequest::new(
-            "claude-sonnet-4-20250514".to_string(), // Default model
+            "claude-sonnet-4-6".to_string(), // Default model
             cached_messages,
         )
         .with_max_tokens(4096)

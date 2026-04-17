@@ -15,7 +15,7 @@ pub struct UserPreferences {
 impl Default for UserPreferences {
     fn default() -> Self {
         Self {
-            last_used_model: "claude-sonnet-4-20250514".to_string(),
+            last_used_model: "claude-sonnet-4-6".to_string(),
             last_used_provider: "anthropic".to_string(),
         }
     }
@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn test_default_preferences() {
         let prefs = UserPreferences::default();
-        assert_eq!(prefs.last_used_model, "claude-sonnet-4-20250514");
+        assert_eq!(prefs.last_used_model, "claude-sonnet-4-6");
         assert_eq!(prefs.last_used_provider, "anthropic");
     }
 
@@ -133,13 +133,13 @@ mod tests {
     #[test]
     fn test_serialize_deserialize() {
         let prefs = UserPreferences {
-            last_used_model: "claude-opus-4-20250514".to_string(),
+            last_used_model: "claude-opus-4-6".to_string(),
             last_used_provider: "anthropic".to_string(),
         };
 
         // Serialize
         let json = serde_json::to_string(&prefs).unwrap();
-        assert!(json.contains("claude-opus-4-20250514"));
+        assert!(json.contains("claude-opus-4-6"));
         assert!(json.contains("anthropic"));
 
         // Deserialize

@@ -1375,7 +1375,7 @@ mod tests {
     #[test]
     fn test_completion_request_with_thinking_config() {
         let request = CompletionRequest::new(
-            "claude-opus-4-20250514".to_string(),
+            "claude-opus-4-6".to_string(),
             vec![ChatMessage::user("Test".to_string())],
         )
         .with_thinking_config(ThinkingConfig::adaptive());
@@ -1405,7 +1405,7 @@ mod tests {
     #[test]
     fn test_completion_request_with_effort() {
         let request = CompletionRequest::new(
-            "claude-opus-4-20250514".to_string(),
+            "claude-opus-4-6".to_string(),
             vec![ChatMessage::user("Test".to_string())],
         )
         .with_effort(EffortLevel::High);
@@ -1465,9 +1465,9 @@ mod tests {
 
     #[test]
     fn test_thinking_type_supports_opus_4_5() {
-        assert!(ThinkingType::Adaptive.supports_model("claude-opus-4-20250514"));
+        assert!(ThinkingType::Adaptive.supports_model("claude-opus-4-6"));
         assert!(ThinkingType::Adaptive.supports_model("claude-opus-4.5-20250514"));
-        assert!(ThinkingType::Enabled.supports_model("claude-opus-4-20250514"));
+        assert!(ThinkingType::Enabled.supports_model("claude-opus-4-6"));
     }
 
     #[test]
@@ -1479,7 +1479,7 @@ mod tests {
 
     #[test]
     fn test_thinking_type_supports_sonnet_4_5() {
-        assert!(ThinkingType::Adaptive.supports_model("claude-sonnet-4-20250514"));
+        assert!(ThinkingType::Adaptive.supports_model("claude-sonnet-4-6"));
         assert!(ThinkingType::Adaptive.supports_model("claude-sonnet-4.5-20250514"));
     }
 
@@ -1491,7 +1491,7 @@ mod tests {
 
     #[test]
     fn test_thinking_type_unsupported_for_disabled() {
-        assert!(!ThinkingType::Disabled.supports_model("claude-opus-4-20250514"));
+        assert!(!ThinkingType::Disabled.supports_model("claude-opus-4-6"));
         assert!(!ThinkingType::Disabled.supports_model("claude-sonnet-4-20250214"));
     }
 

@@ -166,7 +166,7 @@ impl PromptHandler {
 
 impl Default for PromptHandler {
     fn default() -> Self {
-        Self::new(".".to_string(), "claude-3-5-sonnet-20241022".to_string())
+        Self::new(".".to_string(), "claude-sonnet-4-6".to_string())
     }
 }
 

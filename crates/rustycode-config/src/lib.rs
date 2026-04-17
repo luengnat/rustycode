@@ -378,11 +378,11 @@ fn default_model_routing_models() -> std::collections::HashMap<String, String> {
     let mut m = std::collections::HashMap::new();
     // Anthropic Claude model defaults — override in config for other providers
     m.insert("explanation".into(), "claude-haiku-4-5-20251001".into());
-    m.insert("investigation".into(), "claude-sonnet-4-20250514".into());
-    m.insert("implementation".into(), "claude-sonnet-4-20250514".into());
-    m.insert("refactoring".into(), "claude-sonnet-4-20250514".into());
-    m.insert("planning".into(), "claude-opus-4-20250514".into());
-    m.insert("testing".into(), "claude-sonnet-4-20250514".into());
+    m.insert("investigation".into(), "claude-sonnet-4-6".into());
+    m.insert("implementation".into(), "claude-sonnet-4-6".into());
+    m.insert("refactoring".into(), "claude-sonnet-4-6".into());
+    m.insert("planning".into(), "claude-opus-4-6".into());
+    m.insert("testing".into(), "claude-sonnet-4-6".into());
     m
 }
 
@@ -401,7 +401,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             schema: None,
-            model: "claude-3-5-sonnet-latest".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
             temperature: Some(0.1),
             max_tokens: Some(4096),
             providers: ProvidersConfig::default(),
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn test_config_default_model() {
         let config = Config::default();
-        assert_eq!(config.model, "claude-3-5-sonnet-latest");
+        assert_eq!(config.model, "claude-sonnet-4-6");
         assert_eq!(config.temperature, Some(0.1));
         assert_eq!(config.max_tokens, Some(4096));
         assert!(config.schema.is_none());
@@ -685,7 +685,7 @@ mod tests {
     fn test_config_debug() {
         let config = Config::default();
         let debug = format!("{:?}", config);
-        assert!(debug.contains("claude-3-5-sonnet-latest"));
+        assert!(debug.contains("claude-sonnet-4-6"));
         assert!(debug.contains("model"));
         assert!(debug.contains("temperature"));
     }

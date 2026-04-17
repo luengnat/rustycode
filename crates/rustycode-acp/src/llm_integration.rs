@@ -213,8 +213,8 @@ mod tests {
 
     #[test]
     fn test_llm_integration_new() {
-        let llm = LLMIntegration::new("claude-3-5-sonnet-20241022".to_string());
-        assert_eq!(llm.default_model, "claude-3-5-sonnet-20241022");
+        let llm = LLMIntegration::new("claude-sonnet-4-6".to_string());
+        assert_eq!(llm.default_model, "claude-sonnet-4-6");
     }
 
     #[test]

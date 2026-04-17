@@ -73,7 +73,7 @@ pub fn get_available_providers() -> Vec<ProviderInfo> {
             "anthropic",
             "Advanced AI assistant for complex tasks",
             "ANTHROPIC_API_KEY",
-            "claude-sonnet-4-20250514",
+            "claude-sonnet-4-6",
         ),
         ProviderInfo::new(
             "OpenAI GPT",
@@ -352,7 +352,7 @@ pub fn get_all_available_models() -> Vec<SelectorModelInfo> {
                 128000,
             ),
             (
-                "claude-sonnet-4-20250514",
+                "claude-sonnet-4-6",
                 "Claude Sonnet 4 (Copilot)",
                 "Anthropic Claude via GitHub Copilot",
                 200000,

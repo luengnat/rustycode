@@ -12,7 +12,7 @@ use std::collections::HashMap;
 // Generate a valid model name
 fn arb_model_name() -> impl Strategy<Value = String> {
     prop_oneof![
-        Just("claude-3-5-sonnet-20241022".to_string()),
+        Just("claude-sonnet-4-6".to_string()),
         Just("gpt-4o".to_string()),
         Just("gemini-pro".to_string()),
         Just("ollama/llama2".to_string()),

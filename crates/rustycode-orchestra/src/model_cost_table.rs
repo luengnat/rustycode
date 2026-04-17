@@ -79,9 +79,9 @@ fn build_bundled_cost_table() -> HashMap<String, ModelCostEntry> {
     );
 
     table.insert(
-        "claude-3-5-sonnet-latest".to_string(),
+        "claude-sonnet-4-6".to_string(),
         ModelCostEntry {
-            id: "claude-3-5-sonnet-latest".to_string(),
+            id: "claude-sonnet-4-6".to_string(),
             input_per_1k: 0.003,
             output_per_1k: 0.015,
             updated_at: "2025-03-15".to_string(),

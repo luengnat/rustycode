@@ -358,7 +358,7 @@ fn test_session_metadata_preservation() {
         "title": "Metadata Test",
         "created_at": "2024-01-01T00:00:00Z",
         "updated_at": "2024-01-02T12:30:45Z",
-        "model": "claude-sonnet-4-20250514",
+        "model": "claude-sonnet-4-6",
         "provider": "anthropic",
         "max_tokens": 4096,
         "temperature": 0.7,
@@ -376,7 +376,7 @@ fn test_session_metadata_preservation() {
     let json: serde_json::Value =
         serde_json::from_str(&content).expect("Session file should contain valid JSON");
 
-    assert_eq!(json["model"], "claude-sonnet-4-20250514");
+    assert_eq!(json["model"], "claude-sonnet-4-6");
     assert_eq!(json["provider"], "anthropic");
     assert_eq!(json["max_tokens"], 4096);
     assert_eq!(json["temperature"], 0.7);

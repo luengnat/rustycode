@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test with a simple completion request
     let request = CompletionRequest {
-        model: "claude-sonnet-4-20250514".to_string(),
+        model: "claude-sonnet-4-6".to_string(),
         messages: vec![ChatMessage {
             role: MessageRole::User,
             content: MessageContent::Simple(

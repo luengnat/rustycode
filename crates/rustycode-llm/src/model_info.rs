@@ -364,8 +364,8 @@ static KNOWN_MODELS: Lazy<HashMap<&'static str, ModelInfo>> = Lazy::new(|| {
 
     // Anthropic models - Claude 4.5
     m.insert(
-        "claude-sonnet-4-20250514",
-        ModelInfo::with_cost("claude-sonnet-4-20250514", 200_000, 3.0, 15.0)
+        "claude-sonnet-4-6",
+        ModelInfo::with_cost("claude-sonnet-4-6", 200_000, 3.0, 15.0)
             .max_output(16_384)
             .with_cache_control(true)
             .with_tool_calling(true)
@@ -374,8 +374,8 @@ static KNOWN_MODELS: Lazy<HashMap<&'static str, ModelInfo>> = Lazy::new(|| {
             .with_json_mode(true),
     );
     m.insert(
-        "claude-opus-4-20250514",
-        ModelInfo::with_cost("claude-opus-4-20250514", 200_000, 15.0, 75.0)
+        "claude-opus-4-6",
+        ModelInfo::with_cost("claude-opus-4-6", 200_000, 15.0, 75.0)
             .max_output(32_000)
             .with_cache_control(true)
             .with_tool_calling(true)
@@ -527,7 +527,7 @@ mod tests {
         assert!(is_reasoning_model_name("databricks-o3-mini"));
         assert!(is_reasoning_model_name("goose-o4-mini"));
         assert!(!is_reasoning_model_name("gpt-4o"));
-        assert!(!is_reasoning_model_name("claude-sonnet-4-20250514"));
+        assert!(!is_reasoning_model_name("claude-sonnet-4-6"));
     }
 
     #[test]
@@ -550,7 +550,7 @@ mod tests {
         assert_eq!(gpt4o.context_limit, 128_000);
         assert!(gpt4o.supports_tool_calling());
 
-        let claude = KnownModels::get("claude-sonnet-4-20250514");
+        let claude = KnownModels::get("claude-sonnet-4-6");
         assert_eq!(claude.context_limit, 200_000);
     }
 
@@ -564,7 +564,7 @@ mod tests {
     #[test]
     fn test_known_models_contains() {
         assert!(KnownModels::contains("gpt-4o"));
-        assert!(KnownModels::contains("claude-sonnet-4-20250514"));
+        assert!(KnownModels::contains("claude-sonnet-4-6"));
         assert!(!KnownModels::contains("nonexistent-model"));
     }
 
@@ -572,7 +572,7 @@ mod tests {
     fn test_known_models_all_names() {
         let names = KnownModels::all_names();
         assert!(names.contains(&"gpt-4o"));
-        assert!(names.contains(&"claude-sonnet-4-20250514"));
+        assert!(names.contains(&"claude-sonnet-4-6"));
         assert!(names.contains(&"o3-mini"));
 
         // Verify sorted

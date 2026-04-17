@@ -24,13 +24,13 @@ fn create_anthropic_provider() -> Result<AnthropicProvider, String> {
         retry_config: None,
     };
 
-    AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string())
+    AnthropicProvider::new(config, "claude-sonnet-4-6".to_string())
         .map_err(|e| format!("Failed to create provider: {}", e))
 }
 
 fn create_test_request(prompt: &str) -> CompletionRequest {
     CompletionRequest::new(
-        "claude-3-5-sonnet-20241022".to_string(),
+        "claude-sonnet-4-6".to_string(),
         vec![ChatMessage::user(prompt.to_string())],
     )
 }
@@ -49,7 +49,7 @@ fn test_anthropic_api_key_validation_requires_key() {
         retry_config: None,
     };
 
-    let result = AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string());
+    let result = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string());
     assert!(result.is_err());
 }
 
@@ -63,7 +63,7 @@ fn test_anthropic_api_key_validation_rejects_empty_key() {
         retry_config: None,
     };
 
-    let result = AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string());
+    let result = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string());
     assert!(result.is_err());
 }
 
@@ -77,7 +77,7 @@ fn test_anthropic_api_key_validation_accepts_whitespace_only_key_is_rejected() {
         retry_config: None,
     };
 
-    let result = AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string());
+    let result = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string());
     assert!(result.is_err());
 }
 
@@ -93,7 +93,7 @@ fn test_anthropic_api_key_validation_accepts_valid_key() {
         retry_config: None,
     };
 
-    let result = AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string());
+    let result = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string());
     assert!(result.is_ok());
 }
 
@@ -108,7 +108,7 @@ fn test_anthropic_provider_name() {
     };
 
     let provider =
-        AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string()).unwrap();
+        AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
     assert_eq!(provider.name(), "anthropic");
 }
 
@@ -123,7 +123,7 @@ fn test_anthropic_list_models() {
     };
 
     let provider =
-        AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string()).unwrap();
+        AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
 
     // This test doesn't require async since list_models just returns a static list
     let models = futures::executor::block_on(provider.list_models()).unwrap();
@@ -144,7 +144,7 @@ fn test_anthropic_endpoint_default() {
     };
 
     let provider =
-        AnthropicProvider::new_without_validation(config, "claude-3-5-sonnet-20241022".to_string())
+        AnthropicProvider::new_without_validation(config, "claude-sonnet-4-6".to_string())
             .unwrap();
 
     // The endpoint should be the default Anthropic API
@@ -163,7 +163,7 @@ fn test_anthropic_custom_base_url() {
     };
 
     let result =
-        AnthropicProvider::new_without_validation(config, "claude-3-5-sonnet-20241022".to_string());
+        AnthropicProvider::new_without_validation(config, "claude-sonnet-4-6".to_string());
     assert!(result.is_ok());
 }
 
@@ -187,7 +187,7 @@ async fn test_anthropic_chat_completion_simple() {
     // Assert
     assert!(!response.content.is_empty());
     assert!(response.content.to_lowercase().contains("hello"));
-    assert_eq!(response.model, "claude-3-5-sonnet-20241022");
+    assert_eq!(response.model, "claude-sonnet-4-6");
 }
 
 #[tokio::test]
@@ -199,7 +199,7 @@ async fn test_anthropic_chat_completion_with_system_prompt() {
     // Arrange
     let provider = create_anthropic_provider().unwrap();
     let request = CompletionRequest::new(
-        "claude-3-5-sonnet-20241022".to_string(),
+        "claude-sonnet-4-6".to_string(),
         vec![ChatMessage::user("What is your role?".to_string())],
     )
     .with_system_prompt("You are a helpful Rust programming expert.".to_string());
@@ -248,7 +248,7 @@ async fn test_anthropic_chat_completion_multi_turn() {
         ChatMessage::user("What is my favorite color?".to_string()),
     ];
 
-    let request = CompletionRequest::new("claude-3-5-sonnet-20241022".to_string(), messages);
+    let request = CompletionRequest::new("claude-sonnet-4-6".to_string(), messages);
 
     // Act
     let response = LLMProvider::complete(&provider, request).await.unwrap();
@@ -570,7 +570,7 @@ async fn test_anthropic_invalid_api_key() {
     };
 
     let provider =
-        AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string()).unwrap();
+        AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
     let request = create_test_request("Test");
 
     // Act
@@ -625,7 +625,7 @@ async fn test_anthropic_is_available_without_key() {
     };
 
     let provider =
-        AnthropicProvider::new_without_validation(config, "claude-3-5-sonnet-20241022".to_string())
+        AnthropicProvider::new_without_validation(config, "claude-sonnet-4-6".to_string())
             .unwrap();
 
     // Act

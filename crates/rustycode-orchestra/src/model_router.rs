@@ -234,7 +234,7 @@ impl CostTable {
 
         // Anthropic models
         costs.insert(
-            "claude-3-5-sonnet-20241022".to_string(),
+            "claude-sonnet-4-6".to_string(),
             ModelCost {
                 provider: "anthropic".to_string(),
                 input_cost_per_1m: 3.0,
@@ -519,7 +519,7 @@ mod tests {
     #[test]
     fn cost_table_default_has_models() {
         let ct = CostTable::default();
-        assert!(ct.get_cost("claude-3-5-sonnet-20241022").is_some());
+        assert!(ct.get_cost("claude-sonnet-4-6").is_some());
         assert!(ct.get_cost("claude-3-5-haiku-20241022").is_some());
         assert!(ct.get_cost("claude-3-5-opus-20241022").is_some());
         assert!(ct.get_cost("gpt-4o").is_some());
@@ -551,7 +551,7 @@ mod tests {
         let ct = CostTable::new();
         // 1M input + 1M output = full price per unit
         let cost = ct
-            .calculate_cost("claude-3-5-sonnet-20241022", 1_000_000, 1_000_000)
+            .calculate_cost("claude-sonnet-4-6", 1_000_000, 1_000_000)
             .unwrap();
         assert!((cost - 18.0).abs() < 0.01);
     }
@@ -566,7 +566,7 @@ mod tests {
     fn cost_table_calculate_cost_zero_tokens() {
         let ct = CostTable::new();
         let cost = ct
-            .calculate_cost("claude-3-5-sonnet-20241022", 0, 0)
+            .calculate_cost("claude-sonnet-4-6", 0, 0)
             .unwrap();
         assert!((cost - 0.0).abs() < f64::EPSILON);
     }
@@ -658,7 +658,7 @@ mod tests {
     #[test]
     fn model_selection_serde_roundtrip() {
         let sel = ModelSelection {
-            model: "claude-3-5-sonnet-20241022".into(),
+            model: "claude-sonnet-4-6".into(),
             tier: ModelTier::Balanced,
             provider: "anthropic".into(),
             reasoning: "Standard complexity".into(),
@@ -666,7 +666,7 @@ mod tests {
         };
         let json = serde_json::to_string(&sel).unwrap();
         let decoded: ModelSelection = serde_json::from_str(&json).unwrap();
-        assert_eq!(decoded.model, "claude-3-5-sonnet-20241022");
+        assert_eq!(decoded.model, "claude-sonnet-4-6");
         assert_eq!(decoded.provider, "anthropic");
     }
 
@@ -709,6 +709,6 @@ mod tests {
         let ct = CostTable::new();
         let json = serde_json::to_string(&ct).unwrap();
         let decoded: CostTable = serde_json::from_str(&json).unwrap();
-        assert!(decoded.get_cost("claude-3-5-sonnet-20241022").is_some());
+        assert!(decoded.get_cost("claude-sonnet-4-6").is_some());
     }
 }

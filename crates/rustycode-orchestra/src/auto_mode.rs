@@ -668,7 +668,7 @@ mod tests {
 
     fn test_model_selection() -> ModelSelection {
         ModelSelection {
-            model: "claude-3-5-sonnet-20241022".into(),
+            model: "claude-sonnet-4-6".into(),
             tier: crate::complexity::ModelTier::Balanced,
             provider: "anthropic".into(),
             reasoning: "standard complexity".into(),

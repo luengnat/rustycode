@@ -356,7 +356,7 @@ impl ModelSelectorRenderer {
     fn default_models() -> Vec<ModelInfo> {
         vec![
             ModelInfo::new(
-                "claude-sonnet-4-20250514",
+                "claude-sonnet-4-6",
                 "Claude Sonnet 4",
                 "anthropic",
                 "Best balance of intelligence and speed",
@@ -370,7 +370,7 @@ impl ModelSelectorRenderer {
             ])
             .with_shortcut(1),
             ModelInfo::new(
-                "claude-opus-4-20250514",
+                "claude-opus-4-6",
                 "Claude Opus 4",
                 "anthropic",
                 "Maximum intelligence for complex tasks",

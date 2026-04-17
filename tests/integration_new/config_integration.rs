@@ -172,7 +172,7 @@ async fn test_provider_config_from_env() {
     assert!(std::env::var("OPENROUTER_API_KEY").is_ok());
 
     // Config should load successfully
-    assert_eq!(config.model, "claude-3-5-sonnet-20241022");
+    assert_eq!(config.model, "claude-sonnet-4-6");
 }
 
 #[tokio::test]

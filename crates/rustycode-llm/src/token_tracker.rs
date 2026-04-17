@@ -341,12 +341,12 @@ mod tests {
     #[test]
     fn test_cost_per_million_tokens_io() {
         // Claude Sonnet 4: $3/M in, $15/M out
-        let (inp, out) = cost_per_million_tokens_io("claude-sonnet-4-20250514");
+        let (inp, out) = cost_per_million_tokens_io("claude-sonnet-4-6");
         assert_eq!(inp, 3.0);
         assert_eq!(out, 15.0);
 
         // Claude Opus 4: $15/M in, $75/M out
-        let (inp, out) = cost_per_million_tokens_io("claude-opus-4-20250514");
+        let (inp, out) = cost_per_million_tokens_io("claude-opus-4-6");
         assert_eq!(inp, 15.0);
         assert_eq!(out, 75.0);
 
@@ -364,7 +364,7 @@ mod tests {
     #[test]
     fn test_estimate_cost() {
         // Claude Sonnet 4: 1M input + 1M output = $3 + $15 = $18
-        let cost = estimate_cost("claude-sonnet-4-20250514", 1_000_000, 1_000_000);
+        let cost = estimate_cost("claude-sonnet-4-6", 1_000_000, 1_000_000);
         assert!((cost - 18.0).abs() < 0.01, "Expected $18, got ${}", cost);
 
         // Free model
@@ -372,7 +372,7 @@ mod tests {
         assert_eq!(cost, 0.0);
 
         // Small usage
-        let cost = estimate_cost("claude-sonnet-4-20250514", 1000, 500);
+        let cost = estimate_cost("claude-sonnet-4-6", 1000, 500);
         let expected = (1000.0 / 1_000_000.0) * 3.0 + (500.0 / 1_000_000.0) * 15.0;
         assert!((cost - expected).abs() < 0.0001);
     }

@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     let request_view =
-        CompletionRequest::new("claude-3-5-sonnet-20241022".to_string(), messages_view)
+        CompletionRequest::new("claude-sonnet-4-6".to_string(), messages_view)
             .with_streaming(false)
             .with_max_tokens(1024);
 
@@ -116,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     let request_replace =
-        CompletionRequest::new("claude-3-5-sonnet-20241022".to_string(), messages_replace)
+        CompletionRequest::new("claude-sonnet-4-6".to_string(), messages_replace)
             .with_streaming(false)
             .with_max_tokens(1024);
 
@@ -175,7 +175,7 @@ mod e2e_tests {
             ChatMessage::user("Create test.txt with 'Hello, World!'".to_string()),
         ];
 
-        let request = CompletionRequest::new("claude-3-5-sonnet-20241022".to_string(), messages)
+        let request = CompletionRequest::new("claude-sonnet-4-6".to_string(), messages)
             .with_streaming(false)
             .with_max_tokens(1024);
 

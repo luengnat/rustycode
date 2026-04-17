@@ -30,11 +30,11 @@ async fn test_anthropic_tool_selection_explore_intent() {
         retry_config: None,
     };
 
-    let provider = AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string())
+    let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string())
         .expect("Failed to create provider");
 
     let request = CompletionRequest::new(
-        "claude-3-5-sonnet-20241022".to_string(),
+        "claude-sonnet-4-6".to_string(),
         vec![ChatMessage::user(
             "Show me how the authentication system works in this codebase".to_string(),
         )],
@@ -70,11 +70,11 @@ async fn test_anthropic_tool_selection_implement_intent() {
         retry_config: None,
     };
 
-    let provider = AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string())
+    let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string())
         .expect("Failed to create provider");
 
     let request = CompletionRequest::new(
-        "claude-3-5-sonnet-20241022".to_string(),
+        "claude-sonnet-4-6".to_string(),
         vec![ChatMessage::user(
             "Create a new user authentication endpoint with JWT tokens".to_string(),
         )],
@@ -103,11 +103,11 @@ async fn test_anthropic_tool_selection_debug_intent() {
         retry_config: None,
     };
 
-    let provider = AnthropicProvider::new(config, "claude-3-5-sonnet-20241022".to_string())
+    let provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string())
         .expect("Failed to create provider");
 
     let request = CompletionRequest::new(
-        "claude-3-5-sonnet-20241022".to_string(),
+        "claude-sonnet-4-6".to_string(),
         vec![ChatMessage::user(
             "Fix the failing test in src/auth/tests.rs - it's panicking on line 42".to_string(),
         )],
@@ -235,7 +235,7 @@ fn test_explicit_tools_override_auto_selection() {
     })];
 
     let mut request = CompletionRequest::new(
-        "claude-3-5-sonnet-20241022".to_string(),
+        "claude-sonnet-4-6".to_string(),
         vec![ChatMessage::user("Test message".to_string())],
     );
     request.tools = Some(explicit_tools);

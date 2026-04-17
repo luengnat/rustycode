@@ -355,7 +355,7 @@ mod tests {
             ModelFamily::Claude
         );
         assert_eq!(
-            detect_model_family("claude-3-5-sonnet-20241022"),
+            detect_model_family("claude-sonnet-4-6"),
             ModelFamily::Claude
         );
     }

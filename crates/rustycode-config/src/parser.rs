@@ -13,7 +13,7 @@ pub fn default_model_for_provider(provider: &str) -> String {
     match provider.to_lowercase().as_str() {
         "openai" => "gpt-4o".to_string(),
         // Keep legacy mappings expected by backward-compat tests
-        "anthropic" => "claude-sonnet-4-20250514".to_string(),
+        "anthropic" => "claude-sonnet-4-6".to_string(),
         "google" => "gemini-pro".to_string(),
         "github" => "gpt-4o-copilot".to_string(),
         "ollama" => "llama3".to_string(),

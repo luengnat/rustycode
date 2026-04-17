@@ -58,7 +58,7 @@ async fn test_multi_tool_workflows() {
     };
 
     let model =
-        env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-3-5-sonnet-20241022".to_string());
+        env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
 
     let provider = match AnthropicProvider::new_without_validation(config, model.clone()) {
         Ok(p) => p,
@@ -247,7 +247,7 @@ async fn test_tool_result_continuation() {
     };
 
     let model =
-        env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-3-5-sonnet-20241022".to_string());
+        env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
 
     let provider = match AnthropicProvider::new_without_validation(config, model.clone()) {
         Ok(p) => p,

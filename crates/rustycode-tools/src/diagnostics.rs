@@ -412,7 +412,7 @@ mod tests {
     fn test_system_info_with_provider() {
         let mut info = SystemInfo::collect();
         info.provider = Some("anthropic".to_string());
-        info.model = Some("claude-sonnet-4-20250514".to_string());
+        info.model = Some("claude-sonnet-4-6".to_string());
         let text = info.to_text();
         assert!(text.contains("anthropic"));
         assert!(text.contains("claude-sonnet"));

@@ -18,7 +18,7 @@ async fn test_search_result_in_request() {
         retry_config: None,
     };
 
-    let _provider = AnthropicProvider::new(config, "claude-sonnet-4-20250514".to_string())
+    let _provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string())
         .expect("Failed to create provider");
 
     // Create a completion request with search_result content
@@ -85,9 +85,9 @@ fn test_request_construction_with_search_results() {
         // In real usage, search results would be added as tool results or in content
     ];
 
-    let request = CompletionRequest::new("claude-sonnet-4-20250514".to_string(), messages);
+    let request = CompletionRequest::new("claude-sonnet-4-6".to_string(), messages);
 
-    assert_eq!(request.model, "claude-sonnet-4-20250514");
+    assert_eq!(request.model, "claude-sonnet-4-6");
     assert_eq!(request.messages.len(), 1);
 
     println!("✓ Request construction with search results test passed");

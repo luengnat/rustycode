@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         retry_config: None,
     };
 
-    let _provider = AnthropicProvider::new(config, "claude-sonnet-4-20250514".to_string())?;
+    let _provider = AnthropicProvider::new(config, "claude-sonnet-4-6".to_string())?;
 
     println!("=== Anthropic Search Result Example ===\n");
 
@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "What is Rust programming language based on these search results?".to_string(),
     )];
 
-    let request = CompletionRequest::new("claude-sonnet-4-20250514".to_string(), messages);
+    let request = CompletionRequest::new("claude-sonnet-4-6".to_string(), messages);
 
     println!("Request model: {}", request.model);
     println!("Number of messages: {}\n", request.messages.len());

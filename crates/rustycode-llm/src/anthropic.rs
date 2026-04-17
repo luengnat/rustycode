@@ -1799,7 +1799,7 @@ AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
     #[test]
     fn test_anthropic_request_serialization() {
         let request = AnthropicRequest {
-            model: "claude-sonnet-4-20250514".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
             messages: vec![],
             max_tokens: 4096,
             temperature: 0.7,
@@ -1814,7 +1814,7 @@ AnthropicProvider::new(config, "claude-sonnet-4-6".to_string()).unwrap();
             output_config: None,
         };
         let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("\"model\":\"claude-sonnet-4-20250514\""));
+        assert!(json.contains("\"model\":\"claude-sonnet-4-6\""));
         assert!(json.contains("\"max_tokens\":4096"));
         assert!(json.contains("\"temperature\":0.7"));
         // stream: false should still be serialized since skip_serializing_if is only for None

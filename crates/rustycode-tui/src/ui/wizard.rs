@@ -95,7 +95,7 @@ impl FirstRunWizard {
                 description: "Most capable AI assistant for complex tasks".to_string(),
                 requires_api_key: true,
                 default_models: vec![
-                    "claude-3-5-sonnet-20241022".to_string(),
+                    "claude-sonnet-4-6".to_string(),
                     "claude-3-5-haiku-20241022".to_string(),
                     "claude-3-opus-20240229".to_string(),
                 ],
@@ -1685,7 +1685,7 @@ mod tests {
 
         wizard.update_config_from_selection();
 
-        assert_eq!(wizard.config.model, "claude-3-5-sonnet-20241022");
+        assert_eq!(wizard.config.model, "claude-sonnet-4-6");
         assert!(wizard.config.providers.anthropic.is_some());
         assert_eq!(
             wizard.config.providers.anthropic.as_ref().unwrap().api_key,

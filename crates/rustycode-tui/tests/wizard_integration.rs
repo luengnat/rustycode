@@ -55,7 +55,7 @@ fn test_wizard_config_persistence() {
 
     // Verify config can be loaded and contains expected values (load from parent dir)
     let loaded_config = Config::load(temp_dir.path()).expect("Failed to load config");
-    assert_eq!(loaded_config.model, "claude-3-5-sonnet-20241022");
+    assert_eq!(loaded_config.model, "claude-sonnet-4-6");
     assert!(loaded_config.providers.anthropic.is_some());
 }
 

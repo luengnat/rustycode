@@ -37,6 +37,7 @@ use crate::provider_v2::{
     CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError, StreamChunk,
     Usage,
 };
+use crate::retry::extract_retry_after_ms;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
@@ -44,6 +45,7 @@ use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::time::Duration;
 
 /// GitHub Copilot request (OpenAI-compatible format)
 #[derive(Serialize)]
@@ -365,6 +367,7 @@ impl LLMProvider for CopilotProvider {
 
         if !response.status().is_success() {
             let status = response.status();
+            let headers = response.headers().clone();
             let text = response.text().await.unwrap_or_default();
 
             match status.as_u16() {
@@ -376,7 +379,9 @@ impl LLMProvider for CopilotProvider {
                     "model not found. {}. Available: gpt-4o-copilot, o1-copilot, o3-mini-copilot",
                     text
                 ))),
-                429 => return Err(ProviderError::RateLimited { retry_delay: None }),
+                429 => return Err(ProviderError::RateLimited {
+                    retry_delay: extract_retry_after_ms(&headers).map(Duration::from_millis),
+                }),
                 502..=504 => return Err(ProviderError::Network(format!(
                     "GitHub Copilot service temporarily unavailable ({}). Please retry in a few seconds.",
                     text
@@ -474,6 +479,7 @@ impl LLMProvider for CopilotProvider {
 
         if !response.status().is_success() {
             let status = response.status();
+            let headers = response.headers().clone();
             let text = response.text().await.unwrap_or_default();
 
             return match status.as_u16() {
@@ -485,7 +491,9 @@ impl LLMProvider for CopilotProvider {
                     "model not found. {}. Available: gpt-4o-copilot, o1-copilot, o3-mini-copilot",
                     text
                 ))),
-                429 => Err(ProviderError::RateLimited { retry_delay: None }),
+                429 => Err(ProviderError::RateLimited {
+                    retry_delay: extract_retry_after_ms(&headers).map(Duration::from_millis),
+                }),
                 502..=504 => Err(ProviderError::Network(format!(
                     "GitHub Copilot service temporarily unavailable ({}). Please retry in a few seconds.",
                     text

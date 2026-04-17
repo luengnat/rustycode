@@ -495,7 +495,7 @@ mod tests {
     #[test]
     fn test_resolve_model_id_with_slash() {
         let models = vec![AvailableModel {
-            id: "claude-3-5-sonnet-20241022".to_string(),
+            id: "claude-sonnet-4-6".to_string(),
             provider: "anthropic".to_string(),
         }];
 

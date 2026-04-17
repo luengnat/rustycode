@@ -6,6 +6,7 @@ use crate::provider_v2::{
     CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError, StreamChunk,
     Usage,
 };
+use crate::retry::extract_retry_after_ms;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
@@ -258,11 +259,14 @@ impl LLMProvider for ZhipuProvider {
         })?;
         if !response.status().is_success() {
             let status = response.status();
+            let headers = response.headers().clone();
             let error_text = response.text().await.unwrap_or_else(|_| "unable to read error".to_string());
             return Err(match status.as_u16() {
                 401 | 403 => ProviderError::auth(format!("Authentication failed: {}", error_text)),
                 404 => ProviderError::InvalidModel(format!("model not found: {}", error_text)),
-                429 => ProviderError::RateLimited { retry_delay: None },
+                429 => ProviderError::RateLimited {
+                    retry_delay: extract_retry_after_ms(&headers).map(Duration::from_millis),
+                },
                 502..=504 => ProviderError::Network(format!("Zhipu service unavailable: {}", error_text)),
                 _ => ProviderError::api(format!("{}: {}", status, error_text)),
             });
@@ -327,11 +331,14 @@ impl LLMProvider for ZhipuProvider {
         })?;
         if !response.status().is_success() {
             let status = response.status();
+            let headers = response.headers().clone();
             let error_text = response.text().await.unwrap_or_else(|_| "unable to read error".to_string());
             return Err(match status.as_u16() {
                 401 | 403 => ProviderError::auth(format!("Authentication failed: {}", error_text)),
                 404 => ProviderError::InvalidModel(format!("model not found: {}", error_text)),
-                429 => ProviderError::RateLimited { retry_delay: None },
+                429 => ProviderError::RateLimited {
+                    retry_delay: extract_retry_after_ms(&headers).map(Duration::from_millis),
+                },
                 502..=504 => ProviderError::Network(format!("Zhipu service unavailable: {}", error_text)),
                 _ => ProviderError::api(format!("{}: {}", status, error_text)),
             });

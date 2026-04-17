@@ -28,7 +28,7 @@ fn test_message_start_deserialization() {
     assert_eq!(event.message.id, "msg_123");
     assert_eq!(event.message.r#type, "message");
     assert_eq!(event.message.role, "assistant");
-    assert_eq!(event.message.model, "claude-sonnet-4-20250514");
+    assert_eq!(event.message.model, "claude-sonnet-4-6");
     assert!(event.message.stop_reason.is_none());
     assert_eq!(event.message.usage.unwrap().input_tokens, 10);
 
