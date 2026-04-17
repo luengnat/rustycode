@@ -55,6 +55,35 @@ fn load_tasks(harness_dir: &Path) -> Result<serde_json::Value> {
     }
 }
 
+/// Get a mutable reference to the tasks array, with proper error handling.
+fn tasks_array_mut(tasks: &mut serde_json::Value) -> Result<&mut Vec<serde_json::Value>> {
+    tasks
+        .get_mut("tasks")
+        .ok_or_else(|| anyhow::anyhow!("harness-tasks.json missing 'tasks' field"))?
+        .as_array_mut()
+        .ok_or_else(|| anyhow::anyhow!("harness-tasks.json 'tasks' is not an array"))
+}
+
+/// Set a field on a JSON object, with a warning instead of panic on missing key.
+fn set_json_field(obj: &mut serde_json::Value, key: &str, value: serde_json::Value) {
+    if let Some(map) = obj.as_object_mut() {
+        map.insert(key.to_string(), value);
+    } else {
+        eprintln!("WARN: expected JSON object, cannot set '{}'", key);
+    }
+}
+
+/// Get a mutable array field from a JSON object.
+fn json_array_mut<'a>(
+    obj: &'a mut serde_json::Value,
+    key: &str,
+) -> Result<&'a mut Vec<serde_json::Value>> {
+    obj.get_mut(key)
+        .ok_or_else(|| anyhow::anyhow!("missing '{}' field", key))?
+        .as_array_mut()
+        .ok_or_else(|| anyhow::anyhow!("'{}' is not an array", key))
+}
+
 fn run_validation(cwd: &Path, command: &str, timeout_secs: u64) -> bool {
     eprintln!("  🧪 Validation: {}", command);
     let result = std::process::Command::new("bash")
@@ -515,7 +544,7 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                 anyhow::bail!("Max sessions ({}) reached", max_sessions);
             }
 
-            *tasks.get_mut("session_count").unwrap() = serde_json::json!(session_count);
+            set_json_field(&mut tasks, "session_count", serde_json::json!(session_count));
             let session_id = format!("SESSION-{}", session_count);
 
             // Create activation marker
@@ -532,7 +561,9 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
 
             // Context Window Recovery: recover any in_progress tasks from previous session
             {
-                let tasks_array = tasks.get_mut("tasks").unwrap().as_array_mut().unwrap();
+                let Ok(tasks_array) = tasks_array_mut(&mut tasks) else {
+                    anyhow::bail!("Invalid tasks format during recovery");
+                };
                 for task in tasks_array.iter_mut() {
                     if task.get("status").and_then(|s| s.as_str()) != Some("in_progress") {
                         continue;
@@ -591,9 +622,8 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                                     task.get("title").and_then(|t| t.as_str()).unwrap_or("")
                                 ),
                             );
-                            *task.get_mut("status").unwrap() = serde_json::json!("completed");
-                            *task.get_mut("completed_at").unwrap() =
-                                serde_json::json!(Utc::now().to_rfc3339());
+                            set_json_field(task, "status", serde_json::json!("completed"));
+                            set_json_field(task, "completed_at", serde_json::json!(Utc::now().to_rfc3339()));
                             log_progress(&harness_dir, &format!("[{}] RECOVERY [{}] action=\"completed\" reason=\"validation passed\"",
                                 session_id, task_id));
                             eprintln!(
@@ -602,22 +632,21 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                             );
                         } else if let Some(ref commit) = started_commit {
                             git_reset_hard(project_dir, commit);
-                            *task.get_mut("status").unwrap() = serde_json::json!("failed");
+                            set_json_field(task, "status", serde_json::json!("failed"));
                             let attempts =
                                 task.get("attempts").and_then(|a| a.as_u64()).unwrap_or(1);
-                            let error_log =
-                                task.get_mut("error_log").unwrap().as_array_mut().unwrap();
-                            error_log.push(serde_json::json!(
-                                "[SESSION_TIMEOUT] Validation failed during recovery"
-                            ));
-                            *task.get_mut("attempts").unwrap() = serde_json::json!(attempts);
+                            if let Ok(error_log) = json_array_mut(task, "error_log") {
+                                error_log.push(serde_json::json!(
+                                    "[SESSION_TIMEOUT] Validation failed during recovery"
+                                ));
+                            }
+                            set_json_field(task, "attempts", serde_json::json!(attempts));
                             log_progress(&harness_dir, &format!("[{}] RECOVERY [{}] action=\"failed\" reason=\"validation failed\"",
                                 session_id, task_id));
                             eprintln!("🔄 Recovered [{}] -> failed (validation failed)", task_id);
                         } else {
-                            *task.get_mut("status").unwrap() = serde_json::json!("completed");
-                            *task.get_mut("completed_at").unwrap() =
-                                serde_json::json!(Utc::now().to_rfc3339());
+                            set_json_field(task, "status", serde_json::json!("completed"));
+                            set_json_field(task, "completed_at", serde_json::json!(Utc::now().to_rfc3339()));
                             log_progress(&harness_dir, &format!("[{}] RECOVERY [{}] action=\"completed\" reason=\"progress found, no validation\"",
                                 session_id, task_id));
                             eprintln!("🔄 Recovered [{}] -> completed (no validation)", task_id);
@@ -626,10 +655,11 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                         // No progress at all
                         let attempts =
                             task.get("attempts").and_then(|a| a.as_u64()).unwrap_or(0) + 1;
-                        *task.get_mut("status").unwrap() = serde_json::json!("failed");
-                        *task.get_mut("attempts").unwrap() = serde_json::json!(attempts);
-                        let error_log = task.get_mut("error_log").unwrap().as_array_mut().unwrap();
-                        error_log.push(serde_json::json!("[SESSION_TIMEOUT] No progress detected"));
+                        set_json_field(task, "status", serde_json::json!("failed"));
+                        set_json_field(task, "attempts", serde_json::json!(attempts));
+                        if let Ok(error_log) = json_array_mut(task, "error_log") {
+                            error_log.push(serde_json::json!("[SESSION_TIMEOUT] No progress detected"));
+                        }
                         log_progress(&harness_dir, &format!("[{}] RECOVERY [{}] action=\"failed\" reason=\"no progress from previous session\"",
                             session_id, task_id));
                         eprintln!("🔄 Recovered [{}] -> failed (no progress)", task_id);
@@ -655,7 +685,21 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                 };
 
                 // Claim task
-                let task = &mut tasks.get_mut("tasks").unwrap().as_array_mut().unwrap()[task_idx];
+                let task = {
+                    let Ok(arr) = tasks_array_mut(&mut tasks) else {
+                        log_progress(&harness_dir, &format!(
+                            "[{}] ERROR invalid tasks format", session_id));
+                        break;
+                    };
+                    match arr.get_mut(task_idx) {
+                        Some(t) => t,
+                        None => {
+                            log_progress(&harness_dir, &format!(
+                                "[{}] ERROR task index {} out of bounds", session_id, task_idx));
+                            break;
+                        }
+                    }
+                };
                 let task_id = task
                     .get("id")
                     .and_then(|i| i.as_str())
@@ -668,11 +712,11 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                     .to_string();
 
                 let head_commit = get_git_head(project_dir);
-                *task.get_mut("status").unwrap() = serde_json::json!("in_progress");
-                *task.get_mut("started_at_commit").unwrap() = serde_json::json!(head_commit);
-                *task.get_mut("attempts").unwrap() = serde_json::json!(
+                set_json_field(task, "status", serde_json::json!("in_progress"));
+                set_json_field(task, "started_at_commit", serde_json::json!(head_commit));
+                set_json_field(task, "attempts", serde_json::json!(
                     task.get("attempts").and_then(|a| a.as_u64()).unwrap_or(0) + 1
-                );
+                ));
 
                 save_tasks(&harness_dir, &tasks)?;
 
@@ -737,11 +781,17 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                         };
 
                         if validation_passed {
-                            let task = &mut tasks.get_mut("tasks").unwrap().as_array_mut().unwrap()
-                                [task_idx];
-                            *task.get_mut("status").unwrap() = serde_json::json!("completed");
-                            *task.get_mut("completed_at").unwrap() =
-                                serde_json::json!(Utc::now().to_rfc3339());
+                            let task = {
+                                let Ok(arr) = tasks_array_mut(&mut tasks) else {
+                                    break;
+                                };
+                                match arr.get_mut(task_idx) {
+                                    Some(t) => t,
+                                    None => break,
+                                }
+                            };
+                            set_json_field(task, "status", serde_json::json!("completed"));
+                            set_json_field(task, "completed_at", serde_json::json!(Utc::now().to_rfc3339()));
 
                             log_progress(
                                 &harness_dir,
@@ -763,19 +813,26 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                                     session_id, task_id, commit));
                             }
 
-                            let task = &mut tasks.get_mut("tasks").unwrap().as_array_mut().unwrap()
-                                [task_idx];
-                            *task.get_mut("status").unwrap() = serde_json::json!("failed");
+                            let task = {
+                                let Ok(arr) = tasks_array_mut(&mut tasks) else {
+                                    break;
+                                };
+                                match arr.get_mut(task_idx) {
+                                    Some(t) => t,
+                                    None => break,
+                                }
+                            };
+                            set_json_field(task, "status", serde_json::json!("failed"));
                             let attempts =
                                 task.get("attempts").and_then(|a| a.as_u64()).unwrap_or(1);
                             let max_attempts = task
                                 .get("max_attempts")
                                 .and_then(|a| a.as_u64())
                                 .unwrap_or(3);
-                            let error_log =
-                                task.get_mut("error_log").unwrap().as_array_mut().unwrap();
-                            error_log
-                                .push(serde_json::json!("[TEST_FAIL] Validation command failed"));
+                            if let Ok(error_log) = json_array_mut(task, "error_log") {
+                                error_log
+                                    .push(serde_json::json!("[TEST_FAIL] Validation command failed"));
+                            }
 
                             log_progress(
                                 &harness_dir,
@@ -809,12 +866,20 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                             }
                         }
 
-                        let task =
-                            &mut tasks.get_mut("tasks").unwrap().as_array_mut().unwrap()[task_idx];
-                        *task.get_mut("status").unwrap() = serde_json::json!("failed");
+                        let task = {
+                            let Ok(arr) = tasks_array_mut(&mut tasks) else {
+                                break;
+                            };
+                            match arr.get_mut(task_idx) {
+                                Some(t) => t,
+                                None => break,
+                            }
+                        };
+                        set_json_field(task, "status", serde_json::json!("failed"));
 
-                        let error_log = task.get_mut("error_log").unwrap().as_array_mut().unwrap();
-                        error_log.push(serde_json::json!(format!("[TASK_EXEC] {}", e)));
+                        if let Ok(error_log) = json_array_mut(task, "error_log") {
+                            error_log.push(serde_json::json!(format!("[TASK_EXEC] {}", e)));
+                        }
 
                         let attempts = task.get("attempts").and_then(|a| a.as_u64()).unwrap_or(1);
                         let max_attempts = task
@@ -853,7 +918,7 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
             }
 
             // Update last_session and log STATS
-            *tasks.get_mut("last_session").unwrap() = serde_json::json!(Utc::now().to_rfc3339());
+            set_json_field(&mut tasks, "last_session", serde_json::json!(Utc::now().to_rfc3339()));
 
             // Compute stats
             let (total, completed, failed, pending, attempts_total) = tasks

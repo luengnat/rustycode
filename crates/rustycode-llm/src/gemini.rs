@@ -130,7 +130,7 @@ impl GeminiProvider {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/json".parse().unwrap(),
+            "application/json".parse().expect("application/json is always a valid HeaderValue"),
         );
         headers.insert(
             reqwest::header::HeaderName::from_static("x-goog-api-key"),
@@ -177,7 +177,7 @@ impl GeminiProvider {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/json".parse().unwrap(),
+            "application/json".parse().expect("application/json is always a valid HeaderValue"),
         );
         headers.insert(
             reqwest::header::HeaderName::from_static("x-goog-api-key"),
