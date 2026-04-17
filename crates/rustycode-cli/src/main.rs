@@ -474,15 +474,22 @@ async fn async_main() -> Result<()> {
                             let has_sufficient_work =
                                 task_result.total_tool_calls >= min_tool_calls;
                             let has_made_writes = task_result.made_writes;
+                            let has_fs_progress = snapshot.has_progress(&cwd);
                             let has_real_progress = has_sufficient_work
                                 && has_made_writes
-                                && snapshot.has_progress(&cwd);
+                                && has_fs_progress;
 
                             // If agent made writes but never verified, don't declare success.
                             // This catches the pattern where the agent edits a file and stops
                             // without running tests/builds/imports to confirm the changes work.
                             let unverified_edits =
                                 has_made_writes && !task_result.verified_after_last_edit;
+
+                            eprintln!(
+                                "  [progress] work={} writes={} fs_progress={} verified={} unverified={}",
+                                has_sufficient_work, has_made_writes, has_fs_progress,
+                                task_result.verified_after_last_edit, unverified_edits
+                            );
 
                             tracing::debug!(
                                 has_sufficient_work,

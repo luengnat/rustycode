@@ -81,6 +81,8 @@ pub struct BrutalistRendererConfig<'a> {
     pub cursor_col: usize,
     /// Cursor row position within input text (0-indexed, for multiline cursor)
     pub cursor_row: usize,
+    /// Current working directory (for display)
+    pub cwd: std::path::PathBuf,
 }
 
 /// Builder for BrutalistRendererConfig
@@ -247,6 +249,11 @@ impl<'a> BrutalistRendererBuilder<'a> {
         self
     }
 
+    pub fn cwd(mut self, cwd: std::path::PathBuf) -> Self {
+        self.config.cwd = cwd;
+        self
+    }
+
     pub fn build(self) -> BrutalistRenderer<'a> {
         BrutalistRenderer::from_config(self.config)
     }
@@ -338,6 +345,8 @@ pub struct BrutalistRenderer<'a> {
     pub cursor_col: usize,
     /// Cursor row position within input text (0-indexed)
     pub cursor_row: usize,
+    /// Current working directory (for display)
+    pub cwd: std::path::PathBuf,
 }
 
 impl<'a> BrutalistRenderer<'a> {
@@ -388,6 +397,7 @@ impl<'a> BrutalistRenderer<'a> {
             session_start: config.session_start,
             cursor_col: config.cursor_col,
             cursor_row: config.cursor_row,
+            cwd: config.cwd,
         }
     }
 
@@ -1245,7 +1255,11 @@ impl<'a> BrutalistRenderer<'a> {
 
         // Working directory
         {
-            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let cwd = if self.cwd.as_os_str().is_empty() {
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+            } else {
+                self.cwd.clone()
+            };
             let cwd_str = cwd.display().to_string();
             // Replace home dir with ~ for brevity
             let display = if let Ok(home) = std::env::var("HOME") {

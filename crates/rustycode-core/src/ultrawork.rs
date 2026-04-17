@@ -36,12 +36,14 @@ impl ProgressSnapshot {
     pub fn has_progress(&self, cwd: &Path) -> bool {
         // Check git changes
         if has_file_changes(cwd) {
+            tracing::debug!("Progress detected via git status");
             return true;
         }
         // Check git HEAD changed
         if let Some(ref before) = self.git_head {
             if let Some(after) = git_head_rev(cwd) {
                 if before != &after {
+                    tracing::debug!("Progress detected via git HEAD change");
                     return true;
                 }
             }
@@ -49,8 +51,20 @@ impl ProgressSnapshot {
         // Check file list changed
         let current_files = file_list(cwd);
         if current_files != self.files {
+            let new_files: Vec<_> = current_files.difference(&self.files).collect();
+            let removed_files: Vec<_> = self.files.difference(&current_files).collect();
+            tracing::debug!(
+                "Progress detected via file list: {} new, {} removed (sample: {:?})",
+                new_files.len(),
+                removed_files.len(),
+                new_files.iter().take(5)
+            );
             return true;
         }
+        tracing::debug!(
+            "No progress detected: git_status=false, files_unchanged (snapshot had {} files)",
+            self.files.len()
+        );
         false
     }
 }
