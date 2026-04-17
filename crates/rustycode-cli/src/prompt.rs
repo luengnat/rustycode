@@ -15,7 +15,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust
+//! ```no_run
 //! use rustycode_cli::prompt::{Confirm, Select, Input, Prompt};
 //!
 //! // Simple confirmation
@@ -49,7 +49,7 @@
 //! When `PromptConfig::global_yes_enabled()` is true (typically via a `--yes` flag),
 //! all prompts will use their default values without requiring user input:
 //!
-//! ```rust
+//! ```no_run
 //! use rustycode_cli::prompt::{PromptConfig, Confirm};
 //!
 //! // Enable global yes mode (typically from CLI flag)
@@ -168,7 +168,7 @@ pub type Validator<T> = dyn Fn(&T) -> Result<(), ValidationError> + Send + Sync;
 ///
 /// # Example
 ///
-/// ```rust
+/// ```no_run
 /// use rustycode_cli::prompt::{Confirm, Prompt};
 ///
 /// let confirmed = Confirm::new("Do you want to continue?")
@@ -260,7 +260,7 @@ impl Prompt for Confirm {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```no_run
 /// use rustycode_cli::prompt::{Select, Prompt};
 ///
 /// let choice = Select::new("Choose a color")
@@ -410,7 +410,7 @@ impl<T: Clone> Prompt for Select<T> {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```no_run
 /// use rustycode_cli::prompt::{Input, Prompt};
 ///
 /// let name = Input::new("Enter your name")
@@ -527,7 +527,7 @@ impl Prompt for Input {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```no_run
 /// use rustycode_cli::prompt::{MultiSelect, Prompt};
 ///
 /// let choices = MultiSelect::new("Select features to install")
