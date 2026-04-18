@@ -156,7 +156,7 @@ impl RetryConfig {
             0.0
         };
 
-        let final_delay = capped_delay + random_jitter;
+        let final_delay = (capped_delay + random_jitter).min(self.max_delay.as_millis() as f64);
         Duration::from_millis(final_delay as u64)
     }
 
