@@ -73,7 +73,7 @@ impl ConfigBackup {
         if let Some(last) = self.most_recent_backup()? {
             if let Ok(metadata) = fs::metadata(&last) {
                 if let Ok(modified) = metadata.modified() {
-                    if modified.elapsed().unwrap_or(Duration::MAX) < self.throttle {
+                    if modified.elapsed().unwrap_or_default() < self.throttle {
                         return Ok(None);
                     }
                 }

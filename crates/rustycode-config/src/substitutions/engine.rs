@@ -206,7 +206,7 @@ impl SubstitutionEngine {
                 if cached
                     .timestamp
                     .elapsed()
-                    .unwrap_or(std::time::Duration::MAX)
+                    .unwrap_or_default()
                     < ttl
                 {
                     return Ok(cached.value.clone());

@@ -545,8 +545,14 @@ impl MemoryMetrics {
     /// Returns the ratio of relevant results to total retrieved results
     /// based on feedback recorded in query history.
     pub fn calculate_retrieval_precision(&self) -> f32 {
-        let total_retrieved: usize = self.query_history.iter().map(|q| q.results_count).sum();
-        let total_relevant: usize = self.query_history.iter().map(|q| q.relevant_count).sum();
+        let total_retrieved: usize = self
+            .query_history
+            .iter()
+            .fold(0usize, |acc, q| acc.saturating_add(q.results_count));
+        let total_relevant: usize = self
+            .query_history
+            .iter()
+            .fold(0usize, |acc, q| acc.saturating_add(q.relevant_count));
 
         if total_retrieved == 0 {
             return 0.0;

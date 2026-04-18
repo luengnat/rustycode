@@ -1532,7 +1532,7 @@ impl GitClient {
             output: stdout.clone(),
             error: if success { None } else { Some(stderr) },
             executed_at: Utc::now(),
-            duration_ms: duration.as_millis() as u64,
+            duration_ms: duration.as_millis().try_into().unwrap_or(u64::MAX),
         })
     }
 

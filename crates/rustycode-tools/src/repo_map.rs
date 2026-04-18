@@ -1283,7 +1283,7 @@ fn format_map(
         let file_block = format_file_entry(rel_path, summary);
 
         // Check if adding this file would exceed budget
-        if output.len() + file_block.len() > budget_chars {
+        if output.len().saturating_add(file_block.len()) > budget_chars {
             if output.is_empty() {
                 // Even the first file exceeds budget — add a truncated version
                 let trunc_len = budget_chars.saturating_sub(20); // leave room for truncation marker

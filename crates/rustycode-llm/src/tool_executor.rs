@@ -531,4 +531,40 @@ mod tests {
         assert_eq!(parsed.name, "bash");
         assert_eq!(parsed.arguments["command"], "ls");
     }
+
+    #[test]
+    fn test_parse_tool_call_item_string_arguments() {
+        // Some providers return arguments as a JSON string instead of parsed object
+        let item = serde_json::json!({
+            "name": "bash",
+            "arguments": "{\"command\": \"ls -la\"}"
+        });
+        let parsed = parse_tool_call_item(&item).unwrap();
+        assert_eq!(parsed.name, "bash");
+        assert_eq!(parsed.arguments["command"], "ls -la");
+    }
+
+    #[test]
+    fn test_parse_tool_call_item_invalid_string_arguments_falls_back() {
+        // If string arguments aren't valid JSON, use the raw string value
+        let item = serde_json::json!({
+            "name": "bash",
+            "arguments": "not valid json"
+        });
+        let parsed = parse_tool_call_item(&item).unwrap();
+        assert_eq!(parsed.name, "bash");
+        // Should fall back to the raw string value
+        assert!(parsed.arguments.is_string());
+    }
+
+    #[test]
+    fn test_parse_tool_call_item_no_arguments() {
+        let item = serde_json::json!({
+            "name": "list_tools"
+        });
+        let parsed = parse_tool_call_item(&item).unwrap();
+        assert_eq!(parsed.name, "list_tools");
+        assert!(parsed.arguments.is_object());
+        assert!(parsed.arguments.as_object().unwrap().is_empty());
+    }
 }
