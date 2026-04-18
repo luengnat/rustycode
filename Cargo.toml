@@ -135,7 +135,23 @@ type_complexity = "allow"
 
 # collapsible_match is used intentionally in provider-v2 to keep the
 # despatch arms visually aligned and easier to read.
-collapsible_match = "allow"
+collapsible-match = "allow"
+
+# unnecessary_sort_by produces noise on sort_by calls that are clearer
+# to read as-is. The performance difference is negligible for small collections.
+unnecessary-sort-by = "allow"
+
+# manual-checked-ops: the if/else pattern is often clearer than
+# checked_div/checked_sub for readers unfamiliar with the API.
+manual-checked-ops = "allow"
+
+# unnecessary-min-or-max: sometimes the explicit comparison is clearer
+# than min/max for documenting intent.
+unnecessary-min-or-max = "allow"
+
+# useless-conversion: some .into() calls are intentionally explicit
+# to document the type transition.
+useless-conversion = "allow"
 
 # Index-based loops are sometimes clearer than iterator-based loops when
 # correlating multiple slices (e.g., search result context lines).
