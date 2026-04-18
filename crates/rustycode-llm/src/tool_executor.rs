@@ -362,10 +362,16 @@ fn parse_tool_call_item(item: &Value) -> Option<ParsedToolCall> {
     // OpenAI format: nested under "function"
     if let Some(func) = item.get("function") {
         let name = func.get("name")?.as_str()?.to_string();
-        let arguments_str = func.get("arguments").and_then(|a| a.as_str()).unwrap_or("{}");
+        let arguments_str = func
+            .get("arguments")
+            .and_then(|a| a.as_str())
+            .unwrap_or("{}");
         let arguments = serde_json::from_str::<Value>(arguments_str)
             .unwrap_or_else(|_| Value::Object(Default::default()));
-        let id = item.get("id").and_then(|i| i.as_str()).map(|s| s.to_string());
+        let id = item
+            .get("id")
+            .and_then(|i| i.as_str())
+            .map(|s| s.to_string());
         return Some(ParsedToolCall {
             name,
             arguments,
@@ -379,7 +385,10 @@ fn parse_tool_call_item(item: &Value) -> Option<ParsedToolCall> {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| Value::Object(Default::default()));
-        let id = item.get("id").and_then(|i| i.as_str()).map(|s| s.to_string());
+        let id = item
+            .get("id")
+            .and_then(|i| i.as_str())
+            .map(|s| s.to_string());
         return Some(ParsedToolCall {
             name: name.to_string(),
             arguments,
