@@ -142,10 +142,14 @@ impl TimeoutSupervisor {
     /// Check if unit has exceeded any timeout
     pub fn check_timeouts(&self, state: &mut UnitTimeoutState) -> TimeoutAction {
         let now = Utc::now();
-        let elapsed = now.signed_duration_since(state.started_at).num_seconds() as u64;
+        let elapsed = now
+            .signed_duration_since(state.started_at)
+            .num_seconds()
+            .max(0) as u64;
         let idle = now
             .signed_duration_since(state.last_progress_at)
-            .num_seconds() as u64;
+            .num_seconds()
+            .max(0) as u64;
         let in_flight_tool_count = get_in_flight_tool_count();
         let oldest_tool_age_secs = get_oldest_in_flight_tool_age_ms() / 1000;
 
@@ -369,6 +373,27 @@ mod tests {
         );
         let mut state = supervisor.start_unit("T01");
         // Freshly created, well within limits
+        let action = supervisor.check_timeouts(&mut state);
+        assert!(matches!(action, TimeoutAction::Continue));
+    }
+
+    #[test]
+    fn clock_skew_produces_zero_elapsed() {
+        // If started_at is in the future (clock skew), elapsed should clamp to 0
+        let supervisor = TimeoutSupervisor::new(
+            PathBuf::from("/tmp"),
+            TimeoutConfig {
+                soft_timeout_secs: 300,
+                idle_timeout_secs: 600,
+                hard_timeout_secs: 1800,
+            },
+        );
+        let mut state = supervisor.start_unit("T01");
+        // Set started_at 60 seconds in the future to simulate clock skew
+        state.started_at = Utc::now() + ChronoDuration::seconds(60);
+        state.last_progress_at = Utc::now() + ChronoDuration::seconds(60);
+
+        // Should return Continue (clamped to 0 elapsed, not a huge wrapped value)
         let action = supervisor.check_timeouts(&mut state);
         assert!(matches!(action, TimeoutAction::Continue));
     }
