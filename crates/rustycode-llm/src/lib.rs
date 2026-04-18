@@ -202,6 +202,8 @@ pub mod error_recovery;
 pub mod gemini;
 pub mod graceful_degradation;
 pub mod huggingface;
+#[cfg(feature = "litert")]
+pub mod litert_lm;
 pub mod mistral;
 pub mod model_info;
 pub mod model_router;
@@ -259,6 +261,8 @@ pub use graceful_degradation::{
     RetryConfig as DegradationRetryConfig,
 };
 pub use huggingface::HuggingFaceProvider;
+#[cfg(feature = "litert")]
+pub use litert_lm::LiteRtLmProvider;
 pub use mistral::MistralProvider;
 pub use model_router::{
     ModelChoice, ModelRouter, Request, RouterConfig, SimpleRouter, TaskComplexity,
@@ -627,6 +631,19 @@ pub fn create_provider_with_config(
                     return Err(e.into());
                 }
             }
+        },
+        // Litert Lightweight LiteRtLmProvider wiring
+        #[cfg(feature = "litert")]
+        "litert-lm" | "litert_lm" | "litert" => {
+            let provider = LiteRtLmProvider::new(v2_config, model.to_string())?;
+            let boxed: Box<dyn LLMProvider> = Box::new(provider);
+            std::sync::Arc::<dyn LLMProvider>::from(boxed)
+        },
+        #[cfg(not(feature = "litert"))]
+        "litert-lm" | "litert_lm" | "litert" => {
+            return Err(ProviderError::Configuration(
+                "LiteRT-LM provider requires the 'litert' feature flag (needs C++ toolchain)".into(),
+            ).into());
         },
         _ => match AnthropicProvider::new(v2_config.clone(), model.to_string()) {
             Ok(p) => std::sync::Arc::new(p),

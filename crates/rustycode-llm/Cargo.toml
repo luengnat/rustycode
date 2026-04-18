@@ -31,9 +31,13 @@ strum_macros = "0.27"
 uuid = { workspace = true }
 sha2 = { workspace = true }
 once_cell = { workspace = true }
+litert-lm = { version = "0.2.1", optional = true }
 
 [features]
+default = ["litert"]
 # Enable live API integration tests (requires provider API keys, network access)
 live-api-tests = []
 # Enable vector memory integration (semantic search, auto-routing)
 vector-memory = ["rustycode-tools/vector-memory"]
+# Enable LiteRT-LM local inference provider
+litert = ["dep:litert-lm"]

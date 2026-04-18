@@ -271,12 +271,9 @@ fn compress_hybrid(window: &mut ContextWindow, target_reduction: usize) -> Compr
     ];
 
     for strategy in strategies {
-        let result = compress_context(window, strategy, target_reduction);
-
-        if let Ok(ref r) = result {
+        if let Ok(r) = compress_context(window, strategy, target_reduction) {
             if r.tokens_saved >= target_reduction {
-                // Safe: we verified it's Ok above
-                return result;
+                return r;
             }
         }
     }
