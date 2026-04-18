@@ -1209,65 +1209,62 @@ pub fn handle_tool_result(tui: &mut TUI, result: ToolResult) {
         ToolOutput::Timeout => "Timeout".to_string(),
     };
 
-    // Update tool progress in the last assistant message
-    if let Some(last_msg) = tui.messages.last_mut() {
-        if last_msg.role == MessageRole::Assistant {
-            // Try to update an existing running tool entry (created by ToolStart)
-            let updated_existing = if let Some(tools) = &mut last_msg.tool_executions {
-                if let Some(tool) = tools.iter_mut().find(|t| t.tool_id == result.id) {
-                    tool.status = result_status.clone();
-                    let end_time = chrono::Utc::now();
-                    tool.end_time = Some(end_time);
-                    tool.duration_ms = Some(
-                        end_time
-                            .signed_duration_since(tool.start_time)
-                            .num_milliseconds()
-                            .max(0) as u64,
-                    );
-                    tool.result_summary = result_summary.clone();
-                    tool.detailed_output = detailed_output.clone();
-                    true
-                } else {
-                    false
-                }
+    let assistant_msg = tui
+        .messages
+        .iter_mut()
+        .rev()
+        .find(|m| m.role == MessageRole::Assistant);
+    if let Some(last_msg) = assistant_msg {
+        let updated_existing = if let Some(tools) = &mut last_msg.tool_executions {
+            if let Some(tool) = tools.iter_mut().find(|t| t.tool_id == result.id) {
+                tool.status = result_status.clone();
+                let end_time = chrono::Utc::now();
+                tool.end_time = Some(end_time);
+                tool.duration_ms = Some(
+                    end_time
+                        .signed_duration_since(tool.start_time)
+                        .num_milliseconds()
+                        .max(0) as u64,
+                );
+                tool.result_summary = result_summary.clone();
+                tool.detailed_output = detailed_output.clone();
+                true
             } else {
                 false
+            }
+        } else {
+            false
+        };
+
+        if !updated_existing {
+            let tool_execution = ToolExecution {
+                tool_id: result.id.clone(),
+                name: result.name.clone(),
+                start_time: chrono::Utc::now(),
+                end_time: Some(chrono::Utc::now()),
+                duration_ms: None,
+                result_summary: result_summary.clone(),
+                status: result_status,
+                detailed_output,
+                input_json: None,
+                progress_current: None,
+                progress_total: None,
+                progress_description: None,
             };
 
-            // If no running entry was found, create a new completed one
-            if !updated_existing {
-                let tool_execution = ToolExecution {
-                    tool_id: result.id.clone(),
-                    name: result.name.clone(),
-                    start_time: chrono::Utc::now(),
-                    end_time: Some(chrono::Utc::now()),
-                    duration_ms: None,
-                    result_summary: result_summary.clone(),
-                    status: result_status,
-                    detailed_output,
-                    input_json: None,
-                    progress_current: None,
-                    progress_total: None,
-                    progress_description: None,
-                };
-
-                if last_msg.tool_executions.is_none() {
-                    last_msg.tool_executions = Some(vec![]);
-                }
-                if let Some(tools) = &mut last_msg.tool_executions {
-                    tools.push(tool_execution);
-                    // Cap per-message tool count
-                    while tools.len() > 100 {
-                        tools.remove(0);
-                    }
+            if last_msg.tool_executions.is_none() {
+                last_msg.tool_executions = Some(vec![]);
+            }
+            if let Some(tools) = &mut last_msg.tool_executions {
+                tools.push(tool_execution);
+                while tools.len() > 100 {
+                    tools.remove(0);
                 }
             }
+        }
 
-            // Only auto-scroll if user hasn't scrolled up to read earlier content.
-            // Tool results arriving while user is reading shouldn't yank them back.
-            if !tui.user_scrolled {
-                tui.auto_scroll();
-            }
+        if !tui.user_scrolled {
+            tui.auto_scroll();
         }
     }
 
