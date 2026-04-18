@@ -19,6 +19,7 @@ fn unique_temp_dir() -> PathBuf {
 }
 
 #[tokio::test]
+#[ignore = "requires network access and downloads large model binary"]
 async fn litert_runtime_can_install_and_generate() {
     let install_dir = unique_temp_dir();
     let config = LiteRtLmInstallConfig {

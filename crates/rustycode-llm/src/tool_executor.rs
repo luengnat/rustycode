@@ -335,13 +335,12 @@ fn extract_tool_code_block(content: &str) -> Option<String> {
     let start_idx = content.find(start_marker)?;
     let after_start = start_idx + start_marker.len();
 
-    let json_start = if content[after_start..].starts_with('\n') {
-        after_start + 1
-    } else if content[after_start..].starts_with(' ') {
-        after_start + 1
-    } else {
-        after_start
-    };
+    let json_start =
+        if content[after_start..].starts_with('\n') || content[after_start..].starts_with(' ') {
+            after_start + 1
+        } else {
+            after_start
+        };
 
     let remaining = &content[json_start..];
     let end_idx = remaining.find(end_marker)?;
