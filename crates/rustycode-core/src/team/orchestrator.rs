@@ -25,7 +25,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use rustycode_llm::provider_v2::{ChatMessage, CompletionRequest, LLMProvider};
+use rustycode_llm::provider_v2::{ChatMessage, CompletionRequest, CompletionResponse, LLMProvider, MessageRole};
+use rustycode_llm::tool_executor::LLMToolExecutor;
 use rustycode_protocol::team::*;
 use rustycode_protocol::EscalationTarget;
 use serde::{Deserialize, Serialize};
@@ -156,6 +157,10 @@ pub enum TeamEvent {
     },
     /// Request for parallel agent execution.
     ParallelExecutionRequested { agents: Vec<String>, task: String },
+    ToolStarted { role: String, tool_name: String, iteration: u32 },
+    ToolCompleted { role: String, tool_name: String, success: bool, output_preview: String },
+    ToolLoopIteration { role: String, iteration: u32, tool_count: u32 },
+    AdvisorGuidance { role: String, plan: String },
 }
 
 // ============================================================================
@@ -165,11 +170,26 @@ pub enum TeamEvent {
 /// A mockable LLM client for the orchestrator.
 #[async_trait]
 pub trait TeamLLMClient: Send + Sync {
-    /// Call the LLM with the given messages and return the response text.
     async fn complete(&self, messages: Vec<ChatMessage>) -> Result<String>;
+
+    async fn complete_with_tools(
+        &self,
+        messages: Vec<ChatMessage>,
+        tools: Vec<serde_json::Value>,
+    ) -> Result<CompletionResponse> {
+        let _ = tools;
+        let content = self.complete(messages).await?;
+        Ok(CompletionResponse {
+            content,
+            model: String::new(),
+            usage: None,
+            stop_reason: None,
+            citations: None,
+            thinking_blocks: None,
+        })
+    }
 }
 
-/// Production LLM client using the real provider.
 struct RealLLMClient {
     provider: Arc<dyn LLMProvider>,
     model: String,
@@ -187,6 +207,20 @@ impl TeamLLMClient for RealLLMClient {
             .await
             .context("LLM provider call failed")?;
         Ok(response.content)
+    }
+
+    async fn complete_with_tools(
+        &self,
+        messages: Vec<ChatMessage>,
+        tools: Vec<serde_json::Value>,
+    ) -> Result<CompletionResponse> {
+        let request = CompletionRequest::new(&self.model, messages)
+            .with_max_tokens(self.max_tokens)
+            .with_tools(tools);
+        self.provider
+            .complete(request)
+            .await
+            .context("LLM provider call failed with tools")
     }
 }
 
@@ -217,6 +251,35 @@ impl Default for OrchestratorConfig {
             max_adaptations: 5,
             max_response_tokens: 4096,
             use_local_judge: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolLoopConfig {
+    pub max_iterations: u32,
+    pub max_advisor_tokens: u32,
+    pub builder_tools: Vec<String>,
+    pub scalpel_tools: Vec<String>,
+}
+
+impl Default for ToolLoopConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: 15,
+            max_advisor_tokens: 1024,
+            builder_tools: vec![
+                "read_file".into(),
+                "write_file".into(),
+                "bash".into(),
+                "grep".into(),
+                "glob".into(),
+            ],
+            scalpel_tools: vec![
+                "read_file".into(),
+                "write_file".into(),
+                "bash".into(),
+            ],
         }
     }
 }
@@ -289,10 +352,11 @@ pub struct TeamOrchestrator {
     pattern_miner: std::sync::Mutex<PatternMiner>,
     /// Prompt optimizations derived from mined patterns.
     prompt_optimizations: std::sync::Mutex<Vec<PromptOptimization>>,
+    tool_executor: LLMToolExecutor,
+    tool_loop_config: ToolLoopConfig,
 }
 
 impl TeamOrchestrator {
-    /// Create a new orchestrator with a real LLM provider.
     pub fn new(
         project_root: impl Into<PathBuf>,
         provider: Arc<dyn LLMProvider>,
@@ -307,8 +371,10 @@ impl TeamOrchestrator {
         let (event_tx, _) = tokio::sync::broadcast::channel(64);
         let mut event_engine = EventEngine::new();
         event_engine.register_standard_team();
+        let root: PathBuf = project_root.into();
+        let tool_executor = LLMToolExecutor::new(root.clone());
         Self {
-            project_root: project_root.into(),
+            project_root: root,
             client,
             config,
             event_tx,
@@ -317,6 +383,8 @@ impl TeamOrchestrator {
             cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pattern_miner: std::sync::Mutex::new(PatternMiner::new(0.5, 1)),
             prompt_optimizations: std::sync::Mutex::new(Vec::new()),
+            tool_executor,
+            tool_loop_config: ToolLoopConfig::default(),
         }
     }
 
@@ -329,8 +397,10 @@ impl TeamOrchestrator {
         let (event_tx, _) = tokio::sync::broadcast::channel(64);
         let mut event_engine = EventEngine::new();
         event_engine.register_standard_team();
+        let root: PathBuf = project_root.into();
+        let tool_executor = LLMToolExecutor::new(root.clone());
         Self {
-            project_root: project_root.into(),
+            project_root: root,
             client,
             config,
             event_tx,
@@ -339,6 +409,11 @@ impl TeamOrchestrator {
             cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pattern_miner: std::sync::Mutex::new(PatternMiner::new(0.5, 1)),
             prompt_optimizations: std::sync::Mutex::new(Vec::new()),
+            tool_executor,
+            tool_loop_config: ToolLoopConfig {
+                max_advisor_tokens: 0,
+                ..ToolLoopConfig::default()
+            },
         }
     }
 
@@ -1435,7 +1510,6 @@ impl TeamOrchestrator {
             .await
     }
 
-    /// Call the LLM for a specific role, with optional structural declaration.
     async fn call_llm_for_role_with_declaration(
         &self,
         role: TeamRole,
@@ -1449,12 +1523,146 @@ impl TeamOrchestrator {
             &[],
             structural_declaration,
         );
-        debug!(
-            "Calling LLM for role: {} ({} messages)",
-            role,
-            messages.len()
+        debug!("Calling LLM for role: {} ({} messages)", role, messages.len());
+
+        match role {
+            TeamRole::Builder | TeamRole::Scalpel => self.run_tool_loop(role, messages).await,
+            _ => self.client.complete(messages).await,
+        }
+    }
+
+    async fn run_advisor_pass(&self, role: TeamRole, messages: &[ChatMessage]) -> Option<String> {
+        let advisor_prompt = format!(
+            "You are an expert advisor reviewing the task plan for the {} agent.\n\x4e
+             Analyze the context and produce a concise action plan (max 5 steps).\n\x4e
+             Focus on: what to read first, what to write, what to verify.\n\x4e
+             Be specific about file paths and commands.\n\x4e
+             Output ONLY the action plan, nothing else.",
+            match role {
+                TeamRole::Builder => "Builder (implementation)",
+                TeamRole::Scalpel => "Scalpel (targeted fix)",
+                _ => "agent",
+            }
         );
-        self.client.complete(messages).await
+        let advisor_messages = vec![
+            ChatMessage::system(advisor_prompt),
+            ChatMessage::user(messages.iter().map(|m| m.text()).collect::<Vec<_>>().join("\n")),
+        ];
+        match self.client.complete(advisor_messages).await {
+            Ok(plan) => {
+                self.emit(TeamEvent::AdvisorGuidance {
+                    role: format!("{:?}", role),
+                    plan: plan.clone(),
+                });
+                Some(plan)
+            }
+            Err(e) => {
+                warn!("Advisor pass failed: {}", e);
+                None
+            }
+        }
+    }
+
+    async fn run_tool_loop(
+        &self,
+        role: TeamRole,
+        initial_messages: Vec<ChatMessage>,
+    ) -> Result<String> {
+        let role_name = format!("{:?}", role);
+        let tool_names = match role {
+            TeamRole::Builder => &self.tool_loop_config.builder_tools,
+            TeamRole::Scalpel => &self.tool_loop_config.scalpel_tools,
+            _ => &self.tool_loop_config.builder_tools,
+        };
+        let all_tool_defs = self.tool_executor.get_openai_tool_definitions();
+        let filtered_tools: Vec<serde_json::Value> = all_tool_defs
+            .into_iter()
+            .filter(|t| {
+                t.get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .map_or(false, |name| tool_names.iter().any(|tn| tn == name))
+            })
+            .collect();
+        if filtered_tools.is_empty() {
+            warn!("No tools available for {} role, falling back to single-shot", role_name);
+            return self.client.complete(initial_messages).await;
+        }
+
+        let mut messages = initial_messages;
+        if self.tool_loop_config.max_advisor_tokens > 0 {
+            if let Some(advice) = self.run_advisor_pass(role, &messages).await {
+                messages.push(ChatMessage::system(format!("## Advisor Plan\n{}", advice)));
+            }
+        }
+
+        for iteration in 0..self.tool_loop_config.max_iterations {
+            if self.is_cancelled() {
+                return Err(anyhow::anyhow!("Tool loop cancelled"));
+            }
+            debug!("Tool loop iteration {}/{} for {}", iteration + 1, self.tool_loop_config.max_iterations, role_name);
+
+            let response = self
+                .client
+                .complete_with_tools(messages.clone(), filtered_tools.clone())
+                .await
+                .with_context(|| format!("Tool loop LLM call failed for {} at iteration {}", role_name, iteration))?;
+            let content = response.content.clone();
+
+            let tool_calls_openai = self.tool_executor.parse_openai_tool_calls(&content)?;
+            let tool_calls = if tool_calls_openai.is_empty() {
+                self.tool_executor.parse_anthropic_tool_calls(&content)?
+            } else {
+                tool_calls_openai
+            };
+            if tool_calls.is_empty() {
+                debug!("No tool calls in response, returning final content for {}", role_name);
+                return Ok(content);
+            }
+            self.emit(TeamEvent::ToolLoopIteration {
+                role: role_name.clone(),
+                iteration: iteration + 1,
+                tool_count: tool_calls.len() as u32,
+            });
+            messages.push(ChatMessage::assistant(content));
+
+            for tc in &tool_calls {
+                self.emit(TeamEvent::ToolStarted {
+                    role: role_name.clone(),
+                    tool_name: tc.name.clone(),
+                    iteration: iteration + 1,
+                });
+                match self.tool_executor.execute_tool_call(tc).await {
+                    Ok(result) => {
+                        debug!("Tool {} executed: success={}", result.tool_name, result.success);
+                        self.emit(TeamEvent::ToolCompleted {
+                            role: role_name.clone(),
+                            tool_name: result.tool_name.clone(),
+                            success: result.success,
+                            output_preview: result.output.chars().take(200).collect(),
+                        });
+                        let tool_msg = self.tool_executor.result_to_openai_message(&result, tc.id.clone());
+                        messages.push(tool_msg);
+                    }
+                    Err(e) => {
+                        warn!("Tool {} execution failed: {}", tc.name, e);
+                        let error_msg = ChatMessage {
+                            role: MessageRole::Tool(tc.name.clone()),
+                            content: rustycode_protocol::MessageContent::simple(
+                                serde_json::json!({
+                                    "tool_call_id": tc.id.clone().unwrap_or_default(),
+                                    "error": e.to_string()
+                                }).to_string(),
+                            ),
+                        };
+                        messages.push(error_msg);
+                    }
+                }
+            }
+        }
+        warn!("Tool loop exhausted max iterations ({}) for {}", self.tool_loop_config.max_iterations, role_name);
+        let final_response = self.client.complete(messages).await?;
+        Ok(final_response)
     }
 }
 

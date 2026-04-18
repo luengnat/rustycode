@@ -96,6 +96,12 @@ impl TeamEventType {
             TeamEvent::ParallelExecutionRequested { .. } => {
                 TeamEventType::ParallelExecutionRequested
             }
+            TeamEvent::ToolStarted { .. }
+            | TeamEvent::ToolCompleted { .. }
+            | TeamEvent::ToolLoopIteration { .. }
+            | TeamEvent::AdvisorGuidance { .. } => {
+                TeamEventType::AgentStateChanged
+            }
         }
     }
 }

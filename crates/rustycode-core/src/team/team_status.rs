@@ -151,9 +151,11 @@ impl TeamStatusRenderer {
             | TeamEvent::StructuralDeclarationSet { .. }
             | TeamEvent::PlanAdapted { .. }
             | TeamEvent::SpecialistCreated { .. }
-            | TeamEvent::ParallelExecutionRequested { .. } => {
-                // These events are handled by the event engine, not the status display
-            }
+            | TeamEvent::ParallelExecutionRequested { .. }
+            | TeamEvent::ToolStarted { .. }
+            | TeamEvent::ToolCompleted { .. }
+            | TeamEvent::ToolLoopIteration { .. }
+            | TeamEvent::AdvisorGuidance { .. } => {}
         }
     }
 
