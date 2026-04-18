@@ -49,6 +49,7 @@ impl PluginManifest {
         }
         #[cfg(not(feature = "toml"))]
         {
+            let _ = content;
             Err(PluginError::configuration_error(
                 "TOML support requires 'toml' feature".to_string(),
             ))
