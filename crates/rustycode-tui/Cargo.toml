@@ -93,3 +93,6 @@ vector-memory = ["dep:rustycode-vector-memory"]
 [[bench]]
 name = "tui_performance"
 harness = false
+
+[lints]
+workspace = true

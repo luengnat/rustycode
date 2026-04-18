@@ -20,3 +20,6 @@ rustycode-tools = { path = "../rustycode-tools" }
 
 [lib]
 proc-macro = true
+
+[lints]
+workspace = true

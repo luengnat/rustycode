@@ -23,3 +23,6 @@ name = "connector_comparison"
 path = "tests/connector_comparison.rs"
 
 [dev-dependencies]
+
+[lints]
+workspace = true

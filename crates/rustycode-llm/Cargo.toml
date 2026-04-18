@@ -42,3 +42,6 @@ live-api-tests = []
 vector-memory = ["rustycode-tools/vector-memory"]
 # Enable LiteRT-LM local inference provider
 litert = ["dep:rustycode-litert"]
+
+[lints]
+workspace = true
