@@ -683,6 +683,22 @@ impl AnthropicProvider {
                                     text: text.clone(),
                                 }
                             }
+                            rustycode_protocol::ContentBlock::Image { source, .. } => {
+                                ContentBlock::Image {
+                                    content_type: "image",
+                                    source: ImageSource {
+                                        source_type: source.source_type.clone(),
+                                        media_type: source.media_type.clone(),
+                                        data: source.data.clone(),
+                                    },
+                                }
+                            }
+                            rustycode_protocol::ContentBlock::Thinking { thinking, .. } => {
+                                ContentBlock::Text {
+                                    content_type: "text",
+                                    text: format!("[thinking: {}]", thinking),
+                                }
+                            }
                             _ => ContentBlock::Text {
                                 content_type: "text",
                                 text: "[unsupported block]".to_string(),
@@ -1997,8 +2013,8 @@ mod tests {
     }
 
     #[test]
-    fn test_roundtrip_image_block_becomes_unsupported() {
-        // Image blocks fall into the catch-all _ arm -> "[unsupported block]"
+    fn test_roundtrip_image_block_is_preserved() {
+        // Image blocks are now properly converted to Anthropic image blocks
         let provider = make_anthropic_provider();
         let msgs = vec![ChatMessage {
             role: MessageRole::User,
@@ -2010,13 +2026,25 @@ mod tests {
         let result = provider.parse_conversation_messages(&msgs);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "user");
-        let text = extract_anthropic_text(&result[0].content).unwrap();
-        assert_eq!(text, "[unsupported block]");
+        match &result[0].content {
+            AnthropicRequestContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 1);
+                match &blocks[0] {
+                    super::ContentBlock::Image { source, .. } => {
+                        assert_eq!(source.source_type, "base64");
+                        assert_eq!(source.media_type, "image/png");
+                        assert_eq!(source.data, "iVBOR");
+                    }
+                    other => panic!("expected Image block, got {:?}", other),
+                }
+            }
+            other => panic!("expected Blocks, got {:?}", other),
+        }
     }
 
     #[test]
-    fn test_roundtrip_thinking_block_becomes_unsupported() {
-        // Thinking blocks fall into the catch-all _ arm -> "[unsupported block]"
+    fn test_roundtrip_thinking_block_becomes_text() {
+        // Thinking blocks are converted to text representation
         let provider = make_anthropic_provider();
         let msgs = vec![ChatMessage {
             role: MessageRole::Assistant,
@@ -2025,7 +2053,7 @@ mod tests {
         let result = provider.parse_conversation_messages(&msgs);
         assert_eq!(result.len(), 1);
         let text = extract_anthropic_text(&result[0].content).unwrap();
-        assert_eq!(text, "[unsupported block]");
+        assert!(text.contains("deep thought"));
     }
 
     #[test]

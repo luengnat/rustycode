@@ -198,7 +198,10 @@ pub fn save_registry(registry: &ExtensionRegistry) {
 
     // Create parent directory if it doesn't exist
     if let Some(parent) = file_path.parent() {
-        let _ = fs::create_dir_all(parent);
+        if let Err(e) = fs::create_dir_all(parent) {
+            tracing::warn!("Failed to create registry directory {:?}: {}", parent, e);
+            return;
+        }
     }
 
     // Write to temporary file first, then rename (atomic write)
@@ -206,8 +209,14 @@ pub fn save_registry(registry: &ExtensionRegistry) {
     let json = serde_json::to_string_pretty(registry);
 
     if let Ok(json_str) = json {
-        let _ = fs::write(&tmp_path, json_str);
-        let _ = fs::rename(&tmp_path, &file_path);
+        if let Err(e) = fs::write(&tmp_path, &json_str) {
+            tracing::warn!("Failed to write registry to {:?}: {}", tmp_path, e);
+            return;
+        }
+        if let Err(e) = fs::rename(&tmp_path, &file_path) {
+            tracing::warn!("Failed to rename registry {:?} -> {:?}: {}", tmp_path, file_path, e);
+            let _ = fs::remove_file(&tmp_path);
+        }
     }
     // Non-fatal — don't let persistence failures break operation
 }

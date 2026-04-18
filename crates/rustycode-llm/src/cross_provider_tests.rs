@@ -250,11 +250,10 @@ fn cross_provider_image_block_url() {
             // First is text
             let text_json = serde_json::to_value(&blocks[0]).unwrap();
             assert_eq!(text_json["type"], "text");
-            // Second block: Image is NOT explicitly handled in parse_conversation_messages
-            // It falls to the wildcard arm -> "[unsupported block]"
+            // Second block: Image is now properly converted to an Anthropic image block
             let img_json = serde_json::to_value(&blocks[1]).unwrap();
-            assert_eq!(img_json["type"], "text");
-            assert_eq!(img_json["text"], "[unsupported block]");
+            assert_eq!(img_json["type"], "image");
+            assert_eq!(img_json["source"]["type"], "url");
         }
         other => panic!("Anthropic: expected Blocks, got {:?}", other),
     }
@@ -327,7 +326,7 @@ fn cross_provider_thinking_block() {
         ]),
     };
 
-    // Anthropic: thinking falls to wildcard -> "[unsupported block]"
+    // Anthropic: thinking block is converted to text representation
     let anthropic = AnthropicProvider::new(anthropic_config(), "claude-sonnet-4-6".into()).unwrap();
     let a_msgs = anthropic.parse_conversation_messages(&[msg.clone()]);
     assert_eq!(a_msgs.len(), 1);
@@ -335,10 +334,10 @@ fn cross_provider_thinking_block() {
     match &a_msgs[0].content {
         AnthropicRequestContent::Blocks(blocks) => {
             assert_eq!(blocks.len(), 2);
-            // Thinking block falls to wildcard -> "[unsupported block]"
+            // Thinking block is converted to text with thinking content
             let think_json = serde_json::to_value(&blocks[0]).unwrap();
             assert_eq!(think_json["type"], "text");
-            assert_eq!(think_json["text"], "[unsupported block]");
+            assert!(think_json["text"].as_str().unwrap().contains("Let me reason about this"));
             // Text block works fine
             let text_json = serde_json::to_value(&blocks[1]).unwrap();
             assert_eq!(text_json["type"], "text");
