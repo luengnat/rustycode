@@ -686,10 +686,16 @@ fn copy_text_via_platform_tool(text: &str) -> Result<()> {
             use std::io::Write;
             if let Some(stdin) = child.stdin.as_mut() {
                 // clip.exe expects trailing newline
-                let _ = stdin.write_all(format!("{}\n", text).as_bytes());
-                let _ = stdin.flush();
+                if let Err(e) = stdin.write_all(format!("{}\n", text).as_bytes()) {
+                    tracing::warn!("Failed to write to clip.exe stdin: {}", e);
+                }
+                if let Err(e) = stdin.flush() {
+                    tracing::warn!("Failed to flush clip.exe stdin: {}", e);
+                }
             }
-            let _ = child.wait();
+            if let Err(e) = child.wait() {
+                tracing::warn!("clip.exe process wait failed: {}", e);
+            }
             return Ok(());
         }
 

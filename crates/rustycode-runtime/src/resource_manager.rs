@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::warn;
 
 /// Resource types that can be allocated
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -352,7 +353,9 @@ impl ResourceManager {
             // Release reservations
             for resource_type in allocated.keys() {
                 if let Some(pool) = pools.get_mut(resource_type) {
-                    let _ = pool.release(*allocated.get(resource_type).unwrap_or(&0.0));
+                    if let Err(e) = pool.release(*allocated.get(resource_type).unwrap_or(&0.0)) {
+                        warn!("Failed to release {:?} resources: {}", resource_type, e);
+                    }
                 }
             }
 

@@ -589,7 +589,7 @@ impl Usage {
         Self {
             input_tokens,
             output_tokens,
-            total_tokens: input_tokens + output_tokens,
+            total_tokens: input_tokens.saturating_add(output_tokens),
             cache_read_input_tokens: 0,
             cache_creation_input_tokens: 0,
         }
@@ -607,7 +607,7 @@ impl Usage {
         Self {
             input_tokens,
             output_tokens,
-            total_tokens: total_input + output_tokens,
+            total_tokens: total_input.saturating_add(output_tokens),
             cache_read_input_tokens,
             cache_creation_input_tokens,
         }
@@ -615,7 +615,9 @@ impl Usage {
 
     /// Calculate total input tokens (including cache)
     pub fn total_input_tokens(&self) -> u32 {
-        self.cache_read_input_tokens + self.cache_creation_input_tokens + self.input_tokens
+        self.cache_read_input_tokens
+            .saturating_add(self.cache_creation_input_tokens)
+            .saturating_add(self.input_tokens)
     }
 
     /// Check if any cache tokens were used
@@ -1771,7 +1773,10 @@ mod tests {
     #[test]
     fn test_validate_extra_headers_blocks_crlf_injection() {
         let mut headers = std::collections::HashMap::new();
-        headers.insert("X-Custom".to_string(), "value\r\nInjected: true".to_string());
+        headers.insert(
+            "X-Custom".to_string(),
+            "value\r\nInjected: true".to_string(),
+        );
         let result = validate_extra_headers(&Some(headers));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("newline"));
