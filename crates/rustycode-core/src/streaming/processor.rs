@@ -100,15 +100,11 @@ impl SseEventProcessor {
 
             SSEEvent::ContentBlockDelta { delta, .. } => {
                 match delta {
-                    ContentDelta::Text { text } => {
-                        if !self.in_tool_use {
-                            callbacks.on_text(&text);
-                        }
+                    ContentDelta::Text { text } if !self.in_tool_use => {
+                        callbacks.on_text(&text);
                     }
-                    ContentDelta::Thinking { thinking } => {
-                        if !self.in_tool_use {
-                            callbacks.on_thinking(&thinking);
-                        }
+                    ContentDelta::Thinking { thinking } if !self.in_tool_use => {
+                        callbacks.on_thinking(&thinking);
                     }
                     ContentDelta::PartialJson { partial_json } => {
                         if let Some(ref mut tool) = self.active_tool {
@@ -155,16 +151,12 @@ impl SseEventProcessor {
             }
 
             // Legacy plain-text events from non-SSE providers
-            SSEEvent::Text { text } => {
-                if !self.in_tool_use {
-                    callbacks.on_text(&text);
-                }
+            SSEEvent::Text { text } if !self.in_tool_use => {
+                callbacks.on_text(&text);
             }
 
-            SSEEvent::ThinkingDelta { thinking } => {
-                if !self.in_tool_use {
-                    callbacks.on_thinking(&thinking);
-                }
+            SSEEvent::ThinkingDelta { thinking } if !self.in_tool_use => {
+                callbacks.on_thinking(&thinking);
             }
 
             // Ignore these

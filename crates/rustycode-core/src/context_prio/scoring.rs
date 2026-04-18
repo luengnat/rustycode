@@ -40,7 +40,7 @@ where
             });
         }
         SortStrategy::ByTokenCount => {
-            items.sort_by(|a, b| a.token_count.cmp(&b.token_count));
+            items.sort_by_key(|a| a.token_count);
         }
         SortStrategy::ByPriority => {
             items.sort_by_key(|a| std::cmp::Reverse(a.priority));

@@ -115,9 +115,7 @@ fn compress_oldest_first(window: &mut ContextWindow, target_reduction: usize) ->
     let mut saved = 0;
 
     // Sort by timestamp (oldest first)
-    window
-        .content_mut()
-        .sort_by(|a, b| a.metadata.timestamp.cmp(&b.metadata.timestamp));
+    window.content_mut().sort_by_key(|a| a.metadata.timestamp);
 
     // Remove items until we've saved enough tokens
     while saved < target_reduction && !window.content().is_empty() {
@@ -144,9 +142,7 @@ fn compress_lowest_priority(
     let mut saved = 0;
 
     // Sort by priority (lowest first)
-    window
-        .content_mut()
-        .sort_by(|a, b| a.priority.cmp(&b.priority));
+    window.content_mut().sort_by_key(|a| a.priority);
 
     // Remove items until we've saved enough tokens
     while saved < target_reduction && !window.content().is_empty() {
