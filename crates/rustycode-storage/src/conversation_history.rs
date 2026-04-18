@@ -285,7 +285,7 @@ impl ConversationHistory {
             }
         }
 
-        summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        summaries.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
         summaries.truncate(limit);
         Ok(summaries)
     }
@@ -381,7 +381,7 @@ impl ConversationHistory {
             });
         }
 
-        results.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        results.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
         let limit = if filter.limit == 0 { 50 } else { filter.limit };
         results.truncate(limit);
         Ok(results)

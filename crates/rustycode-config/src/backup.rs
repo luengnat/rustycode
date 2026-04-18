@@ -147,7 +147,7 @@ impl ConfigBackup {
         }
 
         // Sort newest first
-        backups.sort_by(|a, b| b.1.cmp(&a.1));
+        backups.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         // Remove oldest entries beyond the limit
         for (path, _) in backups.iter().skip(self.max_backups) {

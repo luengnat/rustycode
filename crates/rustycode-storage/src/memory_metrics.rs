@@ -459,7 +459,7 @@ impl MemoryMetrics {
             .iter()
             .map(|(k, v)| (k.clone(), *v))
             .collect();
-        top_memories.sort_by(|a, b| b.1.cmp(&a.1));
+        top_memories.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_memories.truncate(10);
 
         let unused_memories: Vec<String> = self

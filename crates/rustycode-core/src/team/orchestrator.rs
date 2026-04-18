@@ -1611,7 +1611,7 @@ impl TeamOrchestrator {
                 t.get("function")
                     .and_then(|f| f.get("name"))
                     .and_then(|n| n.as_str())
-                    .map_or(false, |name| tool_names.iter().any(|tn| tn == name))
+                    .is_some_and(|name| tool_names.iter().any(|tn| tn == name))
             })
             .collect();
         if filtered_tools.is_empty() {
