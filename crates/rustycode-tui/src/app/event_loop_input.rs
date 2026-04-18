@@ -473,16 +473,9 @@ impl TUI {
                 }
             },
             Ok(CrosstermEvent::Resize(width, height)) => {
-                // Terminal was resized — invalidate render cache (line wrapping
-                // depends on width) and force re-render. The actual viewport_height
-                // is recalculated from the layout in the render phase.
                 self.message_renderer.invalidate_cache();
-                // Reset scroll offset — line wrapping changes invalidate the offset.
-                // The render phase will recompute the visible range, and auto_scroll()
-                // will snap to the bottom if the user hadn't manually scrolled.
-                // Without this, shrinking the terminal can leave scroll_offset_line
-                // beyond the new total line count, showing a blank screen.
                 self.scroll_offset_line = 0;
+                self.dismiss_any_overlay();
                 self.dirty = true;
                 tracing::debug!("Terminal resized to {}x{}", width, height);
             }

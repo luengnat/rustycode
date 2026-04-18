@@ -747,7 +747,8 @@ fn is_number_list(s: &str) -> bool {
 /// Truncate note to maximum length
 fn truncate_note(text: &str) -> String {
     if text.len() > MAX_USER_NOTE_LENGTH {
-        format!("{}…", &text[..MAX_USER_NOTE_LENGTH])
+        let trunc = text.floor_char_boundary(MAX_USER_NOTE_LENGTH);
+        format!("{}…", &text[..trunc])
     } else {
         text.to_string()
     }
@@ -971,5 +972,27 @@ mod tests {
         assert_eq!(answer.answers.as_ref().unwrap().len(), 2);
         assert_eq!(answer.answers.as_ref().unwrap()[0], "Option 1");
         assert_eq!(answer.answers.as_ref().unwrap()[1], "Option 2");
+    }
+
+    #[test]
+    fn test_truncate_note_multibyte_utf8() {
+        // Verify truncation handles multi-byte UTF-8 characters without panicking
+        let emoji_note = "Hello 🌍🌍🌍🌍🌍🌍🌍🌍🌍🌍";
+        let result = truncate_note(emoji_note);
+        assert!(
+            result.is_char_boundary(result.len()),
+            "truncated note should be valid UTF-8"
+        );
+
+        // Chinese characters (3 bytes each)
+        let chinese = "这是一个很长的中文笔记应该被截断";
+        let result = truncate_note(chinese);
+        assert!(result.is_char_boundary(result.len()));
+
+        // Short string should pass through unchanged
+        assert_eq!(truncate_note("short"), "short");
+
+        // Empty string
+        assert_eq!(truncate_note(""), "");
     }
 }

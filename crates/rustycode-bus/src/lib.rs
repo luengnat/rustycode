@@ -854,7 +854,9 @@ impl Drop for SubscriptionHandle {
         let id = self.id;
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let _ = bus.unsubscribe(id).await;
+                if let Err(e) = bus.unsubscribe(id).await {
+                    tracing::debug!("Best-effort unsubscribe failed for {}: {}", id, e);
+                }
             });
         }
         // If no tokio runtime is available, the subscription will leak.

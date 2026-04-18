@@ -79,8 +79,11 @@ pub struct ProjectSignals {
     /// Is this a monorepo?
     pub is_monorepo: bool,
 
-    /// Primary language hint
+    /// Primary language hint (first detected language)
     pub primary_language: Option<String>,
+
+    /// All detected languages (for monorepos with mixed ecosystems)
+    pub detected_languages: Vec<String>,
 
     /// Has existing CI configuration?
     pub has_ci: bool,
@@ -93,6 +96,9 @@ pub struct ProjectSignals {
 
     /// Auto-detected verification commands
     pub verification_commands: Vec<String>,
+
+    /// Language inferred from IDE directory (fallback signal)
+    pub ide_language: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -101,23 +107,66 @@ pub struct ProjectSignals {
 
 /// Project file markers that indicate a project exists
 pub const PROJECT_FILES: &[&str] = &[
+    // Web/Node
     "package.json",
+    "deno.json",
+    "deno.jsonc",
+    // Rust
     "Cargo.toml",
+    // Go
     "go.mod",
+    // Python
     "pyproject.toml",
     "setup.py",
+    "requirements.txt",
+    // Ruby
     "Gemfile",
+    // JVM
     "pom.xml",
     "build.gradle",
     "build.gradle.kts",
+    "build.xml",       // Ant
+    "build.sbt",       // SBT (Scala)
+    // C/C++
     "CMakeLists.txt",
     "Makefile",
+    // .NET
+    "*.sln",           // Visual Studio solution (glob — use glob check)
+    "*.csproj",        // C# project (glob)
+    "*.fsproj",        // F# project (glob)
+    // PHP
     "composer.json",
+    // Dart/Flutter
     "pubspec.yaml",
+    // Swift
     "Package.swift",
+    // Elixir
     "mix.exs",
-    "deno.json",
-    "deno.jsonc",
+    // R
+    ".Rproj",          // RStudio project
+    "DESCRIPTION",     // R package
+    // Jupyter/Colab
+    "*.ipynb",         // Jupyter notebook (glob)
+];
+
+/// IDE/project directory markers (secondary signals when no build file found)
+pub const IDE_MARKERS: &[&str] = &[
+    ".vscode",    // VS Code
+    ".idea",      // JetBrains (IntelliJ, PyCharm, etc.)
+    ".project",   // Eclipse
+    ".classpath", // Eclipse Java
+    ".vs",        // Visual Studio
+    "*.code-workspace", // VS Code multi-root workspace
+];
+
+/// Glob-style markers that need pattern matching (not exact filename)
+pub const GLOB_MARKERS: &[&str] = &[
+    "*.sln",
+    "*.csproj",
+    "*.fsproj",
+    "*.vbproj",
+    "*.ipynb",
+    "*.code-workspace",
 ];
 
 /// Language mapping for project files
@@ -127,22 +176,62 @@ pub fn language_map() -> &'static HashMap<&'static str, &'static str> {
 
     MAP.get_or_init(|| {
         let mut m = HashMap::new();
+        // Web/Node
         m.insert("package.json", "javascript/typescript");
+        m.insert("deno.json", "typescript/deno");
+        m.insert("deno.jsonc", "typescript/deno");
+        // Rust
         m.insert("Cargo.toml", "rust");
+        // Go
         m.insert("go.mod", "go");
+        // Python
         m.insert("pyproject.toml", "python");
         m.insert("setup.py", "python");
+        m.insert("requirements.txt", "python");
+        // Ruby
         m.insert("Gemfile", "ruby");
+        // JVM
         m.insert("pom.xml", "java");
         m.insert("build.gradle", "java/kotlin");
         m.insert("build.gradle.kts", "kotlin");
+        m.insert("build.xml", "java"); // Ant
+        m.insert("build.sbt", "scala"); // SBT
+        // C/C++
         m.insert("CMakeLists.txt", "c/c++");
+        m.insert("Makefile", "c/c++");
+        // .NET
+        m.insert("*.sln", "c#/.net");
+        m.insert("*.csproj", "c#");
+        m.insert("*.fsproj", "f#");
+        // PHP
         m.insert("composer.json", "php");
+        // Dart/Flutter
         m.insert("pubspec.yaml", "dart/flutter");
+        // Swift
         m.insert("Package.swift", "swift");
+        // Elixir
         m.insert("mix.exs", "elixir");
-        m.insert("deno.json", "typescript/deno");
-        m.insert("deno.jsonc", "typescript/deno");
+        // R
+        m.insert(".Rproj", "r");
+        m.insert("DESCRIPTION", "r");
+        // Jupyter
+        m.insert("*.ipynb", "python/jupyter");
+        m
+    })
+}
+
+/// IDE directory → language hints (used as fallback when no build file found)
+pub fn ide_language_map() -> &'static HashMap<&'static str, &'static str> {
+    use std::sync::OnceLock;
+    static MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+
+    MAP.get_or_init(|| {
+        let mut m = HashMap::new();
+        m.insert(".project", "java");     // Eclipse
+        m.insert(".classpath", "java");    // Eclipse Java
+        m.insert(".idea", "java/kotlin");  // JetBrains
+        m.insert(".vs", "c#/.net");       // Visual Studio
+        m.insert(".vscode", "javascript/typescript"); // VS Code (generic)
         m
     })
 }
@@ -320,18 +409,56 @@ fn detect_v2_orchestra(base_path: &Path) -> Option<V2Detection> {
 /// Project signals detection result
 pub fn detect_project_signals(base_path: &Path) -> ProjectSignals {
     let mut detected_files: Vec<String> = Vec::new();
-    let mut primary_language: Option<String> = None;
+    let mut detected_languages: Vec<String> = Vec::new();
 
-    // Detect project files
+    // Detect exact-match project files
     for file in PROJECT_FILES {
         let file_path = base_path.join(file);
         if file_path.exists() {
             detected_files.push(file.to_string());
-            if primary_language.is_none() {
-                primary_language = language_map().get(file as &str).map(|s| s.to_string());
+            if let Some(lang) = language_map().get(file as &str) {
+                let lang_str = lang.to_string();
+                if !detected_languages.contains(&lang_str) {
+                    detected_languages.push(lang_str);
+                }
             }
         }
     }
+
+    // Detect glob-style markers (*.sln, *.csproj, *.ipynb, etc.)
+    if let Ok(entries) = fs::read_dir(base_path) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            for glob in GLOB_MARKERS {
+                if glob_matches(glob, &name_str) {
+                    let marker = format!("{}:{}", glob, name_str);
+                    if !detected_files.iter().any(|f| f.starts_with(&format!("{}:", glob))) {
+                        detected_files.push(marker);
+                        if let Some(lang) = language_map().get(glob as &str) {
+                            let lang_str = lang.to_string();
+                            if !detected_languages.contains(&lang_str) {
+                                detected_languages.push(lang_str);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // IDE directory fallback — only if no primary build files found a language
+    let ide_language = if detected_languages.is_empty() {
+        detect_ide_language(base_path)
+    } else {
+        None
+    };
+
+    if let Some(ref lang) = ide_language {
+        detected_languages.push(lang.clone());
+    }
+
+    let primary_language = detected_languages.first().cloned();
 
     // Git repo detection
     let is_git_repo = base_path.join(".git").exists();
@@ -380,10 +507,12 @@ pub fn detect_project_signals(base_path: &Path) -> ProjectSignals {
         is_git_repo,
         is_monorepo,
         primary_language,
+        detected_languages,
         has_ci,
         has_tests,
         package_manager,
         verification_commands,
+        ide_language,
     }
 }
 
@@ -395,7 +524,7 @@ pub fn detect_project_signals(base_path: &Path) -> ProjectSignals {
 /// # Returns
 /// Package manager name if detected, None otherwise
 pub fn detect_package_manager(base_path: &Path) -> Option<String> {
-    // Check lock files first (most specific)
+    // Node.js ecosystem — check lock files first (most specific)
     if base_path.join("pnpm-lock.yaml").exists() {
         return Some("pnpm".to_string());
     }
@@ -408,9 +537,61 @@ pub fn detect_package_manager(base_path: &Path) -> Option<String> {
     if base_path.join("package-lock.json").exists() {
         return Some("npm".to_string());
     }
+    if base_path.join("deno.json").exists() || base_path.join("deno.jsonc").exists() {
+        return Some("deno".to_string());
+    }
     // Fallback to package.json
     if base_path.join("package.json").exists() {
         return Some("npm".to_string());
+    }
+
+    // JVM
+    if base_path.join("pom.xml").exists() {
+        return Some("maven".to_string());
+    }
+    if base_path.join("build.gradle").exists() || base_path.join("build.gradle.kts").exists() {
+        return Some("gradle".to_string());
+    }
+    if base_path.join("build.sbt").exists() {
+        return Some("sbt".to_string());
+    }
+    if base_path.join("build.xml").exists() {
+        return Some("ant".to_string());
+    }
+
+    // .NET
+    if let Ok(entries) = fs::read_dir(base_path) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".sln") || name.ends_with(".csproj") || name.ends_with(".fsproj") {
+                return Some("dotnet".to_string());
+            }
+        }
+    }
+
+    // Rust
+    if base_path.join("Cargo.toml").exists() {
+        return Some("cargo".to_string());
+    }
+
+    // Python
+    if base_path.join("requirements.txt").exists() || base_path.join("pyproject.toml").exists() {
+        return Some("pip".to_string());
+    }
+
+    // Ruby
+    if base_path.join("Gemfile").exists() {
+        return Some("bundler".to_string());
+    }
+
+    // Go
+    if base_path.join("go.mod").exists() {
+        return Some("go".to_string());
+    }
+
+    // PHP
+    if base_path.join("composer.json").exists() {
+        return Some("composer".to_string());
     }
 
     None
@@ -440,6 +621,10 @@ fn detect_verification_commands(
         "yarn".to_string()
     } else if pm == "bun" {
         "bun run".to_string()
+    } else if pm == "deno" {
+        "deno task".to_string()
+    } else if pm == "pnpm" {
+        "pnpm run".to_string()
     } else {
         format!("{} run", pm)
     };
@@ -506,6 +691,33 @@ fn detect_verification_commands(
         } else {
             commands.push("bundle exec rake test".to_string());
         }
+    }
+
+    // JVM / Ant
+    if detected_files.iter().any(|f| f.contains("build.xml")) {
+        commands.push("ant test".to_string());
+    }
+
+    // Scala / SBT
+    if detected_files.iter().any(|f| f.contains("build.sbt")) {
+        commands.push("sbt test".to_string());
+    }
+
+    // .NET
+    if detected_files
+        .iter()
+        .any(|f| f.contains("*.sln") || f.contains("*.csproj") || f.contains("*.fsproj"))
+    {
+        commands.push("dotnet test".to_string());
+        commands.push("dotnet build".to_string());
+    }
+
+    // R projects
+    if detected_files
+        .iter()
+        .any(|f| f.contains(".Rproj") || f.contains("DESCRIPTION"))
+    {
+        commands.push("R CMD check .".to_string());
     }
 
     // Makefile projects
@@ -666,6 +878,29 @@ fn read_makefile_targets(base_path: &Path) -> Vec<String> {
     }
 }
 
+/// Simple glob matcher for patterns like "*.sln", "*.csproj".
+/// Only supports `*` wildcard at the start (prefix match).
+fn glob_matches(pattern: &str, filename: &str) -> bool {
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        filename.ends_with(suffix)
+    } else {
+        filename == pattern
+    }
+}
+
+/// Detect language from IDE directory markers (fallback when no build files found).
+fn detect_ide_language(base_path: &Path) -> Option<String> {
+    for marker in IDE_MARKERS {
+        let path = base_path.join(marker);
+        if path.exists() {
+            if let Some(lang) = ide_language_map().get(marker as &str) {
+                return Some(lang.to_string());
+            }
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -778,9 +1013,11 @@ mod tests {
             signals.primary_language,
             Some("javascript/typescript".to_string())
         );
+        assert!(signals.detected_languages.contains(&"javascript/typescript".to_string()));
         assert!(signals.is_git_repo);
         assert!(!signals.is_monorepo);
         assert_eq!(signals.package_manager, Some("npm".to_string()));
+        assert!(signals.ide_language.is_none()); // Build file found, no IDE fallback
 
         // Check verification commands
         assert!(signals
@@ -815,6 +1052,8 @@ version = "0.1.0"
             .iter()
             .any(|f| f.contains("Cargo.toml")));
         assert_eq!(signals.primary_language, Some("rust".to_string()));
+        assert!(signals.detected_languages.contains(&"rust".to_string()));
+        assert_eq!(signals.package_manager, Some("cargo".to_string()));
 
         // Check verification commands
         assert!(signals
@@ -1020,5 +1259,275 @@ lint:
 
         let signals = detect_project_signals(base_path);
         assert!(signals.has_tests);
+    }
+
+    // ---- New project type tests ----
+
+    #[test]
+    fn test_detect_dotnet_solution() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(base_path.join("MyApp.sln"), "").unwrap();
+
+        let signals = detect_project_signals(base_path);
+        assert!(signals
+            .detected_files
+            .iter()
+            .any(|f| f.contains("*.sln")));
+        assert!(signals.detected_languages.contains(&"c#/.net".to_string()));
+        assert_eq!(signals.package_manager, Some("dotnet".to_string()));
+        assert!(signals
+            .verification_commands
+            .iter()
+            .any(|c| c.contains("dotnet test")));
+    }
+
+    #[test]
+    fn test_detect_csharp_project() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(base_path.join("App.csproj"), "<Project></Project>").unwrap();
+
+        let signals = detect_project_signals(base_path);
+        assert!(signals
+            .detected_files
+            .iter()
+            .any(|f| f.contains("*.csproj")));
+        assert!(signals.detected_languages.contains(&"c#".to_string()));
+    }
+
+    #[test]
+    fn test_detect_fsharp_project() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(base_path.join("App.fsproj"), "<Project></Project>").unwrap();
+
+        let signals = detect_project_signals(base_path);
+        assert!(signals
+            .detected_files
+            .iter()
+            .any(|f| f.contains("*.fsproj")));
+        assert!(signals.detected_languages.contains(&"f#".to_string()));
+    }
+
+    #[test]
+    fn test_detect_r_project() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(base_path.join(".Rproj"), "Version: 1.0").unwrap();
+
+        let signals = detect_project_signals(base_path);
+        assert!(signals
+            .detected_files
+            .iter()
+            .any(|f| f.contains(".Rproj")));
+        assert!(signals.detected_languages.contains(&"r".to_string()));
+    }
+
+    #[test]
+    fn test_detect_r_package() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(
+            base_path.join("DESCRIPTION"),
+            "Package: mypkg\nVersion: 0.1.0\n",
+        )
+        .unwrap();
+
+        let signals = detect_project_signals(base_path);
+        assert!(signals
+            .detected_files
+            .iter()
+            .any(|f| f == "DESCRIPTION"));
+        assert!(signals.detected_languages.contains(&"r".to_string()));
+    }
+
+    #[test]
+    fn test_detect_jupyter_notebook() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(
+            base_path.join("analysis.ipynb"),
+            r#"{"cells":[],"metadata":{}}"#,
+        )
+        .unwrap();
+
+        let signals = detect_project_signals(base_path);
+        assert!(signals
+            .detected_files
+            .iter()
+            .any(|f| f.contains("*.ipynb")));
+        assert!(signals
+            .detected_languages
+            .contains(&"python/jupyter".to_string()));
+    }
+
+    #[test]
+    fn test_detect_ant_project() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(
+            base_path.join("build.xml"),
+            r#"<project><target name="test"/></project>"#,
+        )
+        .unwrap();
+
+        let signals = detect_project_signals(base_path);
+        assert!(signals
+            .detected_files
+            .iter()
+            .any(|f| f.contains("build.xml")));
+        assert!(signals.detected_languages.contains(&"java".to_string()));
+        assert_eq!(signals.package_manager, Some("ant".to_string()));
+        assert!(signals
+            .verification_commands
+            .iter()
+            .any(|c| c.contains("ant test")));
+    }
+
+    #[test]
+    fn test_detect_sbt_project() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(
+            base_path.join("build.sbt"),
+            r#"name := "myapp""#,
+        )
+        .unwrap();
+
+        let signals = detect_project_signals(base_path);
+        assert!(signals
+            .detected_files
+            .iter()
+            .any(|f| f.contains("build.sbt")));
+        assert!(signals.detected_languages.contains(&"scala".to_string()));
+        assert_eq!(signals.package_manager, Some("sbt".to_string()));
+        assert!(signals
+            .verification_commands
+            .iter()
+            .any(|c| c.contains("sbt test")));
+    }
+
+    #[test]
+    fn test_detect_deno_project() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(base_path.join("deno.json"), r#"{"tasks": {"test": "deno test"}}"#).unwrap();
+
+        let pm = detect_package_manager(base_path);
+        assert_eq!(pm, Some("deno".to_string()));
+    }
+
+    #[test]
+    fn test_ide_fallback_eclipse() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        // Only Eclipse .project, no build files
+        fs::write(base_path.join(".project"), "<?xml version=\"1.0\"?>").unwrap();
+
+        let signals = detect_project_signals(base_path);
+        assert_eq!(signals.ide_language, Some("java".to_string()));
+        assert!(signals.detected_languages.contains(&"java".to_string()));
+    }
+
+    #[test]
+    fn test_ide_no_fallback_when_build_file_present() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        // Both build file and IDE marker
+        fs::write(base_path.join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
+        fs::create_dir(base_path.join(".vscode")).unwrap();
+
+        let signals = detect_project_signals(base_path);
+        assert!(signals.ide_language.is_none()); // Build file takes priority
+        assert_eq!(signals.primary_language, Some("rust".to_string()));
+    }
+
+    #[test]
+    fn test_multi_language_monorepo() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        // Monorepo with both Rust and Node
+        fs::write(
+            base_path.join("package.json"),
+            r#"{"name": "monorepo", "workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        fs::write(base_path.join("Cargo.toml"), "[workspace]\nmembers = [\"crates/*\"]").unwrap();
+        fs::write(base_path.join("pnpm-workspace.yaml"), "packages:\n  - 'packages/*'").unwrap();
+
+        let signals = detect_project_signals(base_path);
+        assert!(signals.is_monorepo);
+        assert!(signals.detected_languages.len() >= 2);
+        assert!(signals.detected_languages.contains(&"javascript/typescript".to_string()));
+        assert!(signals.detected_languages.contains(&"rust".to_string()));
+    }
+
+    #[test]
+    fn test_detect_go_package_manager() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(base_path.join("go.mod"), "module example.com/test\ngo 1.21").unwrap();
+
+        let pm = detect_package_manager(base_path);
+        assert_eq!(pm, Some("go".to_string()));
+    }
+
+    #[test]
+    fn test_detect_python_package_manager() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(base_path.join("requirements.txt"), "flask\nrequests").unwrap();
+
+        let pm = detect_package_manager(base_path);
+        assert_eq!(pm, Some("pip".to_string()));
+    }
+
+    #[test]
+    fn test_detect_ruby_package_manager() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+
+        fs::write(base_path.join("Gemfile"), "source 'https://rubygems.org'").unwrap();
+
+        let pm = detect_package_manager(base_path);
+        assert_eq!(pm, Some("bundler".to_string()));
+    }
+
+    #[test]
+    fn test_glob_matches() {
+        assert!(glob_matches("*.sln", "MyApp.sln"));
+        assert!(glob_matches("*.csproj", "App.csproj"));
+        assert!(glob_matches("*.ipynb", "analysis.ipynb"));
+        assert!(!glob_matches("*.sln", "Cargo.toml"));
+        assert!(!glob_matches("*.csproj", "build.gradle"));
+    }
+
+    #[test]
+    fn test_expanded_language_map() {
+        let map = language_map();
+        assert_eq!(map.get("build.xml"), Some(&"java"));
+        assert_eq!(map.get("build.sbt"), Some(&"scala"));
+        assert_eq!(map.get("*.sln"), Some(&"c#/.net"));
+        assert_eq!(map.get("*.csproj"), Some(&"c#"));
+        assert_eq!(map.get("*.fsproj"), Some(&"f#"));
+        assert_eq!(map.get(".Rproj"), Some(&"r"));
+        assert_eq!(map.get("DESCRIPTION"), Some(&"r"));
+        assert_eq!(map.get("*.ipynb"), Some(&"python/jupyter"));
+        assert_eq!(map.get("requirements.txt"), Some(&"python"));
     }
 }

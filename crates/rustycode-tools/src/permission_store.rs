@@ -289,7 +289,9 @@ impl PermissionStore {
     /// Clear all records.
     pub fn clear(&mut self) {
         self.records.clear();
-        let _ = self.save();
+        if let Err(e) = self.save() {
+            tracing::warn!("Failed to persist permission store clear: {}", e);
+        }
     }
 
     /// Load records from the persistence file.
@@ -309,8 +311,10 @@ impl PermissionStore {
             }
         }
 
-        // Save cleaned-up version
-        let _ = self.save();
+        // Save cleaned-up version (expired records removed)
+        if let Err(e) = self.save() {
+            tracing::warn!("Failed to persist permission store cleanup: {}", e);
+        }
 
         Ok(())
     }

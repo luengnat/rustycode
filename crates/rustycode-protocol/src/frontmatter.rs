@@ -170,11 +170,11 @@ mod tests {
     fn test_parse_simple_key_value() {
         let yaml = "name: hello\nversion: 42";
         let map = parse_frontmatter_map(yaml);
-        assert_eq!(as_string(map.get("name").unwrap()).as_deref(), Some("hello"));
         assert_eq!(
-            map.get("version").unwrap(),
-            &FrontmatterValue::Number(42)
+            as_string(map.get("name").unwrap()).as_deref(),
+            Some("hello")
         );
+        assert_eq!(map.get("version").unwrap(), &FrontmatterValue::Number(42));
     }
 
     #[test]

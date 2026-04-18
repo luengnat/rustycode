@@ -602,7 +602,7 @@ impl FileFinderRenderer {
         let y = area.y + (area.height - height) / 2;
         let modal_area = Rect::new(x, y, width, height);
 
-        // Clear the area behind the modal
+        f.render_widget(Clear, area);
         f.render_widget(Clear, modal_area);
 
         // Split into search input and file list

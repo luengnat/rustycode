@@ -640,12 +640,18 @@ mod tests {
 
     #[test]
     fn test_escape_applescript_double_quote() {
-        assert_eq!(escape_applescript_string(r#"say "hello""#), r#"say \"hello\""#);
+        assert_eq!(
+            escape_applescript_string(r#"say "hello""#),
+            r#"say \"hello\""#
+        );
     }
 
     #[test]
     fn test_escape_applescript_backslash() {
-        assert_eq!(escape_applescript_string(r"path\to\file"), r"path\\to\\file");
+        assert_eq!(
+            escape_applescript_string(r"path\to\file"),
+            r"path\\to\\file"
+        );
     }
 
     #[test]

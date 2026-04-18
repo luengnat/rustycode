@@ -388,12 +388,33 @@ impl BashSession {
         // Parse exit code
         let exit_code: i32 = exit_code_line.trim().parse().unwrap_or(-1);
 
-        // Check for specific error patterns
-        if stdout.contains("command not found") || stderr.contains("command not found") {
+        // Check for specific error patterns.
+        // Only match at the start of a line to avoid false positives from:
+        // - Shell startup messages in .zshrc/.bashrc that accumulate in stderr
+        // - Command output that legitimately contains these phrases (e.g., grep logs)
+        let is_cmd_not_found = stdout.lines().any(|l| {
+            l.trim().starts_with("command not found:")
+                || l.trim().starts_with("zsh: command not found")
+                || l.trim().starts_with("bash: command not found")
+        }) || stderr.lines().any(|l| {
+            l.trim().starts_with("command not found:")
+                || l.trim().starts_with("zsh: command not found")
+                || l.trim().starts_with("bash: command not found")
+        });
+        if is_cmd_not_found {
             return Err(anyhow!("command not found: {}", command));
         }
 
-        if stdout.contains("Permission denied") || stderr.contains("Permission denied") {
+        let is_perm_denied = stdout.lines().any(|l| {
+            l.trim().starts_with("Permission denied")
+                || l.trim().starts_with("bash: ") && l.contains("Permission denied")
+                || l.trim().starts_with("zsh: ") && l.contains("Permission denied")
+        }) || stderr.lines().any(|l| {
+            l.trim().starts_with("Permission denied")
+                || l.trim().starts_with("bash: ") && l.contains("Permission denied")
+                || l.trim().starts_with("zsh: ") && l.contains("Permission denied")
+        });
+        if is_perm_denied {
             return Err(anyhow!("permission denied: {}", command));
         }
 
@@ -551,9 +572,19 @@ impl BashSession {
         let exit_code: i32 = exit_code_line.trim().parse().unwrap_or(-1);
 
         // Check for specific error patterns
-        let error = if stderr.contains("command not found") {
+        // Only match at the start of a line to avoid false positives from
+        // shell startup messages or legitimate output containing these phrases
+        let error = if stderr.lines().any(|l| {
+            l.trim().starts_with("command not found:")
+                || l.trim().starts_with("zsh: command not found")
+                || l.trim().starts_with("bash: command not found")
+        }) {
             Some(format!("command not found: {}", command))
-        } else if stderr.contains("Permission denied") {
+        } else if stderr.lines().any(|l| {
+            l.trim().starts_with("Permission denied")
+                || (l.trim().starts_with("bash: ") || l.trim().starts_with("zsh: "))
+                    && l.contains("Permission denied")
+        }) {
             Some(format!("permission denied: {}", command))
         } else {
             None
@@ -1791,7 +1822,12 @@ mod tests {
     fn test_global_bash_rate_limiter() {
         // The global rate limiter should allow at least 5 concurrent executions
         assert!(BASH_RATE_LIMITER.max_concurrent >= 5);
-        assert_eq!(BASH_RATE_LIMITER.active_count(), 0);
+        // Note: active_count() may be > 0 due to parallel tests using BashTool.
+        // We only verify the limiter is initialized and the max is reasonable.
+        assert!(
+            BASH_RATE_LIMITER.active_count() <= BASH_RATE_LIMITER.max_concurrent,
+            "active count should not exceed max"
+        );
     }
 
     // Additional tests for validate_command_safety edge cases
@@ -2137,6 +2173,32 @@ mod tests {
             exit_code == 124 || exit_code == -1,
             "expected exit code 124 (timeout) or -1 (signal kill), got {}",
             exit_code
+        );
+    }
+
+    /// Tests that shell startup messages containing "command not found" (from
+    /// .zshrc / .bashrc errors) don't cause false-positive error detection.
+    #[test]
+    fn bash_error_detection_ignores_midline_command_not_found() {
+        let temp_dir = tempdir().expect("workspace tempdir");
+        let ctx = ToolContext::new(temp_dir.path());
+        let tool = BashTool;
+
+        // This should succeed: "echo" is in the allowlist and the command
+        // doesn't actually fail. Even if the shell startup produces stderr
+        // with "command not found" from .zshrc errors, the tool should not
+        // incorrectly report it as an error.
+        let result = tool.execute(json!({ "command": "echo hello_world_test" }), &ctx);
+        assert!(
+            result.is_ok(),
+            "echo should succeed even with shell startup stderr: {:?}",
+            result
+        );
+        let output = result.unwrap();
+        assert!(
+            output.text.contains("hello_world_test"),
+            "output should contain our test string: {:?}",
+            output.text
         );
     }
 }

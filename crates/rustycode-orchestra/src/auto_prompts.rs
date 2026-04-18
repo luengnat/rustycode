@@ -262,9 +262,11 @@ pub fn inline_dependency_summaries(
 
             // Fall back to simple truncation
             let truncate_at = budget.saturating_sub(30); // Leave room for truncation marker
+            let truncate_at = truncate_at.min(result.len());
+            let truncate_at = result.floor_char_boundary(truncate_at);
             format!(
                 "{}\n\n...[{} chars truncated]",
-                &result[..truncate_at.min(result.len())],
+                &result[..truncate_at],
                 result.len().saturating_sub(truncate_at)
             )
         } else {

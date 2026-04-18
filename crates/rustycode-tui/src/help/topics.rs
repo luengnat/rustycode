@@ -191,7 +191,7 @@ pub fn get_all_topics() -> Vec<HelpTopic> {
         HelpTopic {
             title: "Slash commands".to_string(),
             category: HelpCategory::Commands,
-            content: "Type '/' or press Ctrl+K to access slash commands like /help, /save, /load, /theme, /stats, /compact, and more.".to_string(),
+            content: "Type '/' or press Ctrl+K to access slash commands like /help, /save, /load, /theme, /stats, /track (compact by default, /track full for details), /compact, and more.".to_string(),
             key_bindings: vec!["/".to_string(), "Ctrl+K".to_string()],
         },
         HelpTopic {

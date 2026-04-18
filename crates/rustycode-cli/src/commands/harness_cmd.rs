@@ -544,7 +544,11 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                 anyhow::bail!("Max sessions ({}) reached", max_sessions);
             }
 
-            set_json_field(&mut tasks, "session_count", serde_json::json!(session_count));
+            set_json_field(
+                &mut tasks,
+                "session_count",
+                serde_json::json!(session_count),
+            );
             let session_id = format!("SESSION-{}", session_count);
 
             // Create activation marker
@@ -623,7 +627,11 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                                 ),
                             );
                             set_json_field(task, "status", serde_json::json!("completed"));
-                            set_json_field(task, "completed_at", serde_json::json!(Utc::now().to_rfc3339()));
+                            set_json_field(
+                                task,
+                                "completed_at",
+                                serde_json::json!(Utc::now().to_rfc3339()),
+                            );
                             log_progress(&harness_dir, &format!("[{}] RECOVERY [{}] action=\"completed\" reason=\"validation passed\"",
                                 session_id, task_id));
                             eprintln!(
@@ -646,7 +654,11 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                             eprintln!("🔄 Recovered [{}] -> failed (validation failed)", task_id);
                         } else {
                             set_json_field(task, "status", serde_json::json!("completed"));
-                            set_json_field(task, "completed_at", serde_json::json!(Utc::now().to_rfc3339()));
+                            set_json_field(
+                                task,
+                                "completed_at",
+                                serde_json::json!(Utc::now().to_rfc3339()),
+                            );
                             log_progress(&harness_dir, &format!("[{}] RECOVERY [{}] action=\"completed\" reason=\"progress found, no validation\"",
                                 session_id, task_id));
                             eprintln!("🔄 Recovered [{}] -> completed (no validation)", task_id);
@@ -658,7 +670,8 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                         set_json_field(task, "status", serde_json::json!("failed"));
                         set_json_field(task, "attempts", serde_json::json!(attempts));
                         if let Ok(error_log) = json_array_mut(task, "error_log") {
-                            error_log.push(serde_json::json!("[SESSION_TIMEOUT] No progress detected"));
+                            error_log
+                                .push(serde_json::json!("[SESSION_TIMEOUT] No progress detected"));
                         }
                         log_progress(&harness_dir, &format!("[{}] RECOVERY [{}] action=\"failed\" reason=\"no progress from previous session\"",
                             session_id, task_id));
@@ -687,15 +700,22 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                 // Claim task
                 let task = {
                     let Ok(arr) = tasks_array_mut(&mut tasks) else {
-                        log_progress(&harness_dir, &format!(
-                            "[{}] ERROR invalid tasks format", session_id));
+                        log_progress(
+                            &harness_dir,
+                            &format!("[{}] ERROR invalid tasks format", session_id),
+                        );
                         break;
                     };
                     match arr.get_mut(task_idx) {
                         Some(t) => t,
                         None => {
-                            log_progress(&harness_dir, &format!(
-                                "[{}] ERROR task index {} out of bounds", session_id, task_idx));
+                            log_progress(
+                                &harness_dir,
+                                &format!(
+                                    "[{}] ERROR task index {} out of bounds",
+                                    session_id, task_idx
+                                ),
+                            );
                             break;
                         }
                     }
@@ -714,9 +734,13 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                 let head_commit = get_git_head(project_dir);
                 set_json_field(task, "status", serde_json::json!("in_progress"));
                 set_json_field(task, "started_at_commit", serde_json::json!(head_commit));
-                set_json_field(task, "attempts", serde_json::json!(
-                    task.get("attempts").and_then(|a| a.as_u64()).unwrap_or(0) + 1
-                ));
+                set_json_field(
+                    task,
+                    "attempts",
+                    serde_json::json!(
+                        task.get("attempts").and_then(|a| a.as_u64()).unwrap_or(0) + 1
+                    ),
+                );
 
                 save_tasks(&harness_dir, &tasks)?;
 
@@ -791,7 +815,11 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                                 }
                             };
                             set_json_field(task, "status", serde_json::json!("completed"));
-                            set_json_field(task, "completed_at", serde_json::json!(Utc::now().to_rfc3339()));
+                            set_json_field(
+                                task,
+                                "completed_at",
+                                serde_json::json!(Utc::now().to_rfc3339()),
+                            );
 
                             log_progress(
                                 &harness_dir,
@@ -830,8 +858,9 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
                                 .and_then(|a| a.as_u64())
                                 .unwrap_or(3);
                             if let Ok(error_log) = json_array_mut(task, "error_log") {
-                                error_log
-                                    .push(serde_json::json!("[TEST_FAIL] Validation command failed"));
+                                error_log.push(serde_json::json!(
+                                    "[TEST_FAIL] Validation command failed"
+                                ));
                             }
 
                             log_progress(
@@ -918,7 +947,11 @@ pub async fn execute(cwd: &Path, command: HarnessCommand) -> Result<()> {
             }
 
             // Update last_session and log STATS
-            set_json_field(&mut tasks, "last_session", serde_json::json!(Utc::now().to_rfc3339()));
+            set_json_field(
+                &mut tasks,
+                "last_session",
+                serde_json::json!(Utc::now().to_rfc3339()),
+            );
 
             // Compute stats
             let (total, completed, failed, pending, attempts_total) = tasks

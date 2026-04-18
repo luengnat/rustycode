@@ -374,11 +374,12 @@ impl ToastManager {
         let toast_width = 60.min(area.width.saturating_sub(4));
 
         for (i, toast) in toasts.iter().enumerate() {
-            // Calculate base position
+            let input_area_reserve = 5u16;
             let base_y = area
                 .height
                 .saturating_sub(toast_height * (i + 1) as u16)
-                .saturating_sub(2);
+                .saturating_sub(2)
+                .saturating_sub(input_area_reserve);
             let base_x = area.width.saturating_sub(toast_width).saturating_sub(2);
 
             // Apply slide offset (animation)

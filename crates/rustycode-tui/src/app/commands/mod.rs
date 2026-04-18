@@ -6,7 +6,7 @@
 //! - `memory_commands` - Memory management commands
 //! - `provider_commands` - Provider/model configuration
 //! - `lifecycle_commands` - Session lifecycle (clear, quit, save, load)
-//! - `info_commands` - Help, marketplace, skill, mcp, hook, theme
+//! - `info_commands` - Help, marketplace, skill, mcp, hook, theme, track
 //! - `file_commands` - File operations (undo, diff, extract, rename)
 //! - `task_commands` - Task/todo, review, compact, learnings
 //! - `workers_commands` - Worker and cron management
@@ -261,6 +261,10 @@ const REGISTERED_SLASH_COMMANDS: &[SlashCommandPlugin] = &[
     SlashCommandPlugin {
         names: &["/stats"],
         handler: handle_stats_command,
+    },
+    SlashCommandPlugin {
+        names: &["/track", "/progress"],
+        handler: handle_track_command,
     },
     SlashCommandPlugin {
         names: &["/cost", "/usage"],

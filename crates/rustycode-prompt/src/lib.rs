@@ -897,7 +897,11 @@ mod tests {
         for i in 0..260 {
             let template = format!("template_{}: {{{{val}}}}", i);
             let result = manager.render_inline(&template, &ctx);
-            assert!(result.is_ok(), "render_inline should succeed for template {}", i);
+            assert!(
+                result.is_ok(),
+                "render_inline should succeed for template {}",
+                i
+            );
             assert_eq!(result.unwrap(), format!("template_{}: test", i));
         }
     }

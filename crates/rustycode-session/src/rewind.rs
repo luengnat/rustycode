@@ -306,13 +306,15 @@ pub fn create_snapshot_with_checkpoint(
 ) -> InteractionSnapshot {
     let summary = if let Some(ref um) = user_message {
         if um.len() > 50 {
-            format!("{}...", &um[..47])
+            let end = um.floor_char_boundary(47);
+            format!("{}...", &um[..end])
         } else {
             um.clone()
         }
     } else if let Some(ref am) = assistant_message {
         if am.len() > 50 {
-            format!("{}...", &am[..47])
+            let end = am.floor_char_boundary(47);
+            format!("{}...", &am[..end])
         } else {
             am.clone()
         }

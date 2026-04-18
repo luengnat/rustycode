@@ -587,7 +587,8 @@ pub fn format_failure_context(result: &VerificationResult) -> String {
         let mut stderr = check.stderr.as_deref().unwrap_or("");
 
         if stderr.len() > MAX_STDERR_PER_CHECK {
-            stderr = &stderr[..MAX_STDERR_PER_CHECK];
+            let trunc = stderr.floor_char_boundary(MAX_STDERR_PER_CHECK);
+            stderr = &stderr[..trunc];
             let truncated = format!("{}\n…[truncated]", stderr);
             blocks.push(format!(
                 "### ❌ `{}` (exit code {})\n\

@@ -569,9 +569,18 @@ impl SessionSidebar {
             return;
         }
 
-        // Clear the area with background
-        let block = Block::default().style(Style::default().bg(Color::Reset)); // Transparent background
-        frame.render_widget(block, area);
+        let render_area = Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: area.height.saturating_sub(1),
+        };
+        if render_area.height < 4 {
+            return;
+        }
+
+        let block = Block::default().style(Style::default().bg(Color::Reset));
+        frame.render_widget(block, render_area);
 
         // Snapshot collapsed state before borrowing sections
         let collapsed_keys: Vec<String> = self
@@ -586,7 +595,7 @@ impl SessionSidebar {
         let mut scroll_offset = self.state.scroll_offset;
 
         // Build sections and lines
-        let sections = self.build_sections(area.width);
+        let sections = self.build_sections(render_area.width);
 
         let mut lines = Vec::new();
 
@@ -607,7 +616,7 @@ impl SessionSidebar {
 
             header.push(Span::styled(
                 section.title,
-                Style::default().fg(Color::Cyan).bold(), // Use cyan for headers
+                Style::default().fg(Color::Cyan).bold(),
             ));
 
             lines.push(Line::from(header));
@@ -619,23 +628,21 @@ impl SessionSidebar {
             }
         }
 
-        // Compute scroll parameters from rendered content
         let content_count = lines.len();
-        let viewport_count = area.height.saturating_sub(2) as usize; // subtract border
+        let viewport_count = render_area.height.saturating_sub(2) as usize;
         let max_scroll = content_count.saturating_sub(viewport_count);
         if scroll_offset > max_scroll {
             scroll_offset = max_scroll;
         }
 
-        // Render content without borders (clean look like reference)
         let paragraph = Paragraph::new(lines)
             .scroll((scroll_offset as u16, 0))
             .block(
                 Block::default()
-                    .borders(Borders::LEFT) // Only left border for clean look
+                    .borders(Borders::LEFT)
                     .border_style(Style::default().fg(Color::DarkGray)),
             );
-        frame.render_widget(paragraph, area);
+        frame.render_widget(paragraph, render_area);
 
         // Update state after rendering (deferred to avoid borrow conflicts)
         self.state.content_lines = content_count;

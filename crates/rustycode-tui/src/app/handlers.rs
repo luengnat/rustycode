@@ -154,11 +154,13 @@ pub fn handle_stream_chunk(tui: &mut TUI, chunk: StreamChunk) {
                 tui.current_stream_content.reserve(renderable.len());
                 tui.current_stream_content.push_str(&renderable);
 
-                // Update the last message if it's an assistant message.
-                if let Some(last_msg) = tui.messages.last_mut() {
-                    if last_msg.role == MessageRole::Assistant {
-                        last_msg.content.push_str(&renderable);
-                    }
+                let assistant_msg = tui
+                    .messages
+                    .iter_mut()
+                    .rev()
+                    .find(|m| m.role == MessageRole::Assistant);
+                if let Some(last_msg) = assistant_msg {
+                    last_msg.content.push_str(&renderable);
                 }
 
                 tui.is_streaming = true;
@@ -218,10 +220,13 @@ pub fn handle_stream_chunk(tui: &mut TUI, chunk: StreamChunk) {
             if !remaining.is_empty() {
                 tui.current_stream_content.reserve(remaining.len());
                 tui.current_stream_content.push_str(&remaining);
-                if let Some(last_msg) = tui.messages.last_mut() {
-                    if last_msg.role == MessageRole::Assistant {
-                        last_msg.content.push_str(&remaining);
-                    }
+                let assistant_msg = tui
+                    .messages
+                    .iter_mut()
+                    .rev()
+                    .find(|m| m.role == MessageRole::Assistant);
+                if let Some(msg) = assistant_msg {
+                    msg.content.push_str(&remaining);
                 }
             }
 
@@ -300,25 +305,50 @@ pub fn handle_stream_chunk(tui: &mut TUI, chunk: StreamChunk) {
                 tui.dirty = true;
                 tui.auto_scroll();
             } else {
-                // Empty response — check if there's a dangling empty assistant message.
-                // If the response was cancelled or had only tool calls (no text),
-                // keep the message. But if it's truly empty and uncalledited, remove it.
                 if !was_cancelled {
-                    if let Some(last_msg) = tui.messages.last() {
-                        if last_msg.role == MessageRole::Assistant
-                            && last_msg.content.is_empty()
-                            && last_msg.thinking.is_none()
-                            && last_msg
-                                .tool_executions
-                                .as_ref()
-                                .is_none_or(|t| t.is_empty())
-                        {
-                            // Remove the empty placeholder message
-                            tui.messages.pop();
-                            tui.add_system_message(
-                                "Received empty response — try rephrasing or check model"
-                                    .to_string(),
-                            );
+                    let assistant_info = tui
+                        .messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.role == MessageRole::Assistant)
+                        .map(|m| {
+                            (
+                                m.id.clone(),
+                                m.content.is_empty() && m.thinking.is_none(),
+                                m.tool_executions.as_ref().is_none_or(|t| t.is_empty()),
+                            )
+                        });
+
+                    if let Some((msg_id, is_empty, no_tools)) = assistant_info {
+                        if is_empty {
+                            if no_tools {
+                                if let Some(pos) = tui.messages.iter().position(|m| m.id == msg_id)
+                                {
+                                    tui.messages.remove(pos);
+                                }
+                                tui.add_system_message(
+                                    "Received empty response — try rephrasing or check model"
+                                        .to_string(),
+                                );
+                            } else if let Some(last_msg) =
+                                tui.messages.iter_mut().rev().find(|m| m.id == msg_id)
+                            {
+                                let tool_count = last_msg
+                                    .tool_executions
+                                    .as_ref()
+                                    .map(|t| t.len())
+                                    .unwrap_or(0);
+                                let tool_names: Vec<&str> = last_msg
+                                    .tool_executions
+                                    .as_ref()
+                                    .map(|t| t.iter().map(|e| e.name.as_str()).collect())
+                                    .unwrap_or_default();
+                                last_msg.content = format!(
+                                    "Executed {} tool(s): {}",
+                                    tool_count,
+                                    tool_names.join(", ")
+                                );
+                            }
                         }
                     }
                 }
@@ -623,34 +653,34 @@ pub fn handle_stream_chunk(tui: &mut TUI, chunk: StreamChunk) {
                 },
             );
 
-            // Add running tool execution to the last assistant message
-            if let Some(last_msg) = tui.messages.last_mut() {
-                if last_msg.role == MessageRole::Assistant {
-                    let tool_execution = ToolExecution {
-                        tool_id: tool_id.clone(),
-                        name: tool_name.clone(),
-                        status: ToolStatus::Running,
-                        start_time: chrono::Utc::now(),
-                        end_time: None,
-                        duration_ms: None,
-                        result_summary: format!("{}...", tool_name),
-                        detailed_output: None,
-                        input_json: input_json.clone(),
-                        progress_current: None,
-                        progress_total: None,
-                        progress_description: None,
-                    };
+            let assistant_msg = tui
+                .messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == MessageRole::Assistant);
+            if let Some(last_msg) = assistant_msg {
+                let tool_execution = ToolExecution {
+                    tool_id: tool_id.clone(),
+                    name: tool_name.clone(),
+                    status: ToolStatus::Running,
+                    start_time: chrono::Utc::now(),
+                    end_time: None,
+                    duration_ms: None,
+                    result_summary: format!("{}...", tool_name),
+                    detailed_output: None,
+                    input_json: input_json.clone(),
+                    progress_current: None,
+                    progress_total: None,
+                    progress_description: None,
+                };
 
-                    if last_msg.tool_executions.is_none() {
-                        last_msg.tool_executions = Some(vec![]);
-                    }
-                    if let Some(tools) = &mut last_msg.tool_executions {
-                        tools.push(tool_execution);
-                        // Cap per-message tool count to prevent unbounded growth
-                        // in long sessions with many tool calls
-                        while tools.len() > 100 {
-                            tools.remove(0);
-                        }
+                if last_msg.tool_executions.is_none() {
+                    last_msg.tool_executions = Some(vec![]);
+                }
+                if let Some(tools) = &mut last_msg.tool_executions {
+                    tools.push(tool_execution);
+                    while tools.len() > 100 {
+                        tools.remove(0);
                     }
                 }
             }
@@ -768,26 +798,24 @@ pub fn handle_stream_chunk(tui: &mut TUI, chunk: StreamChunk) {
                 size_str
             );
 
-            // Update the matching running tool execution in the last assistant message
-            if let Some(last_msg) = tui.messages.last_mut() {
-                if last_msg.role == MessageRole::Assistant {
-                    if let Some(tools) = &mut last_msg.tool_executions {
-                        // Find the tool by tool_id for accurate matching
-                        // (multiple tools with same name can run concurrently)
-                        if let Some(tool) = tools.iter_mut().find(|t| t.tool_id == tool_id) {
-                            tool.status = if success {
-                                ToolStatus::Complete
-                            } else {
-                                ToolStatus::Failed
-                            };
-                            let end_time = chrono::Utc::now();
-                            tool.end_time = Some(end_time);
-                            tool.duration_ms = Some(duration_ms);
-                            tool.result_summary = format!(
-                                "{} {} ({}ms, {})",
-                                status, tool_name, duration_ms, size_str
-                            );
-                        }
+            let assistant_msg = tui
+                .messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == MessageRole::Assistant);
+            if let Some(last_msg) = assistant_msg {
+                if let Some(tools) = &mut last_msg.tool_executions {
+                    if let Some(tool) = tools.iter_mut().find(|t| t.tool_id == tool_id) {
+                        tool.status = if success {
+                            ToolStatus::Complete
+                        } else {
+                            ToolStatus::Failed
+                        };
+                        let end_time = chrono::Utc::now();
+                        tool.end_time = Some(end_time);
+                        tool.duration_ms = Some(duration_ms);
+                        tool.result_summary =
+                            format!("{} {} ({}ms, {})", status, tool_name, duration_ms, size_str);
                     }
                 }
             }

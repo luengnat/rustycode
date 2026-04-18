@@ -17,6 +17,7 @@ pub fn process_hook(input_json: &str, hook_type: &str) -> Result<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::codec::HookInput;

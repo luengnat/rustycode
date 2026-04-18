@@ -348,10 +348,14 @@ impl UserMetrics {
         self.min_response_time = std::cmp::min(self.min_response_time, result.duration);
         self.max_response_time = std::cmp::max(self.max_response_time, result.duration);
 
-        // Update average (running average)
-        let total_duration =
-            self.avg_response_time * (self.total_requests - 1) as u32 + result.duration;
-        self.avg_response_time = total_duration / self.total_requests as u32;
+        // Update average (running average) using nanosecond arithmetic to
+        // avoid panic on Duration * u32 overflow when request counts or
+        // latencies are large.
+        let count = self.total_requests as u64;
+        let avg_ns = self.avg_response_time.as_nanos() as u64;
+        let new_ns = result.duration.as_nanos() as u64;
+        let total_ns = avg_ns.saturating_mul(count - 1).saturating_add(new_ns);
+        self.avg_response_time = Duration::from_nanos(total_ns / count);
     }
 }
 
@@ -661,5 +665,24 @@ mod tests {
             .send(LoadResult::success(Duration::from_millis(1)))
             .is_ok());
         drop(tx);
+    }
+
+    #[test]
+    fn test_user_metrics_running_average_does_not_overflow() {
+        // Previously Duration * u32 could panic on overflow when count was large.
+        // Now uses u64 nanosecond arithmetic with saturating_mul.
+        let mut metrics = UserMetrics::default();
+        // Add many results with a large latency to stress the running average
+        for _ in 0..1000 {
+            metrics.add_result(&LoadResult::success(Duration::from_secs(10)).with_user_id(1));
+        }
+        assert_eq!(metrics.total_requests, 1000);
+        // Average should be ~10s (10_000ms)
+        let avg_ms = metrics.avg_response_time.as_millis();
+        assert!(
+            (9_500..=10_500).contains(&avg_ms),
+            "average should be ~10s, got {}ms",
+            avg_ms
+        );
     }
 }

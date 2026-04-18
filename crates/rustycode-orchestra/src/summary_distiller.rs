@@ -349,6 +349,7 @@ pub fn distill_summaries(summaries: &[String], budget_chars: usize) -> Distillat
 
     if content.len() > budget_chars {
         let truncate_at = budget_chars.saturating_sub(15);
+        let truncate_at = content.floor_char_boundary(truncate_at);
         content = format!("{}\n[...truncated]", &content[..truncate_at]);
     }
 

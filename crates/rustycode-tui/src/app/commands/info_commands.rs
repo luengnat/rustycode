@@ -195,6 +195,30 @@ pub fn handle_stats_command(_parts: &[&str], ctx: CommandContext<'_>) -> Result<
     Ok(CommandEffect::SystemMessage(result.display))
 }
 
+/// Handle /track command — show unified workspace progress
+pub fn handle_track_command(parts: &[&str], ctx: CommandContext<'_>) -> Result<CommandEffect> {
+    let cwd = ctx.cwd.to_path_buf();
+    let tasks = ctx.workspace_tasks.clone();
+    let agents = ctx.agent_manager.get_agents();
+    let tx = ctx.command_tx;
+    let detail_mode = matches!(parts.get(1), Some(&"full" | &"detail" | &"details"));
+
+    std::thread::spawn(move || {
+        let output = if detail_mode {
+            crate::workspace_progress::render_workspace_progress(&cwd, &tasks, &agents)
+        } else {
+            crate::workspace_progress::render_workspace_progress_compact(&cwd, &tasks, &agents)
+        };
+        let _ = tx.send(crate::app::async_::SlashCommandResult::Success(output));
+    });
+
+    Ok(CommandEffect::AsyncStarted(if detail_mode {
+        "📊 Collecting detailed workspace progress...".to_string()
+    } else {
+        "📊 Collecting compact workspace progress...".to_string()
+    }))
+}
+
 /// Handle /cost command — display detailed cost breakdown
 pub fn handle_cost_command(_parts: &[&str], ctx: CommandContext<'_>) -> Result<CommandEffect> {
     let cost = ctx.session_cost_usd;

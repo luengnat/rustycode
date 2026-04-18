@@ -787,7 +787,7 @@ impl<'a> BrutalistRenderer<'a> {
                 } else if self.current_stream_content.is_empty() {
                     ("thinking", colors_inner.primary)
                 } else {
-                    ("ai", colors_inner.primary)
+                    ("", colors_inner.primary)
                 };
 
                 let mut header_spans = vec![
@@ -860,8 +860,17 @@ impl<'a> BrutalistRenderer<'a> {
                 y_offset += 1;
             }
 
-            // Show streaming content preview or thinking animation
-            if !self.current_stream_content.is_empty() && y_offset < area.height {
+            // Skip preview when message list already shows this text (dedup)
+            let last_assistant_has_content = self
+                .messages
+                .iter()
+                .rev()
+                .find(|m| m.role == crate::ui::message::MessageRole::Assistant)
+                .is_some_and(|m| !m.content.is_empty());
+            if !self.current_stream_content.is_empty()
+                && y_offset < area.height
+                && !last_assistant_has_content
+            {
                 // Live content preview: show first 2 lines of streaming content
                 let preview_lines: Vec<&str> =
                     self.current_stream_content.lines().take(2).collect();
@@ -1578,35 +1587,27 @@ impl<'a> BrutalistRenderer<'a> {
             return lines;
         }
 
-        // Role header with heavy border + turn number
-        let (role_label, role_color) = match message.role {
-            MessageRole::User => ("you", colors.secondary),
-            MessageRole::Assistant => ("ai", colors.primary),
+        // Role color for the vertical bar (pink = user, cyan = ai)
+        let role_color = match message.role {
+            MessageRole::User => colors.secondary,
+            MessageRole::Assistant => colors.primary,
             MessageRole::System => unreachable!(), // handled above
         };
 
         // Tool call chaining: suppress header for chained messages (except last)
         let is_chained_mid = chained.is_some_and(|(is_chained, is_last)| is_chained && !is_last);
-        if is_chained_mid {
+        if !is_chained_mid {
+            // Just a colored vertical bar — no text label, saves vertical space
+            lines.push(Line::from(vec![Span::styled(
+                "▐ ",
+                Style::default().fg(role_color).add_modifier(Modifier::BOLD),
+            )]));
+        } else {
             // Minimal continuation marker for chained tool-only messages
             lines.push(Line::from(vec![Span::styled(
                 "│ ",
                 Style::default().fg(Color::Rgb(60, 60, 70)),
             )]));
-        } else {
-            lines.push(Line::from(vec![
-                Span::styled("▐ ", Style::default().fg(role_color)),
-                Span::styled(
-                    role_label,
-                    Style::default().fg(role_color).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!(" ({}) ", message.timestamp.format("%H:%M")),
-                    Style::default()
-                        .fg(colors.muted)
-                        .add_modifier(Modifier::DIM),
-                ),
-            ]));
         }
 
         // Collapsed message: show first line + "N more lines" indicator

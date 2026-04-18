@@ -21,7 +21,10 @@ impl TUI {
         // If no user/assistant conversation yet, show helpful empty state with context
         // (System messages like "Workspace loaded" don't count as conversation)
         let has_conversation = self.messages.iter().any(|m| {
-            matches!(m.role, crate::ui::message::MessageRole::User | crate::ui::message::MessageRole::Assistant)
+            matches!(
+                m.role,
+                crate::ui::message::MessageRole::User | crate::ui::message::MessageRole::Assistant
+            )
         });
         if !has_conversation {
             let center_y = area.height / 2;
@@ -48,7 +51,10 @@ impl TUI {
             lines.push(Line::raw(""));
 
             // Context info (claw-code pattern: show model, project, branch)
-            let project_name = self.services.cwd().file_name()
+            let project_name = self
+                .services
+                .cwd()
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown");
             let branch_info = self.git_branch.as_deref().unwrap_or("detached");
@@ -102,41 +108,37 @@ impl TUI {
                 ];
                 // Stable per session: hash project name for deterministic greeting
                 let greeting = GREETINGS[greeting_idx % GREETINGS.len()];
-                lines.push(Line::from(vec![
-                    ratatui::text::Span::styled(
-                        greeting.to_string(),
-                        ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
-                    ),
-                ]));
-            }
-            lines.push(Line::from(vec![
-                ratatui::text::Span::styled(
-                    {
-                        // Rotate through different tips for discoverability
-                        // Changes every ~5 seconds based on animation frame
-                        const TIPS: &[&str] = &[
-                            "? help  ·  / commands  ·  ! bash  ·  Ctrl+K palette",
-                            "Ctrl+X editor  ·  Ctrl+S stash  ·  Ctrl+R search history",
-                            "Shift+Up/Down = turn jump  ·  Alt+E/W expand/collapse all",
-                            "Tab = toggle tools  ·  Ctrl+P tool panel  ·  Ctrl+B sessions",
-                            "Ctrl+D to quit  ·  Ctrl+C to cancel  ·  Esc to stop",
-                        ];
-                        let tip_idx = (greeting_idx + self.animator.current_frame().progress_frame / 20) % TIPS.len();
-                        TIPS[tip_idx]
-                    },
+                lines.push(Line::from(vec![ratatui::text::Span::styled(
+                    greeting.to_string(),
                     ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
-                ),
-            ]));
+                )]));
+            }
+            lines.push(Line::from(vec![ratatui::text::Span::styled(
+                {
+                    // Rotate through different tips for discoverability
+                    // Changes every ~5 seconds based on animation frame
+                    const TIPS: &[&str] = &[
+                        "? help  ·  / commands  ·  ! bash  ·  Ctrl+K palette",
+                        "Ctrl+X editor  ·  Ctrl+S stash  ·  Ctrl+R search history",
+                        "Shift+Up/Down = turn jump  ·  Alt+E/W expand/collapse all",
+                        "Tab = toggle tools  ·  Ctrl+P tool panel  ·  Ctrl+B sessions",
+                        "Ctrl+D to quit  ·  Ctrl+C to cancel  ·  Esc to stop",
+                    ];
+                    let tip_idx = (greeting_idx
+                        + self.animator.current_frame().progress_frame / 20)
+                        % TIPS.len();
+                    TIPS[tip_idx]
+                },
+                ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
+            )]));
 
             // Check if API key is missing and show a warning (cached in TUI struct)
             if !self.api_key_warning.is_empty() {
                 lines.push(Line::raw(""));
-                lines.push(Line::from(vec![
-                    ratatui::text::Span::styled(
-                        format!("  {}", self.api_key_warning),
-                        ratatui::style::Style::default().fg(ratatui::style::Color::Rgb(255, 200, 80)),
-                    ),
-                ]));
+                lines.push(Line::from(vec![ratatui::text::Span::styled(
+                    format!("  {}", self.api_key_warning),
+                    ratatui::style::Style::default().fg(ratatui::style::Color::Rgb(255, 200, 80)),
+                )]));
             }
 
             let paragraph = Paragraph::new(lines).alignment(Alignment::Center);
@@ -160,8 +162,16 @@ impl TUI {
             let mut est_total: usize = 0;
             for msg in &self.messages {
                 let msg_lines = estimate_line_count(&msg.content)
-                    + msg.thinking.as_ref().map(|t| estimate_line_count(t) + 4).unwrap_or(0)
-                    + msg.tool_executions.as_ref().map(|t| t.len() + 2).unwrap_or(0)
+                    + msg
+                        .thinking
+                        .as_ref()
+                        .map(|t| estimate_line_count(t) + 4)
+                        .unwrap_or(0)
+                    + msg
+                        .tool_executions
+                        .as_ref()
+                        .map(|t| t.len() + 2)
+                        .unwrap_or(0)
                     + 1; // separator
                 est_total += msg_lines.max(1);
             }
@@ -187,8 +197,16 @@ impl TUI {
                 1
             } else {
                 estimate_line_count(&msg.content).max(1)
-                    + msg.thinking.as_ref().map(|t| estimate_line_count(t) + 4).unwrap_or(0)
-                    + msg.tool_executions.as_ref().map(|t| t.len() + 2).unwrap_or(0)
+                    + msg
+                        .thinking
+                        .as_ref()
+                        .map(|t| estimate_line_count(t) + 4)
+                        .unwrap_or(0)
+                    + msg
+                        .tool_executions
+                        .as_ref()
+                        .map(|t| t.len() + 2)
+                        .unwrap_or(0)
             };
             let separator = if msg_idx > 0 { 1 } else { 0 };
             est_cumulative += separator + est_msg_lines;
@@ -213,12 +231,20 @@ impl TUI {
                 let preview = if first_line.is_empty() {
                     if let Some(tools) = &msg.tool_executions {
                         if !tools.is_empty() {
-                            format!("{} tool{}", tools.len(), if tools.len() > 1 { "s" } else { "" })
+                            format!(
+                                "{} tool{}",
+                                tools.len(),
+                                if tools.len() > 1 { "s" } else { "" }
+                            )
                         } else {
                             // Empty content, no tools — show role-based placeholder
                             match msg.role {
-                                crate::ui::message::MessageRole::User => "(empty message)".to_string(),
-                                crate::ui::message::MessageRole::Assistant => "(no content)".to_string(),
+                                crate::ui::message::MessageRole::User => {
+                                    "(empty message)".to_string()
+                                }
+                                crate::ui::message::MessageRole::Assistant => {
+                                    "(no content)".to_string()
+                                }
                                 crate::ui::message::MessageRole::System => "(system)".to_string(),
                             }
                         }
@@ -226,7 +252,9 @@ impl TUI {
                         // Empty content, no tools — show role-based placeholder
                         match msg.role {
                             crate::ui::message::MessageRole::User => "(empty message)".to_string(),
-                            crate::ui::message::MessageRole::Assistant => "(no content)".to_string(),
+                            crate::ui::message::MessageRole::Assistant => {
+                                "(no content)".to_string()
+                            }
                             crate::ui::message::MessageRole::System => "(system)".to_string(),
                         }
                     }
@@ -288,6 +316,19 @@ impl TUI {
                 if let Some(tools) = &msg.tool_executions {
                     if !tools.is_empty() {
                         lines.push(ratatui::text::Line::from(""));
+                        if msg.content.trim().is_empty() {
+                            lines.push(ratatui::text::Line::from(vec![
+                                ratatui::text::Span::styled(
+                                    format!(
+                                        "  🔧 {} tool{} executed",
+                                        tools.len(),
+                                        if tools.len() > 1 { "s" } else { "" }
+                                    ),
+                                    ratatui::style::Style::default()
+                                        .fg(ratatui::style::Color::Gray),
+                                ),
+                            ]));
+                        }
                         lines.extend(render_tool_summary(tools));
                     }
                 }
@@ -442,11 +483,16 @@ impl TUI {
             if let Some(queued) = &self.queued_message {
                 if y_offset < area.height.saturating_sub(2) {
                     let preview: String = queued.chars().take(80).collect();
-                    let ellipsis = if queued.chars().count() > 80 { "..." } else { "" };
+                    let ellipsis = if queued.chars().count() > 80 {
+                        "..."
+                    } else {
+                        ""
+                    };
                     let queued_line = Line::from(vec![
                         ratatui::text::Span::styled(
                             " ⏳ ",
-                            ratatui::style::Style::default().fg(ratatui::style::Color::Rgb(180, 180, 255)),
+                            ratatui::style::Style::default()
+                                .fg(ratatui::style::Color::Rgb(180, 180, 255)),
                         ),
                         ratatui::text::Span::styled(
                             format!("Queued: {}{}", preview, ellipsis),
@@ -478,12 +524,10 @@ impl TUI {
             // Top indicator
             if above > 0 {
                 let indicator = format!(" ▲ {} more (↑)", above);
-                let top_line = Line::from(vec![
-                    ratatui::text::Span::styled(
-                        indicator,
-                        ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
-                    ),
-                ]);
+                let top_line = Line::from(vec![ratatui::text::Span::styled(
+                    indicator,
+                    ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
+                )]);
                 let top_area = ratatui::layout::Rect {
                     x: area.x,
                     y: area.y,
@@ -515,14 +559,15 @@ impl TUI {
                 let indicator = if below < 100 {
                     format!(" ▼ {} lines below · End to jump", below)
                 } else {
-                    format!(" ▼ ~{} lines below · End to jump", (below as f64 / 10.0).round() as usize * 10)
+                    format!(
+                        " ▼ ~{} lines below · End to jump",
+                        (below as f64 / 10.0).round() as usize * 10
+                    )
                 };
-                let bottom_line = Line::from(vec![
-                    ratatui::text::Span::styled(
-                        indicator,
-                        ratatui::style::Style::default().fg(indicator_color),
-                    ),
-                ]);
+                let bottom_line = Line::from(vec![ratatui::text::Span::styled(
+                    indicator,
+                    ratatui::style::Style::default().fg(indicator_color),
+                )]);
                 let bottom_area = ratatui::layout::Rect {
                     x: area.x,
                     y: area.y + area.height.saturating_sub(1),
@@ -540,26 +585,29 @@ impl TUI {
         // Turn indicator when viewing a past turn (goose pattern)
         // Shows "turn X/Y" when user navigated to a historical message
         if self.user_scrolled {
-            let total_turns = self.messages.iter()
+            let total_turns = self
+                .messages
+                .iter()
                 .filter(|m| matches!(m.role, crate::ui::message::MessageRole::User))
                 .count();
             if total_turns > 1 {
                 // Find which turn the selected message belongs to
-                let current_turn = self.messages[..=self.selected_message.min(self.messages.len().saturating_sub(1))]
+                let current_turn = self.messages[..=self
+                    .selected_message
+                    .min(self.messages.len().saturating_sub(1))]
                     .iter()
                     .filter(|m| matches!(m.role, crate::ui::message::MessageRole::User))
                     .count();
                 let is_latest = self.selected_message >= self.messages.len().saturating_sub(1);
                 if !is_latest && current_turn > 0 {
-                    let turn_text = format!(" ◈ turn {}/{} — shift+↓ return ", current_turn, total_turns);
-                    let turn_line = Line::from(vec![
-                        ratatui::text::Span::styled(
-                            turn_text,
-                            ratatui::style::Style::default()
-                                .fg(ratatui::style::Color::Rgb(255, 200, 80))
-                                .add_modifier(ratatui::style::Modifier::BOLD),
-                        ),
-                    ]);
+                    let turn_text =
+                        format!(" ◈ turn {}/{} — shift+↓ return ", current_turn, total_turns);
+                    let turn_line = Line::from(vec![ratatui::text::Span::styled(
+                        turn_text,
+                        ratatui::style::Style::default()
+                            .fg(ratatui::style::Color::Rgb(255, 200, 80))
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    )]);
                     let turn_area = ratatui::layout::Rect {
                         x: area.x,
                         y: area.y + area.height.saturating_sub(2),
@@ -649,16 +697,27 @@ impl TUI {
 ///
 /// Claw-code inspired: shows context-aware tool info with file paths,
 /// line counts, and semantic formatting per tool type.
-fn render_tool_summary(tools: &[crate::ui::message::ToolExecution]) -> Vec<ratatui::text::Line<'static>> {
+fn render_tool_summary(
+    tools: &[crate::ui::message::ToolExecution],
+) -> Vec<ratatui::text::Line<'static>> {
     use crate::ui::message::ToolStatus;
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::{Line, Span};
 
     let mut lines = Vec::new();
     let total = tools.len();
-    let passed = tools.iter().filter(|t| matches!(t.status, ToolStatus::Complete)).count();
-    let failed = tools.iter().filter(|t| matches!(t.status, ToolStatus::Failed)).count();
-    let running = tools.iter().filter(|t| matches!(t.status, ToolStatus::Running)).count();
+    let passed = tools
+        .iter()
+        .filter(|t| matches!(t.status, ToolStatus::Complete))
+        .count();
+    let failed = tools
+        .iter()
+        .filter(|t| matches!(t.status, ToolStatus::Failed))
+        .count();
+    let running = tools
+        .iter()
+        .filter(|t| matches!(t.status, ToolStatus::Running))
+        .count();
 
     // Summary line: ╭─ 3 tools · 2 ok · 1 fail · 450ms ╮
     // Goose pattern: border color reflects overall status (red for failures, gold for running)
@@ -669,11 +728,12 @@ fn render_tool_summary(tools: &[crate::ui::message::ToolExecution]) -> Vec<ratat
     } else {
         Color::DarkGray
     };
-    let mut summary = vec![
-        Span::styled("  ╭─ ", Style::default().fg(border_color)),
-    ];
+    let mut summary = vec![Span::styled("  ╭─ ", Style::default().fg(border_color))];
     if running > 0 {
-        summary.push(Span::styled("◐ ", Style::default().fg(Color::Rgb(255, 200, 80))));
+        summary.push(Span::styled(
+            "◐ ",
+            Style::default().fg(Color::Rgb(255, 200, 80)),
+        ));
     }
     summary.push(Span::styled(
         format!("{} tool{}", total, if total != 1 { "s" } else { "" }),
@@ -738,7 +798,9 @@ fn render_tool_summary(tools: &[crate::ui::message::ToolExecution]) -> Vec<ratat
             Span::styled(format!("{} ", icon), Style::default().fg(color)),
             Span::styled(
                 format!("[{}] ", kind),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
             ),
         ];
 
@@ -753,14 +815,19 @@ fn render_tool_summary(tools: &[crate::ui::message::ToolExecution]) -> Vec<ratat
                 Style::default().fg(Color::Rgb(180, 180, 180)),
             ));
         } else {
-            tool_line.push(Span::styled(tool.name.clone(), Style::default().fg(Color::Gray)));
+            tool_line.push(Span::styled(
+                tool.name.clone(),
+                Style::default().fg(Color::Gray),
+            ));
         }
 
         // Duration badge
         if let Some(dur_ms) = tool.duration_ms {
             tool_line.push(Span::styled(
                 format!(" {}", format_duration(dur_ms)),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             ));
         }
 
@@ -784,9 +851,17 @@ fn extract_tool_detail(tool: &crate::ui::message::ToolExecution) -> Option<Strin
     }
     if lower.contains("write") || lower.contains("create") {
         let path = extract_file_path(summary);
-        let line_count = tool.detailed_output.as_ref().map(|o| estimate_line_count(o)).unwrap_or(0);
+        let line_count = tool
+            .detailed_output
+            .as_ref()
+            .map(|o| estimate_line_count(o))
+            .unwrap_or(0);
         if let Some(p) = path {
-            return Some(if line_count > 0 { format!("{} ({} lines)", p, line_count) } else { p });
+            return Some(if line_count > 0 {
+                format!("{} ({} lines)", p, line_count)
+            } else {
+                p
+            });
         }
         return Some(summary.clone());
     }
@@ -912,8 +987,10 @@ pub fn tool_kind_icon(name: &str) -> &'static str {
         "R" // Read file
     } else if lower.contains("write") || lower.contains("create") || lower.contains("insert") {
         "W" // Write/create file
-    } else if lower.contains("edit") || lower.contains("patch")
-        || lower.contains("replace") || lower.contains("search_replace")
+    } else if lower.contains("edit")
+        || lower.contains("patch")
+        || lower.contains("replace")
+        || lower.contains("search_replace")
     {
         "E" // Edit existing file
     } else if lower.contains("delete") || lower.contains("remove") {
@@ -922,18 +999,26 @@ pub fn tool_kind_icon(name: &str) -> &'static str {
         "G" // Grep/search content
     } else if lower.contains("glob") || lower.contains("find") || lower.contains("list") {
         "F" // Find/list files
-    } else if lower.contains("bash") || lower.contains("exec") || lower.contains("shell")
-        || lower.contains("run") || lower.contains("cmd")
+    } else if lower.contains("bash")
+        || lower.contains("exec")
+        || lower.contains("shell")
+        || lower.contains("run")
+        || lower.contains("cmd")
     {
         "$" // Shell command
     } else if lower.contains("git") {
         "G" // Git operation
-    } else if lower.contains("fetch") || lower.contains("http") || lower.contains("web")
-        || lower.contains("curl") || lower.contains("download")
+    } else if lower.contains("fetch")
+        || lower.contains("http")
+        || lower.contains("web")
+        || lower.contains("curl")
+        || lower.contains("download")
     {
         "~" // Network operation
-    } else if lower.contains("question") || lower.contains("ask")
-        || lower.contains("think") || lower.contains("reason")
+    } else if lower.contains("question")
+        || lower.contains("ask")
+        || lower.contains("think")
+        || lower.contains("reason")
     {
         "?" // Question/prompt or thinking/reasoning
     } else if lower.contains("todo") {
@@ -1053,7 +1138,11 @@ fn render_thinking_block(
 
             if has_more {
                 // Estimate remaining lines from byte ratio to avoid full scan
-                let shown_bytes: usize = collected.iter().take(max_content_lines).map(|l| l.len()).sum();
+                let shown_bytes: usize = collected
+                    .iter()
+                    .take(max_content_lines)
+                    .map(|l| l.len())
+                    .sum();
                 let avg_line_bytes = (shown_bytes / max_content_lines.max(1)).max(1);
                 let remaining_bytes = thinking.len().saturating_sub(shown_bytes);
                 let estimated_remaining = remaining_bytes / avg_line_bytes;

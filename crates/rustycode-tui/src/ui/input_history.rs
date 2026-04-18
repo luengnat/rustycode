@@ -105,11 +105,18 @@ impl HistoryManager {
             self.history_pos += 1;
             let cmd = self.history[self.history.len() - self.history_pos].clone();
             // Preserve multi-line entries: split on \n so cursor navigation works
-            input_state.lines = if cmd.contains('\n') {
+            // Defensive: ensure we replace the entire input with the recalled history
+            // instead of appending to the existing content. Some event dispatch
+            // paths could lead to multiple mutations within a single Up press,
+            // which would otherwise cause an append-like effect. Always push the
+            // recalled command as a fresh lines vector.
+            let recalled_lines = if cmd.contains('\n') {
                 cmd.lines().map(|l| l.to_string()).collect::<Vec<_>>()
             } else {
                 vec![cmd]
             };
+            input_state.lines.clear();
+            input_state.lines.extend(recalled_lines);
             if input_state.lines.is_empty() {
                 input_state.lines = vec![String::new()];
             }

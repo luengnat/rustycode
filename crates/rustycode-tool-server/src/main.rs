@@ -72,12 +72,10 @@ async fn async_main() {
             eprintln!("error: failed to bind tool server to {addr}: {e}");
             std::process::exit(1);
         });
-    axum::serve(listener, app)
-        .await
-        .unwrap_or_else(|e| {
-            eprintln!("error: tool server failed: {e}");
-            std::process::exit(1);
-        });
+    axum::serve(listener, app).await.unwrap_or_else(|e| {
+        eprintln!("error: tool server failed: {e}");
+        std::process::exit(1);
+    });
 }
 
 async fn handle_call(State(state): State<AppState>, Json(payload): Json<Value>) -> Json<Value> {

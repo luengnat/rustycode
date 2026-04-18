@@ -144,7 +144,8 @@ pub fn shorten_tool_param(s: &str, max_len: usize) -> String {
 
     let components: Vec<&str> = display.split('/').collect();
     if components.len() <= 2 {
-        return display[..max_len.saturating_sub(3)].to_string() + "…";
+        let end = display.floor_char_boundary(max_len.saturating_sub(3));
+        return format!("{}…", &display[..end]);
     }
 
     let first = components.first().unwrap_or(&"");
@@ -156,18 +157,21 @@ pub fn shorten_tool_param(s: &str, max_len: usize) -> String {
     let available = max_len.saturating_sub(prefix.len() + suffix.len() + 3);
 
     if available < 4 {
-        return format!("{}{}…{}", prefix, &first[..1], last);
+        let first_char = first.chars().next().unwrap_or('/');
+        return format!("{}{}…{}", prefix, first_char, last);
     }
 
     let mut result = prefix.to_string();
-    result.push_str(&first[..1]);
+    let first_char = first.chars().next().unwrap_or('/');
+    result.push(first_char);
 
     for comp in components.iter().skip(1).take(components.len() - 2) {
         if result.len() + comp.len() + suffix.len() + 3 > max_len {
             break;
         }
         result.push('/');
-        result.push_str(&comp[..1]);
+        let comp_char = comp.chars().next().unwrap_or('?');
+        result.push(comp_char);
     }
 
     result.push('…');
@@ -221,5 +225,38 @@ pub fn tool_type_icon(name: &str) -> &'static str {
         "▶"
     } else {
         "○"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shorten_tool_param_ascii() {
+        let result = shorten_tool_param("/a/b/c/d/e/f", 10);
+        assert!(result.contains('…'), "should contain ellipsis: {}", result);
+    }
+
+    #[test]
+    fn test_shorten_tool_param_short_enough() {
+        let path = "/short/path";
+        assert_eq!(shorten_tool_param(path, 50), path);
+    }
+
+    #[test]
+    fn test_shorten_tool_param_multibyte_component() {
+        // Path with Chinese characters — should not panic on UTF-8 boundary
+        let path = "/项目/代码/文件/测试/结尾";
+        let result = shorten_tool_param(path, 30);
+        assert!(result.contains('…'), "should contain ellipsis: {}", result);
+    }
+
+    #[test]
+    fn test_shorten_tool_param_two_components() {
+        // Only 2 components — should truncate with ellipsis
+        let path = "/verylongdirectoryname/file.txt";
+        let result = shorten_tool_param(path, 20);
+        assert!(result.contains('…'), "should contain ellipsis: {}", result);
     }
 }

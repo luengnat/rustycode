@@ -771,7 +771,8 @@ pub mod predefined {
                 id: "gemma-4-e2b-it".to_string(),
                 name: "Gemma 4 E2B (LiteRT-LM)".to_string(),
                 provider_id: "litert-lm".to_string(),
-                description: "Gemma 4 2B parameter instruction-tuned model for local inference".to_string(),
+                description: "Gemma 4 2B parameter instruction-tuned model for local inference"
+                    .to_string(),
                 context_window: 8_192,
                 supports_tools: false,
                 supports_vision: false,
@@ -785,14 +786,19 @@ pub mod predefined {
                 id: "gemma-4-e4b-it".to_string(),
                 name: "Gemma 4 E4B (LiteRT-LM)".to_string(),
                 provider_id: "litert-lm".to_string(),
-                description: "Gemma 4 4B parameter instruction-tuned model, best quality for local inference".to_string(),
+                description:
+                    "Gemma 4 4B parameter instruction-tuned model, best quality for local inference"
+                        .to_string(),
                 context_window: 8_192,
                 supports_tools: false,
                 supports_vision: false,
                 max_tokens: 4096,
                 input_cost_per_1k: 0.0,
                 output_cost_per_1k: 0.0,
-                use_cases: vec!["Local inference".to_string(), "Best local quality".to_string()],
+                use_cases: vec![
+                    "Local inference".to_string(),
+                    "Best local quality".to_string(),
+                ],
                 cost_tier: 1,
             },
             ModelInfo {
@@ -834,7 +840,10 @@ pub mod predefined {
                 max_tokens: 4096,
                 input_cost_per_1k: 0.0,
                 output_cost_per_1k: 0.0,
-                use_cases: vec!["Local inference".to_string(), "Balanced quality".to_string()],
+                use_cases: vec![
+                    "Local inference".to_string(),
+                    "Balanced quality".to_string(),
+                ],
                 cost_tier: 1,
             },
             ModelInfo {
@@ -1498,7 +1507,13 @@ mod tests {
 
     #[test]
     fn test_context_window_for_litert_lm_models() {
-        assert_eq!(predefined::context_window_for_model("gemma-4-e2b-it"), 8_192);
-        assert_eq!(predefined::context_window_for_model("gemma-4-e4b-it"), 8_192);
+        assert_eq!(
+            predefined::context_window_for_model("gemma-4-e2b-it"),
+            8_192
+        );
+        assert_eq!(
+            predefined::context_window_for_model("gemma-4-e4b-it"),
+            8_192
+        );
     }
 }

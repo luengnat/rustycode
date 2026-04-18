@@ -478,7 +478,8 @@ fn truncate_long_lines(content: &str) -> String {
                 return line.to_string();
             }
 
-            let truncate_zone = &line[..300.min(line.len())];
+            let truncate_zone_end = line.floor_char_boundary(300.min(line.len()));
+            let truncate_zone = &line[..truncate_zone_end];
             let last_sentence_end = [
                 truncate_zone.rfind(". "),
                 truncate_zone.rfind("! "),

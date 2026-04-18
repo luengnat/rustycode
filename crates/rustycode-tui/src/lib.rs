@@ -46,6 +46,7 @@ mod session;
 pub mod theme;
 pub mod tool_helpers;
 mod unicode;
+pub mod workspace_progress;
 
 // Token autocompaction
 mod compaction;

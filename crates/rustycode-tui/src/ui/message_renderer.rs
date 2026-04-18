@@ -418,7 +418,8 @@ impl MessageRenderer {
         // Truncate if too long
         let max_len = 200;
         let output = if detailed_output.len() > max_len {
-            format!("{}...", &detailed_output[..max_len])
+            let end = detailed_output.floor_char_boundary(max_len);
+            format!("{}...", &detailed_output[..end])
         } else {
             detailed_output.clone()
         };

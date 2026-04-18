@@ -1054,6 +1054,16 @@ pub async fn stream_llm_response(config: StreamConfig) -> Result<()> {
             }
         }
 
+        tracing::info!(
+            "Turn {} done: stop_action={:?}, assistant_response={} chars, thinking={} chars, tool_execs={}, content_blocks={}",
+            turn_count,
+            stop_action,
+            assistant_response.len(),
+            thinking_content.len(),
+            tool_executions.len(),
+            content_blocks.len(),
+        );
+
         // Decide what to do next based on stop_reason
         match stop_action {
             ToolUseAction::ExecuteTools => {

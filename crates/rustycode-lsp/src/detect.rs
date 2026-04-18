@@ -90,6 +90,34 @@ impl ProjectDetector {
         if dir.join("Makefile").exists() || dir.join("makefile").exists() {
             return Some(BuildSystem::Make);
         }
+        if dir.join("build.xml").exists() {
+            return Some(BuildSystem::Ant);
+        }
+        if dir.join("build.sbt").exists() {
+            return Some(BuildSystem::Sbt);
+        }
+        // .NET — check for solution/project files
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.ends_with(".sln") || name.ends_with(".csproj") || name.ends_with(".fsproj") || name.ends_with(".vbproj") {
+                    return Some(BuildSystem::Dotnet);
+                }
+            }
+        }
+        // R
+        if dir.join(".Rproj").exists() || dir.join("DESCRIPTION").exists() {
+            return Some(BuildSystem::R);
+        }
+        // Jupyter notebooks
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.ends_with(".ipynb") {
+                    return Some(BuildSystem::Jupyter);
+                }
+            }
+        }
         None
     }
 

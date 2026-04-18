@@ -332,27 +332,26 @@ mod tests {
     #[test]
     fn test_validate_plugin_metadata_name_too_long() {
         let long_name = "x".repeat(300);
-        let result =
-            PluginLifecycleManager::validate_plugin_metadata(&long_name, "1.0.0");
+        let result = PluginLifecycleManager::validate_plugin_metadata(&long_name, "1.0.0");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("256 characters"));
     }
 
     #[test]
     fn test_validate_plugin_metadata_name_with_null_bytes() {
-        let result =
-            PluginLifecycleManager::validate_plugin_metadata("bad\0name", "1.0.0");
+        let result = PluginLifecycleManager::validate_plugin_metadata("bad\0name", "1.0.0");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("invalid characters"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid characters"));
     }
 
     #[test]
     fn test_validate_plugin_metadata_name_with_path_separator() {
-        let result =
-            PluginLifecycleManager::validate_plugin_metadata("../evil", "1.0.0");
+        let result = PluginLifecycleManager::validate_plugin_metadata("../evil", "1.0.0");
         assert!(result.is_err());
-        let result =
-            PluginLifecycleManager::validate_plugin_metadata("evil\\plugin", "1.0.0");
+        let result = PluginLifecycleManager::validate_plugin_metadata("evil\\plugin", "1.0.0");
         assert!(result.is_err());
     }
 

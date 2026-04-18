@@ -78,6 +78,38 @@ impl TUI {
                     // handler do it to avoid race with async stream task.
                     // Mark cancelled so Done handler skips auto-continue.
                     self.stream_cancelled = true;
+                    // CLEAR THINKING STATE IMMEDIATELY
+                    // 1) If the last message is an Assistant and it has thinking content,
+                    //    drop that thinking state so the spinner doesn't linger.
+                    // 2) If the current streaming content corresponds to the thinking
+                    //    content, drop it as well to avoid showing stale content.
+                    let thinking_snapshot = {
+                        // Capture thinking before we mutate the last message
+                        if let Some(last) = self.messages.last_mut() {
+                            if last.role == crate::ui::message_types::MessageRole::Assistant {
+                                last.thinking.clone()
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    };
+                    // Mutate last message thinking field to clear it
+                    if let Some(last) = self.messages.last_mut() {
+                        if last.role == crate::ui::message_types::MessageRole::Assistant {
+                            last.thinking = None;
+                        }
+                    }
+                    // If current_stream_content is exactly the thinking text, clear it
+                    if let Some(thinking) = thinking_snapshot {
+                        if !self.current_stream_content.is_empty()
+                            && self.current_stream_content.trim() == thinking.trim()
+                        {
+                            self.current_stream_content.clear();
+                        }
+                    }
+
                     let preserved = self.current_stream_content.len();
                     if preserved > 0 {
                         self.add_system_message(format!(

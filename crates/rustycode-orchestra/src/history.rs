@@ -49,6 +49,8 @@ pub fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         let truncate_len = max_len.saturating_sub(4); // Reserve space for "..."
+                                                      // Use floor_char_boundary to find a valid char boundary for safe slicing
+        let truncate_len = s.floor_char_boundary(truncate_len);
         let truncated = &s[..truncate_len];
         format!("{}...", truncated)
     }
@@ -125,6 +127,34 @@ mod tests {
         assert_eq!(truncate_with_ellipsis("short", 10), "short");
         assert_eq!(truncate_with_ellipsis("very long string", 10), "very l...");
         assert_eq!(truncate_with_ellipsis("exactlen", 8), "exactlen");
+    }
+
+    #[test]
+    fn test_truncate_with_ellipsis_multibyte_utf8() {
+        // Ensure truncation doesn't panic on multi-byte UTF-8 characters
+        let emoji_str = "Hello 🌍🌍🌍🌍🌍 world";
+        let result = truncate_with_ellipsis(emoji_str, 15);
+        assert!(
+            result.ends_with("..."),
+            "should end with ellipsis: {:?}",
+            result
+        );
+        assert!(
+            result.is_char_boundary(result.len()),
+            "result should be valid UTF-8"
+        );
+
+        // Chinese characters (3 bytes each in UTF-8)
+        let chinese = "你好世界你好世界你好世界";
+        let result = truncate_with_ellipsis(chinese, 10);
+        assert!(result.ends_with("..."));
+        assert!(result.is_char_boundary(result.len()));
+
+        // Empty string
+        assert_eq!(truncate_with_ellipsis("", 5), "");
+
+        // String shorter than max_len with multi-byte chars
+        assert_eq!(truncate_with_ellipsis("你好", 20), "你好");
     }
 
     #[test]

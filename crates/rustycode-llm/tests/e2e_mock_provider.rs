@@ -300,11 +300,14 @@ async fn test_mock_with_environment_variables() {
 
 #[tokio::test]
 async fn test_mock_with_error_before_stream() {
-    clear_mock_env();
-    std::env::set_var("RUSTYCODE_MOCK_ERROR_MESSAGE", "Error before stream");
-
-    let config = rustycode_llm::provider_v2::ProviderConfig::default();
-    let provider = MockProvider::from_env(config);
+    // Use MockProvider::new() directly instead of env vars to avoid
+    // race conditions with parallel tests sharing environment variables.
+    let provider = MockProvider::new(
+        vec![Err(ProviderError::Unknown(
+            "Error before stream".to_string(),
+        ))],
+        None,
+    );
     let request = create_test_request("Error test");
 
     // Act
@@ -318,9 +321,6 @@ async fn test_mock_with_error_before_stream() {
         }
         _ => panic!("Expected Unknown error"),
     }
-
-    // Cleanup
-    std::env::remove_var("RUSTYCODE_MOCK_ERROR_MESSAGE");
 }
 
 #[tokio::test]

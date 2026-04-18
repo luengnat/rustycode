@@ -535,6 +535,12 @@ impl CommandPaletteRenderer {
             Command::with_hint("/todo", "Manage todos", "add|list|done", || {
                 CommandResult::Close
             }),
+            Command::with_hint(
+                "/track",
+                "Show workspace progress",
+                "full|detail|tasks|todos",
+                || CommandResult::Close,
+            ),
             // ── Skills & Extensions ────────────────────────────────
             Command::with_hint(
                 "/skill",

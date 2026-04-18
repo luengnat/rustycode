@@ -498,7 +498,8 @@ fn apply_edit(
             "old_text not found in {}: '{}'",
             edit.path.display(),
             if old_text.len() > 50 {
-                format!("{}...", &old_text[..47])
+                let end = old_text.floor_char_boundary(47);
+                format!("{}...", &old_text[..end])
             } else {
                 old_text.to_string()
             }

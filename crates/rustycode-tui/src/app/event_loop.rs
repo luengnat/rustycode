@@ -793,6 +793,9 @@ impl TUI {
 
                             // Restore messages
                             self.messages = state.messages;
+                            // Recompute token context based on restored messages so the
+                            // context usage bar reflects the loaded session.
+                            self.context_monitor.update(&self.messages);
                             if !self.messages.is_empty() {
                                 self.selected_message = self.messages.len().saturating_sub(1);
                             }
@@ -1475,10 +1478,8 @@ impl TUI {
                 self.session_input_tokens = 0;
                 self.session_output_tokens = 0;
                 self.session_cost_usd = 0.0;
-                self.context_monitor.current_tokens = 0;
-                self.context_monitor.needs_compaction = false;
-                // Replace messages with loaded session
                 self.messages = messages;
+                self.context_monitor.update(&self.messages);
                 if !self.messages.is_empty() {
                     self.selected_message = self.messages.len() - 1;
                 }

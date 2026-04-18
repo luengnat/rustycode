@@ -64,7 +64,8 @@ impl DoomLoopDetector {
             key_arg: key_arg.map(|s| {
                 // Truncate long args to keep memory bounded
                 if s.len() > 200 {
-                    format!("{}...", &s[..197])
+                    let end = s.floor_char_boundary(197);
+                    format!("{}...", &s[..end])
                 } else {
                     s.to_string()
                 }

@@ -127,9 +127,12 @@ impl InputHandler {
             }
 
             (KeyCode::Enter, KeyModifiers::SHIFT) => {
-                // Shift+Enter: always send message (in both SingleLine and MultiLine)
-                let lines: Vec<String> = self.state.lines.to_vec();
-                InputAction::SendMessage(lines)
+                // Shift+Enter: insert newline in both modes (matches hint text)
+                if self.state.mode == InputMode::SingleLine {
+                    self.state.mode = InputMode::MultiLine;
+                }
+                self.state.insert_newline();
+                InputAction::Consumed
             }
 
             (KeyCode::Enter, KeyModifiers::NONE) => {
@@ -426,6 +429,33 @@ mod tests {
         let action = handler.handle_key_event(KeyCode::Enter, KeyModifiers::ALT);
 
         assert!(matches!(action, InputAction::SendMessage(_)));
+    }
+
+    #[test]
+    fn test_handler_shift_enter_inserts_newline() {
+        // Shift+Enter should insert newline (not send), matching hint text
+        let mut handler = InputHandler::new();
+        handler.state.lines[0] = "Hello".to_string();
+        handler.state.cursor_col = 5; // cursor at end of line
+
+        let action = handler.handle_key_event(KeyCode::Enter, KeyModifiers::SHIFT);
+        assert_eq!(action, InputAction::Consumed);
+        assert_eq!(handler.state.mode, InputMode::MultiLine);
+        assert_eq!(handler.state.lines.len(), 2);
+        assert_eq!(handler.state.lines[0], "Hello");
+        assert_eq!(handler.state.lines[1], "");
+    }
+
+    #[test]
+    fn test_handler_shift_enter_in_multiline() {
+        // Shift+Enter in multiline mode should also insert newline
+        let mut handler = InputHandler::new();
+        handler.state.mode = InputMode::MultiLine;
+        handler.state.lines = vec!["Line 1".to_string(), "Line 2".to_string()];
+
+        let action = handler.handle_key_event(KeyCode::Enter, KeyModifiers::SHIFT);
+        assert_eq!(action, InputAction::Consumed);
+        assert_eq!(handler.state.lines.len(), 3);
     }
 
     #[test]

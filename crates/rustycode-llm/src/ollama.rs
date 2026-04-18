@@ -523,13 +523,16 @@ impl LLMProvider for OllamaProvider {
                 }
                 if let Ok(data) = serde_json::from_str::<OllamaStreamResponse>(line) {
                     if let Some(prompt_tokens) = data.prompt_eval_count {
-                        *prompt_eval_count.lock().unwrap() = Some(prompt_tokens);
+                        *prompt_eval_count.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Some(prompt_tokens);
                     }
                     if let Some(output_tokens) = data.eval_count {
-                        *eval_count.lock().unwrap() = Some(output_tokens);
+                        *eval_count.lock().unwrap_or_else(|e| e.into_inner()) = Some(output_tokens);
                     }
 
-                    let mut content_buffer = accumulated_content.lock().unwrap();
+                    let mut content_buffer = accumulated_content
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     if let Some(message) = data.message {
                         if !message.content.is_empty() {
                             content_buffer.push_str(&message.content);
@@ -544,8 +547,9 @@ impl LLMProvider for OllamaProvider {
                         drop(content_buffer);
 
                         let usage = {
-                            let prompt = *prompt_eval_count.lock().unwrap();
-                            let output = *eval_count.lock().unwrap();
+                            let prompt =
+                                *prompt_eval_count.lock().unwrap_or_else(|e| e.into_inner());
+                            let output = *eval_count.lock().unwrap_or_else(|e| e.into_inner());
                             if let (Some(input_tokens), Some(output_tokens)) = (prompt, output) {
                                 Some(Usage {
                                     input_tokens,
