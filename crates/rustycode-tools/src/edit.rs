@@ -767,4 +767,61 @@ mod tests {
         );
         assert!(content.contains("new();"));
     }
+
+    // ── Unit tests for matching functions ──
+
+    #[test]
+    fn try_exact_match_finds_substring() {
+        let content = "hello world";
+        assert_eq!(try_exact_match(content, "world"), Some((6, 11)));
+        assert_eq!(try_exact_match(content, "missing"), None);
+    }
+
+    #[test]
+    fn try_exact_match_empty_old_text() {
+        // Empty old_text should match at position 0
+        assert_eq!(try_exact_match("content", ""), Some((0, 0)));
+    }
+
+    #[test]
+    fn try_normalized_match_crlf_to_lf() {
+        let content = "line1\r\nline2\r\nline3\r\n";
+        let result = try_normalized_match(content, "line1\nline2", "foo\nbar");
+        assert!(result.is_some());
+        let output = result.unwrap();
+        // Should preserve CRLF line endings
+        assert!(output.contains("\r\n"));
+        assert!(output.contains("foo"));
+        assert!(output.contains("bar"));
+    }
+
+    #[test]
+    fn try_normalized_match_no_match_returns_none() {
+        let content = "line1\r\nline2\r\n";
+        assert_eq!(try_normalized_match(content, "missing", "replacement"), None);
+    }
+
+    #[test]
+    fn try_trimmed_match_ignores_whitespace() {
+        let content = "  fn main()  \n    println!(\"hi\");  \n  }  \n";
+        let result = try_trimmed_match(
+            content,
+            "fn main()\nprintln!(\"hi\");\n}",
+            "fn main()\nprintln!(\"bye\");\n}",
+        );
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("bye"));
+    }
+
+    #[test]
+    fn try_trimmed_match_no_match_returns_none() {
+        let content = "hello\nworld\n";
+        assert_eq!(try_trimmed_match(content, "foo\nbar", "baz"), None);
+    }
+
+    #[test]
+    fn try_trimmed_match_empty_old_returns_none() {
+        let content = "hello\n";
+        assert_eq!(try_trimmed_match(content, "", "replacement"), None);
+    }
 }

@@ -374,7 +374,7 @@ impl CompactionEngine {
         }
 
         let target_tokens =
-            (estimate_tokens_parallel(&session.messages) as f64 * target_ratio) as usize;
+            (estimate_tokens_parallel(&session.messages) as f64 * target_ratio).max(0.0) as usize;
 
         let mut compacted = Vec::new();
         let mut tokens = 0;
