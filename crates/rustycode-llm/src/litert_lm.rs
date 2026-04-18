@@ -1,100 +1,104 @@
 use crate::provider_v2::{
-    ChatMessage, CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig,
-    ProviderError, SSEEvent, StreamChunk, Usage,
+    ChatMessage, CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError,
+    SSEEvent, StreamChunk, Usage,
 };
 use async_trait::async_trait;
-use futures::Stream;
-use rustycode_litert::{
-    default_gemma_e4b_model_url, default_litert_lm_binary_url, default_litert_lm_install_dir,
-    ensure_litert_lm_binary, ensure_litert_lm_runtime, LiteRtLmInstallConfig,
-};
-use std::path::{Path, PathBuf};
+use futures::{Stream, StreamExt};
+use rustycode_litert::LitManager;
+use std::path::Path;
 use std::pin::Pin;
-use std::process::Stdio;
-use tokio::process::Command;
+use std::sync::Arc;
+use tokio::sync::OnceCell;
 
 /// Local LiteRT-LM provider.
 ///
-/// This provider auto-installs the LiteRT-LM desktop binary and a Gemma E4B
-/// model if they are not already present on disk.
+/// This provider uses our own `rustycode-litert` crate for binary management,
+/// process pooling, and inference, ensuring consistent cross-platform behaviour
+/// and correct binary resolution (v0.10.2 from our installer).
 pub struct LiteRtLmProvider {
     config: ProviderConfig,
     requested_model: String,
-    binary_url: String,
-    model_url: String,
-    install_dir: PathBuf,
-    binary_filename: String,
-    model_filename: String,
-    backend: String,
+    model_source: String,
+    runtime_model_name: String,
+    manager: OnceCell<Arc<LitManager>>,
+    model_ready: OnceCell<()>,
 }
 
 impl LiteRtLmProvider {
     pub fn new(config: ProviderConfig, requested_model: String) -> Result<Self, ProviderError> {
-        let backend = std::env::var("LITERT_LM_BACKEND").unwrap_or_else(|_| "cpu".to_string());
-        let install_dir = std::env::var("LITERT_LM_HOME")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(default_litert_lm_install_dir);
-
-        let binary_url = std::env::var("LITERT_LM_BINARY_URL")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(default_litert_lm_binary_url);
-
-        let model_url = Self::model_url_for(&requested_model);
-        let model_filename = Self::model_filename_for(&requested_model);
+        let model_source = Self::model_source_for(&requested_model);
+        let runtime_model_name = Self::runtime_model_name_for(&requested_model);
 
         Ok(Self {
             config,
             requested_model,
-            binary_url,
-            model_url,
-            install_dir,
-            binary_filename: "litert_lm_main".to_string(),
-            model_filename,
-            backend,
+            model_source,
+            runtime_model_name,
+            manager: OnceCell::new(),
+            model_ready: OnceCell::new(),
         })
     }
 
-    fn model_filename_for(requested_model: &str) -> String {
+    fn is_url(value: &str) -> bool {
+        let value = value.trim().to_ascii_lowercase();
+        value.starts_with("http://") || value.starts_with("https://")
+    }
+
+    fn runtime_model_name_for(requested_model: &str) -> String {
         let model = requested_model.trim();
-        if model.ends_with(".litertlm") {
+        if Self::is_url(model) {
             Path::new(model)
-                .file_name()
+                .file_stem()
                 .and_then(|name| name.to_str())
-                .unwrap_or("gemma-3n-e4b.litertlm")
+                .unwrap_or("litert-model")
+                .to_string()
+        } else if model.ends_with(".litertlm") {
+            Path::new(model)
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("litert-model")
                 .to_string()
         } else {
-            format!("{}.litertlm", Self::slug_model_name(model))
+            model.to_string()
         }
     }
 
-    fn model_url_for(requested_model: &str) -> String {
+    fn model_source_for(requested_model: &str) -> String {
         if let Ok(url) = std::env::var("LITERT_LM_MODEL_URL") {
             if !url.trim().is_empty() {
                 return url;
             }
         }
 
-        let model = requested_model.to_lowercase();
-        if model.contains("e4b") {
-            return default_gemma_e4b_model_url();
+        let model = requested_model.trim();
+        if Self::is_url(model) {
+            return model.to_string();
         }
 
-        if model.ends_with(".litertlm") {
+        let model_lower = model.to_lowercase();
+        if model_lower.contains("gemma-4") && model_lower.contains("e4b") {
+            return "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm".to_string();
+        }
+        if model_lower.contains("gemma-4") && model_lower.contains("e2b") {
+            return "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm".to_string();
+        }
+        if model_lower.contains("e4b") {
+            return "https://huggingface.co/MiCkSoftware/gemma-3n-E4B-it-litert-lm/resolve/main/gemma-3n-E4B-it-int4-Web.litertlm".to_string();
+        }
+
+        if model_lower.ends_with(".litertlm") {
             return format!(
                 "https://github.com/google-ai-edge/LiteRT-LM/releases/download/v0.10.2/{}",
-                Path::new(requested_model)
+                Path::new(model)
                     .file_name()
                     .and_then(|name| name.to_str())
-                    .unwrap_or("gemma-3n-e4b.litertlm")
+                    .unwrap_or("gemma-3n-E4B.litertlm")
             );
         }
 
         format!(
             "https://github.com/google-ai-edge/LiteRT-LM/releases/download/v0.10.2/{}.litertlm",
-            Self::slug_model_name(requested_model)
+            Self::slug_model_name(model)
         )
     }
 
@@ -104,31 +108,6 @@ impl LiteRtLmProvider {
             .to_lowercase()
             .replace(['/', ' '], "-")
             .replace('_', "-")
-    }
-
-    fn runtime_install_config(&self) -> LiteRtLmInstallConfig {
-        LiteRtLmInstallConfig {
-            version: "v0.10.2".to_string(),
-            binary_url: self.binary_url.clone(),
-            model_url: self.model_url.clone(),
-            install_dir: self.install_dir.clone(),
-            binary_filename: self.binary_filename.clone(),
-            model_filename: self.model_filename.clone(),
-        }
-    }
-
-    async fn ensure_runtime(&self) -> Result<(PathBuf, PathBuf), ProviderError> {
-        if Path::new(&self.requested_model).exists() {
-            let binary_path = ensure_litert_lm_binary(&self.runtime_install_config())
-                .await
-                .map_err(|err| ProviderError::Configuration(err.to_string()))?;
-            return Ok((binary_path, PathBuf::from(&self.requested_model)));
-        }
-
-        let result = ensure_litert_lm_runtime(&self.runtime_install_config())
-            .await
-            .map_err(|err| ProviderError::Configuration(err.to_string()))?;
-        Ok((result.binary_path, result.model_path))
     }
 
     fn build_prompt(request: &CompletionRequest) -> String {
@@ -160,82 +139,41 @@ impl LiteRtLmProvider {
         format!("{}:\n{}", role, message.text())
     }
 
-    fn build_args(&self, prompt: &str, model_path: &Path) -> Vec<String> {
-        vec![
-            "--backend".to_string(),
-            self.backend.clone(),
-            "--model_path".to_string(),
-            model_path.to_string_lossy().to_string(),
-            "--input_prompt".to_string(),
-            prompt.to_string(),
-        ]
+    async fn ensure_manager(&self) -> Result<Arc<LitManager>, ProviderError> {
+        self.manager
+            .get_or_try_init(|| async {
+                LitManager::new()
+                    .await
+                    .map(Arc::new)
+                    .map_err(|err| ProviderError::Configuration(err.to_string()))
+            })
+            .await
+            .map(Arc::clone)
     }
 
-    async fn run_prompt(
-        &self,
-        prompt: &str,
-        model_path: &Path,
-        binary_path: &Path,
-    ) -> Result<String, ProviderError> {
-        let mut command = Command::new(binary_path);
-        command
-            .args(self.build_args(prompt, model_path))
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+    async fn ensure_model_ready(&self, manager: Arc<LitManager>) -> Result<(), ProviderError> {
+        let source = self.model_source.clone();
+        let alias = if source == self.runtime_model_name {
+            None
+        } else {
+            Some(self.runtime_model_name.clone())
+        };
 
-        let timeout = std::time::Duration::from_secs(self.config.timeout_seconds.unwrap_or(120));
-        let output = tokio::time::timeout(timeout, command.output())
+        self.model_ready
+            .get_or_try_init(|| async move {
+                manager
+                    .ensure_model(&source, alias.as_deref())
+                    .await
+                    .map_err(|err| ProviderError::Configuration(err.to_string()))
+            })
             .await
-            .map_err(|_| {
-                ProviderError::Timeout(format!(
-                    "LiteRT-LM command timed out after {} seconds",
-                    timeout.as_secs()
-                ))
-            })?
-            .map_err(|err| {
-                if err.kind() == std::io::ErrorKind::NotFound {
-                    ProviderError::Configuration(format!(
-                        "LiteRT-LM binary not found: {}",
-                        binary_path.display()
-                    ))
-                } else {
-                    ProviderError::Unknown(format!("Failed to run LiteRT-LM binary: {}", err))
-                }
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let details = if stderr.is_empty() {
-                stdout
-            } else if stdout.is_empty() {
-                stderr
-            } else {
-                format!("{}; {}", stderr, stdout)
-            };
-            return Err(ProviderError::Unknown(format!(
-                "LiteRT-LM command failed with status {}: {}",
-                output.status, details
-            )));
-        }
-
-        let stdout = String::from_utf8(output.stdout).map_err(|err| {
-            ProviderError::Serialization(format!("LiteRT-LM output was not valid UTF-8: {}", err))
-        })?;
-        let stdout = stdout.trim().to_string();
-
-        if stdout.is_empty() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            if !stderr.is_empty() {
-                return Ok(stderr);
-            }
-        }
-
-        Ok(stdout)
+            .map(|_| ())
     }
 
     pub fn supported_models() -> Vec<String> {
         vec![
+            "gemma-4-e2b-it".to_string(),
+            "gemma-4-e4b-it".to_string(),
             "gemma3-1b".to_string(),
             "gemma-3n-e2b".to_string(),
             "gemma-3n-e4b".to_string(),
@@ -265,8 +203,22 @@ impl LLMProvider for LiteRtLmProvider {
         request: CompletionRequest,
     ) -> Result<CompletionResponse, ProviderError> {
         let prompt = Self::build_prompt(&request);
-        let (binary_path, model_path) = self.ensure_runtime().await?;
-        let content = self.run_prompt(&prompt, &model_path, &binary_path).await?;
+        let manager = self.ensure_manager().await?;
+        self.ensure_model_ready(Arc::clone(&manager)).await?;
+
+        let timeout = std::time::Duration::from_secs(self.config.timeout_seconds.unwrap_or(120));
+        let content = tokio::time::timeout(
+            timeout,
+            manager.run_completion(&self.runtime_model_name, &prompt),
+        )
+        .await
+        .map_err(|_| {
+            ProviderError::Timeout(format!(
+                "LiteRT-LM completion timed out after {} seconds",
+                timeout.as_secs()
+            ))
+        })?
+        .map_err(|err| ProviderError::Unknown(err.to_string()))?;
 
         Ok(CompletionResponse {
             content,
@@ -282,8 +234,19 @@ impl LLMProvider for LiteRtLmProvider {
         &self,
         request: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>, ProviderError> {
-        let response = self.complete(request).await?;
-        let stream = futures::stream::iter(vec![Ok(SSEEvent::text(response.content))]);
+        let prompt = Self::build_prompt(&request);
+        let manager = self.ensure_manager().await?;
+        self.ensure_model_ready(Arc::clone(&manager)).await?;
+
+        let stream = manager
+            .run_completion_stream(&self.runtime_model_name, &prompt)
+            .await
+            .map_err(|err| ProviderError::Unknown(err.to_string()))?
+            .map(|chunk| match chunk {
+                Ok(text) => Ok(SSEEvent::text(text)),
+                Err(err) => Err(ProviderError::Unknown(err.to_string())),
+            });
+
         Ok(Box::pin(stream))
     }
 
@@ -331,11 +294,25 @@ mod tests {
             content: "done".into(),
         };
 
-        assert_eq!(LiteRtLmProvider::format_message(&message), "Tool bash:\ndone");
+        assert_eq!(
+            LiteRtLmProvider::format_message(&message),
+            "Tool bash:\ndone"
+        );
     }
 
     #[test]
     fn slug_model_name_normalizes_delimiters() {
-        assert_eq!(LiteRtLmProvider::slug_model_name("Gemma 3n_E4B"), "gemma-3n-e4b");
+        assert_eq!(
+            LiteRtLmProvider::slug_model_name("Gemma 3n_E4B"),
+            "gemma-3n-e4b"
+        );
+    }
+
+    #[test]
+    fn runtime_model_name_for_urls_uses_filename_stem() {
+        assert_eq!(
+            LiteRtLmProvider::runtime_model_name_for("https://example.com/models/foo.litertlm"),
+            "foo"
+        );
     }
 }

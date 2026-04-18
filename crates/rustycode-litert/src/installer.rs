@@ -56,7 +56,7 @@ pub fn default_litert_lm_install_dir() -> PathBuf {
         .join(DEFAULT_VERSION)
 }
 
-pub fn default_litert_lm_binary_url() -> String {
+pub fn default_litert_lm_binary_url() -> Result<String> {
     let arch = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "macos-arm64"
     } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
@@ -68,22 +68,28 @@ pub fn default_litert_lm_binary_url() -> String {
     } else if cfg!(target_os = "windows") {
         "windows-x64"
     } else {
-        "macos-arm64" // fallback
+        anyhow::bail!(
+            "Unsupported platform: {}/{}. Supported: macOS (arm64/x64), Linux (arm64/x64), Windows (x64)",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
     };
 
-    format!(
+    Ok(format!(
         "https://github.com/luengnat/LiteRT-LM/releases/download/{}/litert-lm-{}-{}.tar.gz",
         DEFAULT_VERSION,
         DEFAULT_VERSION.trim_start_matches('v'),
         arch
-    )
+    ))
 }
 
 impl Default for LiteRtLmInstallConfig {
     fn default() -> Self {
+        let binary_url =
+            default_litert_lm_binary_url().expect("LiteRT-LM is not supported on this platform");
         Self {
             version: DEFAULT_VERSION.to_string(),
-            binary_url: default_litert_lm_binary_url(),
+            binary_url,
             model_url: default_gemma_e4b_model_url(),
             install_dir: default_litert_lm_install_dir(),
             binary_filename: DEFAULT_BINARY_FILENAME.to_string(),

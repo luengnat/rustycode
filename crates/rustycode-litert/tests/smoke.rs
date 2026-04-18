@@ -23,9 +23,10 @@ async fn litert_runtime_can_install_and_generate() {
     let install_dir = unique_temp_dir();
     let config = LiteRtLmInstallConfig {
         version: "v0.10.2".to_string(),
-        binary_url: default_litert_lm_binary_url(),
-        model_url: "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm"
-            .to_string(),
+        binary_url: default_litert_lm_binary_url().expect("unsupported platform"),
+        model_url:
+            "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm"
+                .to_string(),
         install_dir,
         binary_filename: "litert_lm_main".to_string(),
         model_filename: "Qwen3-0.6B.litertlm".to_string(),
