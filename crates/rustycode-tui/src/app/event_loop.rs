@@ -967,6 +967,70 @@ impl TUI {
         }
     }
 
+    /// Check for tmux compatibility and add warning messages if needed
+    pub(crate) fn check_tmux_compatibility(&mut self) {
+        if std::env::var("TMUX").is_err() {
+            return;
+        }
+
+        use std::process::Command;
+
+        // Check escape-time
+        let escape_time = Command::new("tmux")
+            .args(["show-options", "-gv", "escape-time"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| s.trim().parse::<u32>().ok());
+
+        if let Some(et) = escape_time {
+            if et > 50 {
+                self.add_system_message(format!(
+                    "⚠️ High tmux escape-time detected ({}ms). ESC key may feel sluggish. Recommend: set -sg escape-time 0",
+                    et
+                ));
+            }
+        }
+
+        // Check mouse support
+        let mouse = Command::new("tmux")
+            .args(["show-options", "-gv", "mouse"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim() == "on");
+
+        if let Some(false) = mouse {
+            self.add_system_message(
+                "⚠️ Tmux mouse support is off. Scrolling may not work. Recommend: set -g mouse on"
+                    .to_string(),
+            );
+        }
+
+        // Check focus-events
+        let focus_events = Command::new("tmux")
+            .args(["show-options", "-gv", "focus-events"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim() == "on");
+
+        if let Some(false) = focus_events {
+            self.add_system_message(
+                "⚠️ Tmux focus-events is off. TUI may not detect when you switch windows. Recommend: set -g focus-events on"
+                    .to_string(),
+            );
+        }
+
+        // Check for Ctrl+B clash
+        self.add_system_message(
+            "💡 Inside tmux: Use Ctrl+L as an alternative to Ctrl+B for toggling the sidebar."
+                .to_string(),
+        );
+
+        self.dirty = true;
+    }
+
     /// Run the TUI main loop
     pub fn run(&mut self) -> Result<()> {
         // Install panic hook FIRST - before any terminal operations
@@ -1066,6 +1130,9 @@ impl TUI {
                 self.dirty = true;
             }
         }
+
+        // Check for tmux compatibility issues
+        self.check_tmux_compatibility();
 
         self.event_loop(&mut terminal, shutdown_rx)?;
 
@@ -1241,22 +1308,29 @@ impl TUI {
     pub(crate) fn handle_bracketed_paste(&mut self, content: &str) -> Result<()> {
         use crate::ui::input_state::InputMode;
 
-        // Check if content has newlines - if so, switch to multiline
-        if content.contains('\n') {
+        if content.is_empty() {
+            return Ok(());
+        }
+
+        // Check if content has newlines - if so, ensure we are in multiline mode
+        // (but don't force it if it's already multiline)
+        if content.contains('\n') && self.input_handler.state.mode == InputMode::SingleLine {
             self.input_handler.state.mode = InputMode::MultiLine;
         }
 
-        // Insert the pasted content at cursor position
-        let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
         let state = &mut self.input_handler.state;
 
+        // Split content into lines, preserving empty lines
+        let lines: Vec<&str> = content.split('\n').collect();
+
         if lines.len() == 1 {
-            // Single line paste
-            if let Some(current_line) = state.lines.get_mut(state.cursor_row) {
-                let before = &current_line[..current_line.len().min(state.cursor_col)];
-                let after = &current_line[state.cursor_col.min(current_line.len())..];
-                *current_line = format!("{}{}{}", before, lines[0], after);
-                state.cursor_col += lines[0].len();
+            // Single line paste - just insert the string
+            let text = lines[0];
+            if state.cursor_row < state.lines.len() {
+                let current_line = &mut state.lines[state.cursor_row];
+                let cursor_col = state.cursor_col.min(current_line.len());
+                current_line.insert_str(cursor_col, text);
+                state.cursor_col += text.len();
             }
         } else {
             // Multiline paste
@@ -1265,26 +1339,26 @@ impl TUI {
                 let before = state.lines[state.cursor_row][..cursor_col].to_string();
                 let after = state.lines[state.cursor_row][cursor_col..].to_string();
 
-                // Replace current line with first pasted line
+                // Replace current line with "before" + first pasted line
                 state.lines[state.cursor_row] = format!("{}{}", before, lines[0]);
 
-                // Insert remaining lines
-                for (i, line) in lines.iter().skip(1).enumerate() {
-                    if i == lines.len() - 2 {
-                        // Last line: append the "after" content
-                        state
-                            .lines
-                            .insert(state.cursor_row + 1 + i, format!("{}{}", line, after));
-                    } else {
-                        state.lines.insert(state.cursor_row + 1 + i, line.clone());
-                    }
+                // Insert middle lines
+                #[allow(clippy::needless_range_loop)]
+                for i in 1..lines.len() - 1 {
+                    state.lines.insert(state.cursor_row + i, lines[i].to_string());
                 }
 
+                // Last line: last pasted part + "after"
+                let last_idx = lines.len() - 1;
+                let last_pasted_part = lines[last_idx];
+                state.lines.insert(
+                    state.cursor_row + last_idx,
+                    format!("{}{}", last_pasted_part, after),
+                );
+
                 // Move cursor to end of pasted content
-                state.cursor_row += lines.len() - 1;
-                if let Some(last_line) = lines.last() {
-                    state.cursor_col = last_line.len();
-                }
+                state.cursor_row += last_idx;
+                state.cursor_col = last_pasted_part.len();
             }
         }
 

@@ -418,10 +418,10 @@ impl TUI {
             }
             (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
                 // Ctrl+L: When input has text, clear it (readline convention).
-                // When input is empty, force screen redraw (terminal convention).
-                let input_empty = self.input_handler.state.lines.len() == 1
-                    && self.input_handler.state.lines[0].is_empty();
+                // When input is empty, toggle sidebar (tmux alternative for Ctrl+B).
+                let input_empty = self.input_handler.state.is_empty();
                 if input_empty {
+                    self.handle_sidebar_toggle();
                     self.message_renderer.invalidate_cache();
                     self.dirty = true;
                 } else {

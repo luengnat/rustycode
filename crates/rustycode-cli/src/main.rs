@@ -331,12 +331,17 @@ async fn async_main() -> Result<()> {
 
         Command::Doctor => {
             let report = runtime.doctor(&cwd).await?;
-            println!("{}", serde_json::to_string_pretty(&report)?);
+            // Redact API keys before printing
+            let mut json = serde_json::to_value(&report)?;
+            if let Some(config) = json.get_mut("config") {
+                *config = runtime.config().redacted_for_display();
+            }
+            println!("{}", serde_json::to_string_pretty(&json)?);
         }
         Command::Config {
             command: ConfigCommand::Show,
         } => {
-            println!("{}", serde_json::to_string_pretty(runtime.config())?);
+            println!("{}", serde_json::to_string_pretty(&runtime.config().redacted_for_display())?);
         }
         Command::Config {
             command: ConfigCommand::Get { key },
@@ -344,7 +349,7 @@ async fn async_main() -> Result<()> {
             let config = runtime.config();
             let value = match key.as_str() {
                 "model" => serde_json::json!(config.model).to_string(),
-                "provider" => serde_json::json!(config.providers).to_string(),
+                "provider" => serde_json::json!(config.redacted_for_display().get("providers")).to_string(),
                 "log_level" => serde_json::json!(config.advanced.log_level).to_string(),
                 "telemetry_enabled" => {
                     serde_json::json!(config.advanced.telemetry_enabled).to_string()
@@ -646,8 +651,20 @@ async fn async_main() -> Result<()> {
             command: SessionsCommand::Show { id },
         } => {
             let session_id = SessionId::parse(&id)?;
+            // Check if session exists first
+            let sessions = runtime.recent_sessions(1000).await?;
+            let found = sessions.iter().find(|s| s.id == session_id);
+            if found.is_none() {
+                eprintln!("Session not found: {}", id);
+                std::process::exit(1);
+            }
+            let session = found.unwrap();
             let events = runtime.session_events(&session_id).await?;
-            println!("{}", serde_json::to_string_pretty(&events)?);
+            let output = serde_json::json!({
+                "session": session,
+                "events": events,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Command::Events {
             command:

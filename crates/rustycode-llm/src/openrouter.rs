@@ -26,7 +26,7 @@ use crate::provider_metadata::{
 };
 use crate::provider_v2::{
     CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError, StreamChunk,
-    Usage,
+    Usage, build_openai_response_format,
 };
 use crate::retry::extract_retry_after_ms;
 use secrecy::ExposeSecret;
@@ -50,6 +50,8 @@ struct OpenRouterRequest {
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -359,6 +361,7 @@ impl LLMProvider for OpenRouterProvider {
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             stream: Some(false),
+            response_format: build_openai_response_format(&request.output_config),
         };
 
         // Build request with per-request headers
@@ -519,6 +522,7 @@ impl LLMProvider for OpenRouterProvider {
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             stream: Some(true),
+            response_format: build_openai_response_format(&request.output_config),
         };
 
         // Build request with per-request headers

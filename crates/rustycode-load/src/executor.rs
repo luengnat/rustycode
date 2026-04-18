@@ -206,8 +206,11 @@ impl LoadTestRunner {
         let ramp_up_delay = match &scenario.ramp_up {
             RampUpStrategy::Immediate => Duration::ZERO,
             RampUpStrategy::Linear { duration } => {
-                let delay_per_user = *duration / scenario.concurrent_users as u32;
-                delay_per_user * user_id as u32
+                // Use nanosecond arithmetic to avoid Duration */u32 panic on overflow
+                let users = scenario.concurrent_users.max(1) as u64;
+                let delay_ns = duration.as_nanos() as u64 / users;
+                let total_ns = delay_ns.saturating_mul(user_id as u64);
+                Duration::from_nanos(total_ns)
             }
             RampUpStrategy::Stepped {
                 steps,
@@ -215,7 +218,10 @@ impl LoadTestRunner {
             } => {
                 let users_per_step = scenario.concurrent_users.div_ceil(*steps);
                 let step = user_id / users_per_step;
-                *step_duration * step as u32
+                // Use nanosecond arithmetic to avoid Duration * u32 panic on overflow
+                let step_ns = step_duration.as_nanos() as u64;
+                let total_ns = step_ns.saturating_mul(step as u64);
+                Duration::from_nanos(total_ns)
             }
         };
 

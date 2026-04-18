@@ -4,7 +4,7 @@ use crate::provider_metadata::{
 };
 use crate::provider_v2::{
     CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError, StreamChunk,
-    Usage,
+    Usage, build_openai_response_format,
 };
 use crate::retry::extract_retry_after_ms;
 use anyhow::Result;
@@ -30,6 +30,8 @@ struct ZhipuRequest {
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -293,6 +295,7 @@ impl LLMProvider for ZhipuProvider {
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             tools: request.tools.map(|t| serde_json::json!(t)),
+            response_format: build_openai_response_format(&request.output_config),
         };
         let req = self
             .client
@@ -394,6 +397,7 @@ impl LLMProvider for ZhipuProvider {
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             tools: request.tools.map(|t| serde_json::json!(t)),
+            response_format: build_openai_response_format(&request.output_config),
         };
         let req = self
             .client

@@ -119,7 +119,7 @@ pub struct OutputFormat {
     pub format_type: OutputFormatType,
     /// JSON Schema for structured output validation
     /// Only used when format_type is JsonSchema
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "schema", skip_serializing_if = "Option::is_none")]
     pub json_schema: Option<serde_json::Value>,
 }
 
@@ -139,6 +139,40 @@ impl OutputFormat {
 pub enum OutputFormatType {
     /// JSON schema structured output
     JsonSchema,
+}
+
+/// Build an OpenAI-compatible `response_format` JSON value from an `OutputConfig`.
+pub fn build_openai_response_format(output_config: &Option<OutputConfig>) -> Option<serde_json::Value> {
+    let oc = output_config.as_ref()?;
+    let format = oc.format.as_ref()?;
+    match format.format_type {
+        OutputFormatType::JsonSchema => {
+            let schema = format.json_schema.clone().unwrap_or(serde_json::Value::Null);
+            Some(serde_json::json!({
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_output",
+                    "strict": true,
+                    "schema": schema
+                }
+            }))
+        }
+    }
+}
+
+/// Build a Gemini-compatible response schema from an `OutputConfig`.
+pub fn build_gemini_response_schema(output_config: &Option<OutputConfig>) -> Option<serde_json::Value> {
+    let oc = output_config.as_ref()?;
+    let format = oc.format.as_ref()?;
+    match format.format_type {
+        OutputFormatType::JsonSchema => {
+            let schema = format.json_schema.clone().unwrap_or(serde_json::Value::Null);
+            Some(serde_json::json!({
+                "responseMimeType": "application/json",
+                "responseSchema": schema
+            }))
+        }
+    }
 }
 
 /// Display mode for thinking blocks
@@ -1505,7 +1539,7 @@ mod tests {
         assert!(value.get("format").is_some());
         let format = &value["format"];
         assert_eq!(format["type"], "json_schema");
-        assert!(format.get("json_schema").is_some());
+        assert!(format.get("schema").is_some());
     }
 
     #[test]

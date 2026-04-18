@@ -474,7 +474,8 @@ impl TUI {
             },
             Ok(CrosstermEvent::Resize(width, height)) => {
                 self.message_renderer.invalidate_cache();
-                self.scroll_offset_line = 0;
+                // Don't reset scroll_offset_line to 0, let it stay where it was
+                // and it will be clamped during next render if necessary.
                 self.dismiss_any_overlay();
                 self.dirty = true;
                 tracing::debug!("Terminal resized to {}x{}", width, height);

@@ -93,36 +93,43 @@ fn test_enter_key_creates_newline_in_multiline_mode() {
 }
 
 #[test]
-fn test_shift_enter_submits_in_multiline_mode() {
+fn test_shift_enter_inserts_newline_in_multiline_mode() {
     let mut handler = InputHandler::new();
 
     // Switch to multi-line mode
     handler.state.mode = rustycode_tui::ui::input_state::InputMode::MultiLine;
 
-    // Type two lines
+    // Type some text
     handler.state.insert_char('L');
     handler.state.insert_char('i');
     handler.state.insert_char('n');
     handler.state.insert_char('e');
-    handler.state.insert_newline();
+    handler.state.insert_char('1');
+
+    // Press Shift+Enter — should insert newline, not send
+    let action = handler.handle_key_event(KeyCode::Enter, KeyModifiers::SHIFT);
+    assert!(
+        matches!(action, InputAction::Consumed),
+        "Shift+Enter should insert newline in multi-line mode, not send"
+    );
+
+    // Continue typing on new line
     handler.state.insert_char('L');
     handler.state.insert_char('i');
     handler.state.insert_char('n');
     handler.state.insert_char('e');
     handler.state.insert_char('2');
 
-    // Press Shift+Enter
-    let action = handler.handle_key_event(KeyCode::Enter, KeyModifiers::SHIFT);
-
-    // Should send the message with all lines
+    // Now Ctrl+Enter should send
+    let action = handler.handle_key_event(KeyCode::Enter, KeyModifiers::CONTROL);
     assert!(
         matches!(action, InputAction::SendMessage(_)),
-        "Shift+Enter should send message in multi-line mode"
+        "Ctrl+Enter should send message in multi-line mode"
     );
 
     if let InputAction::SendMessage(lines) = action {
         assert_eq!(lines.len(), 2, "Should have two lines");
-        assert_eq!(lines[0], "Line", "First line should match");
+        assert_eq!(lines[0], "Line1", "First line should match");
         assert_eq!(lines[1], "Line2", "Second line should match");
     }
 }

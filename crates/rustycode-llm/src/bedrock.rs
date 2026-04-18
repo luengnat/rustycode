@@ -20,6 +20,7 @@
 use crate::provider_metadata::{ConfigField, ConfigFieldType, ConfigSchema, ProviderMetadata};
 use crate::provider_v2::{
     CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError, StreamChunk,
+    OutputConfig,
 };
 use crate::retry::{extract_retry_after_ms, retry_with_backoff, RetryConfig};
 use anyhow::{Context, Result};
@@ -45,6 +46,8 @@ struct BedrockRequest {
     system: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     anthropic_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_config: Option<OutputConfig>,
 }
 
 #[derive(Serialize)]
@@ -264,7 +267,7 @@ impl BedrockProvider {
     }
 
     async fn complete_internal(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
-        let _url = format!("{}/model/converse", self.endpoint());
+        let url = format!("{}/model/converse", self.endpoint());
 
         let anthropic_version = Self::anthropic_version(&request.model);
 
@@ -285,11 +288,12 @@ impl BedrockProvider {
             temperature: request.temperature.unwrap_or(0.7),
             system: request.system_prompt.clone(),
             anthropic_version,
+            output_config: request.output_config.clone(),
         };
 
         let response = self
             .client
-            .post(&_url)
+            .post(&url)
             .json(&request_body)
             .send()
             .await
@@ -340,12 +344,10 @@ impl BedrockProvider {
         &self,
         request: &CompletionRequest,
     ) -> Result<CompletionResponse, ProviderError> {
-        // This is the v2 API version that returns ProviderError
-        let _url = format!("{}/model/converse", self.endpoint());
+        let url = format!("{}/model/converse", self.endpoint());
 
         let anthropic_version = Self::anthropic_version(&request.model);
 
-        // Convert messages to Bedrock format
         let bedrock_messages: Vec<BedrockMessage> = request
             .messages
             .iter()
@@ -362,11 +364,12 @@ impl BedrockProvider {
             temperature: request.temperature.unwrap_or(0.7),
             system: request.system_prompt.clone(),
             anthropic_version,
+            output_config: request.output_config.clone(),
         };
 
         let response = self
             .client
-            .post(&_url)
+            .post(&url)
             .json(&request_body)
             .send()
             .await
@@ -542,6 +545,7 @@ impl LLMProvider for BedrockProvider {
             temperature: request.temperature.unwrap_or(0.7),
             system: request.system_prompt.clone(),
             anthropic_version,
+            output_config: request.output_config.clone(),
         };
 
         let response = self

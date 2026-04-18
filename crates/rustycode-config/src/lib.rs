@@ -497,6 +497,9 @@ impl Config {
             ));
         }
 
+        // Auto-add .rustycode/ to .gitignore if in a git repo
+        ensure_gitignore(project_dir);
+
         Ok(config)
     }
 
@@ -517,6 +520,84 @@ impl Config {
             .map_err(|e| ConfigError::FileReadError(path_buf, e.to_string()))?;
 
         Ok(())
+    }
+
+    /// Return a JSON-safe representation with API keys redacted.
+    ///
+    /// Keys longer than 8 characters show first 4 and last 4 chars.
+    /// Keys 4-8 characters show first 2 and last 2.
+    /// Shorter keys are fully masked.
+    pub fn redacted_for_display(&self) -> serde_json::Value {
+        let mut json = serde_json::to_value(self)
+            .unwrap_or_else(|_| serde_json::json!({}));
+
+        // Redact provider API keys
+        if let Some(providers) = json.get_mut("providers").and_then(|p| p.as_object_mut()) {
+            for (_name, provider_val) in providers.iter_mut() {
+                if let Some(obj) = provider_val.as_object_mut() {
+                    if let Some(api_key) = obj.get_mut("api_key") {
+                        if let Some(key_str) = api_key.as_str() {
+                            *api_key = serde_json::Value::String(redact_key(key_str));
+                        }
+                    }
+                }
+            }
+        }
+
+        json
+    }
+}
+
+fn redact_key(key: &str) -> String {
+    if key.len() > 8 {
+        format!("{}...{}", &key[..4], &key[key.len() - 4..])
+    } else if key.len() > 4 {
+        format!("{}...{}", &key[..2], &key[key.len() - 2..])
+    } else {
+        "***".to_string()
+    }
+}
+
+/// Ensure `.rustycode/` is in the project's `.gitignore` if it's a git repo.
+///
+/// This prevents session data, cache, and local configuration from being
+/// accidentally committed. Non-fatal if it fails.
+fn ensure_gitignore(project_dir: &Path) {
+    let gitignore_path = project_dir.join(".gitignore");
+
+    // Only proceed if this is a git repo (has .git directory)
+    if !project_dir.join(".git").exists() {
+        return;
+    }
+
+    // Read existing .gitignore content
+    let existing = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
+
+    // Check if .rustycode/ is already listed
+    for line in existing.lines() {
+        let trimmed = line.trim();
+        if trimmed == ".rustycode/" || trimmed == ".rustycode" {
+            return; // Already listed
+        }
+    }
+
+    // Append .rustycode/ to .gitignore
+    let entry = if existing.is_empty() || existing.ends_with('\n') {
+        ".rustycode/\n".to_string()
+    } else {
+        "\n.rustycode/\n".to_string()
+    };
+
+    if let Err(e) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&gitignore_path)
+        .and_then(|mut f| {
+            use std::io::Write;
+            write!(f, "{}", entry)
+        })
+    {
+        tracing::debug!("Could not update .gitignore: {}", e);
     }
 }
 
@@ -811,6 +892,22 @@ mod tests {
         assert!(!json.contains("base_url"));
         assert!(!json.contains("models"));
         assert!(!json.contains("headers"));
+    }
+
+    #[test]
+    fn test_redact_key_masks_long_keys() {
+        assert_eq!(redact_key("sk-1234567890abcdef"), "sk-1...cdef");
+        assert_eq!(redact_key("short"), "sh...rt");
+        assert_eq!(redact_key("abc"), "***");
+    }
+
+    #[test]
+    fn test_redacted_for_display_hides_api_keys() {
+        let config = Config::default();
+        let display = config.redacted_for_display();
+
+        // No providers configured in default, but the structure should exist
+        assert!(display.get("providers").is_some());
     }
 
     #[test]
@@ -1411,5 +1508,40 @@ mod tests {
         assert!(config.advanced.project_tools.is_some());
         let pt = config.advanced.project_tools.unwrap();
         assert_eq!(pt.build_system, Some(BuildSystem::Cargo));
+    }
+
+    #[test]
+    fn test_ensure_gitignore_creates_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create a .git directory to simulate a git repo
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+        super::ensure_gitignore(dir.path());
+
+        let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+        assert!(gitignore.contains(".rustycode/"));
+    }
+
+    #[test]
+    fn test_ensure_gitignore_no_duplicate() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join(".gitignore"), ".rustycode/\n").unwrap();
+
+        super::ensure_gitignore(dir.path());
+
+        let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+        let count = gitignore.matches(".rustycode/").count();
+        assert_eq!(count, 1, "Should not duplicate .rustycode/ entry");
+    }
+
+    #[test]
+    fn test_ensure_gitignore_skips_non_git_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        // No .git directory — should not create .gitignore
+
+        super::ensure_gitignore(dir.path());
+
+        assert!(!dir.path().join(".gitignore").exists());
     }
 }

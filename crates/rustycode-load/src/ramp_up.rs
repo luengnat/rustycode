@@ -59,7 +59,12 @@ impl RampUpStrategy {
             RampUpStrategy::Stepped {
                 steps,
                 step_duration,
-            } => Some(*step_duration * *steps as u32),
+            } => {
+                // Use nanosecond arithmetic to avoid Duration * u32 panic on overflow
+                let total_ns = step_duration.as_nanos() as u64;
+                let total_ns = total_ns.saturating_mul(*steps as u64);
+                Some(Duration::from_nanos(total_ns))
+            }
         }
     }
 
@@ -208,5 +213,25 @@ mod tests {
         let strategy = RampUpStrategy::stepped(2, Duration::from_secs(5));
         // Past all steps, should be capped at total
         assert_eq!(strategy.active_users(10, Duration::from_secs(100)), 10);
+    }
+
+    #[test]
+    fn test_stepped_duration_does_not_overflow() {
+        // Previously: step_duration * steps as u32 could panic on overflow
+        // Now uses saturating nanosecond arithmetic
+        let strategy = RampUpStrategy::stepped(
+            1_000_000,
+            Duration::from_secs(3600),
+        );
+        let duration = strategy.duration(100);
+        assert!(duration.is_some());
+        // Should not panic — saturates instead
+        assert!(duration.unwrap() > Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn test_stepped_duration_normal() {
+        let strategy = RampUpStrategy::stepped(5, Duration::from_secs(10));
+        assert_eq!(strategy.duration(100), Some(Duration::from_secs(50)));
     }
 }

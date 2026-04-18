@@ -720,11 +720,15 @@ pub struct VerificationState {
 }
 
 /// Summary of test results.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TestSummary {
+    #[serde(default)]
     pub total: usize,
+    #[serde(default)]
     pub passed: usize,
+    #[serde(default)]
     pub failed: usize,
+    #[serde(default)]
     pub failed_names: Vec<String>,
 }
 
@@ -1162,17 +1166,21 @@ impl fmt::Display for TeamRole {
 /// This is the token-efficient way to communicate "what changed" between
 /// agents. The skeptic sees the summary + hunk (not the full file), and the
 /// judge sees only paths + line counts.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FileChange {
     /// Path relative to project root.
     pub path: String,
     /// One-line human summary: "added fn validate_jwt()", "fixed null check on line 42".
+    #[serde(default)]
     pub summary: String,
     /// Unified diff hunk — only changed lines with ±3 lines of context.
+    #[serde(default)]
     pub diff_hunk: String,
     /// Lines added (approximate, from diff).
+    #[serde(default)]
     pub lines_added: usize,
     /// Lines removed (approximate, from diff).
+    #[serde(default)]
     pub lines_removed: usize,
 }
 
@@ -1185,17 +1193,22 @@ pub struct FileChange {
 ///
 /// The builder's *reasoning* goes to disk (`.rustycode/session/{id}/reasoning/`),
 /// NOT into the context of other agents.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BuilderTurn {
     /// What approach was taken, in one line.
+    #[serde(default)]
     pub approach: String,
     /// Files changed, with summaries and diff hunks.
+    #[serde(default)]
     pub changes: Vec<FileChange>,
     /// What the builder claims to have accomplished.
+    #[serde(default)]
     pub claims: Vec<String>,
     /// Confidence level 0.0–1.0.
+    #[serde(default = "default_confidence")]
     pub confidence: f64,
     /// Whether the builder considers the task done.
+    #[serde(default)]
     pub done: bool,
     /// Optional: request escalation to another phase (e.g., "Architect", "SecurityReview").
     /// Set when Builder encounters structural uncertainty or security-sensitive changes.
@@ -1232,7 +1245,7 @@ impl BuilderTurn {
 }
 
 /// A claim the skeptic refuted, with evidence.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RefutedClaim {
     /// The original claim.
     pub claim: String,
@@ -1245,15 +1258,19 @@ pub struct RefutedClaim {
 /// The skeptic reviews the builder's claims and diffs, NOT the builder's
 /// reasoning. This prevents the skeptic from being influenced by the
 /// builder's confidence or argumentation style.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SkepticTurn {
     /// Overall verdict.
+    #[serde(default)]
     pub verdict: SkepticVerdict,
     /// Claims verified against the actual code.
+    #[serde(default)]
     pub verified: Vec<String>,
     /// Claims refuted with evidence from disk.
+    #[serde(default)]
     pub refuted: Vec<RefutedClaim>,
     /// New insights discovered during review.
+    #[serde(default)]
     pub insights: Vec<String>,
 }
 
@@ -1261,29 +1278,36 @@ pub struct SkepticTurn {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
+#[derive(Default)]
 pub enum SkepticVerdict {
     /// Claims verified, code looks correct.
     Approve,
     /// Some claims need revision, but no hallucination.
+    #[default]
     NeedsWork,
     /// Hallucination or critical issue detected — hard stop.
     Veto,
 }
+
 
 /// Judge's structured response — empirical results only.
 ///
 /// The judge doesn't read claims or opinions. It runs tests and compilation
 /// and reports facts. This is the ground truth that the coordinator uses to
 /// decide progress.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct JudgeTurn {
     /// Does the code compile?
+    #[serde(default)]
     pub compiles: bool,
     /// Test results.
+    #[serde(default)]
     pub tests: TestSummary,
     /// Files that were modified since last judge run.
+    #[serde(default)]
     pub dirty_files: Vec<String>,
     /// Compilation errors (if any), truncated to first 10 lines.
+    #[serde(default)]
     pub compile_errors: Vec<String>,
 }
 
@@ -1295,18 +1319,19 @@ pub struct JudgeTurn {
 ///
 /// Once produced, the Builder may only touch declared modules using declared deps.
 /// The Skeptic enforces structural compliance. The Scalpel is exempt (targeted fixes only).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct StructuralDeclaration {
     /// Modules to create or modify, with explicit exports and imports.
     pub modules: Vec<ModuleDeclaration>,
     /// Traits/interfaces shared across modules — defined once, used everywhere.
     pub interfaces: Vec<InterfaceDeclaration>,
     /// Cargo.toml dependency changes — decided before any code is written.
+    #[serde(default)]
     pub dependencies: DependencyChanges,
 }
 
 /// A single module the Builder will create or modify.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ModuleDeclaration {
     /// Relative path from crate root, e.g. "src/team/architect.rs"
     pub path: String,
@@ -1321,15 +1346,16 @@ pub struct ModuleDeclaration {
 }
 
 /// Whether the Architect is creating a new module or modifying an existing one.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum ModuleAction {
+    #[default]
     Create,
     Modify,
 }
 
 /// A trait/interface shared across module boundaries.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct InterfaceDeclaration {
     /// Trait name.
     pub name: String,
@@ -1342,7 +1368,7 @@ pub struct InterfaceDeclaration {
 }
 
 /// Cargo dependency decisions — resolved before Builder touches any code.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct DependencyChanges {
     /// New crates to add (name + version or features).
     pub add: Vec<DependencySpec>,
@@ -1353,7 +1379,7 @@ pub struct DependencyChanges {
 }
 
 /// A new dependency to add.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct DependencySpec {
     pub name: String,
     pub version: String,
@@ -1362,27 +1388,32 @@ pub struct DependencySpec {
 }
 
 /// The Architect's structured output turn.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ArchitectTurn {
     /// The binding structural declaration.
+    #[serde(default)]
     pub declaration: StructuralDeclaration,
     /// Why this structure was chosen.
+    #[serde(default)]
     pub rationale: String,
     /// Architect's confidence in the declaration (0.0–1.0).
+    #[serde(default = "default_confidence")]
     pub confidence: f64,
 }
 
 /// The Scalpel's structured output turn — targeted fixes only, no redesign.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScalpelTurn {
     /// Specific fixes applied.
+    #[serde(default)]
     pub fixes: Vec<ScalpelFix>,
     /// Whether all targeted failures are resolved.
+    #[serde(default)]
     pub done: bool,
 }
 
 /// A single targeted fix by the Scalpel.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScalpelFix {
     /// File that was fixed.
     pub file: String,
@@ -1703,6 +1734,10 @@ impl RoleBriefing {
 
         self
     }
+}
+
+fn default_confidence() -> f64 {
+    0.5
 }
 
 #[cfg(test)]

@@ -35,7 +35,7 @@ use crate::provider_metadata::{
 };
 use crate::provider_v2::{
     CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError, StreamChunk,
-    Usage,
+    Usage, build_openai_response_format,
 };
 use crate::retry::extract_retry_after_ms;
 use anyhow::Result;
@@ -55,6 +55,8 @@ struct CopilotRequest {
     temperature: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -353,6 +355,7 @@ impl LLMProvider for CopilotProvider {
             messages: copilot_messages,
             temperature: request.temperature.unwrap_or(0.7),
             max_tokens: request.max_tokens,
+            response_format: build_openai_response_format(&request.output_config),
         };
 
         let response = self
@@ -466,6 +469,7 @@ impl LLMProvider for CopilotProvider {
             messages: copilot_messages,
             temperature: request.temperature.unwrap_or(0.7),
             max_tokens: request.max_tokens,
+            response_format: build_openai_response_format(&request.output_config),
         };
 
         let response = self
@@ -648,6 +652,7 @@ mod tests {
             }],
             temperature: 0.7,
             max_tokens: Some(2048),
+            response_format: None,
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"model\":\"gpt-4o-copilot\""));
@@ -661,6 +666,7 @@ mod tests {
             messages: vec![],
             temperature: 0.5,
             max_tokens: None,
+            response_format: None,
         };
         let json = serde_json::to_string(&request).unwrap();
         // max_tokens should be absent when None

@@ -42,11 +42,27 @@ pub(crate) mod prompts {
         prompt.push_str("You are the **Builder** agent in a multi-agent coding team.\n\n");
         prompt.push_str("## Your Job\n");
         prompt.push_str("Implement the current plan step by writing code changes.\n\n");
+        prompt.push_str("## Tools\n");
+        prompt.push_str(
+            "You have tools available: read_file, write_file, bash, grep, glob. USE THEM.\n",
+        );
+        prompt.push_str("Do NOT just describe what you would do — actually read files, write files, and run commands.\n\n");
+        prompt.push_str("## Workflow\n");
+        prompt.push_str("1. read_file existing code to understand the current state\n");
+        prompt.push_str("2. write_file to create or modify files\n");
+        prompt.push_str("3. bash to run build/test commands and verify your changes\n");
+        prompt.push_str("4. Iterate: if tests fail, read errors, fix, and re-run\n");
+        prompt.push_str(
+            "5. When done, respond with the Final Output Format below (no more tool calls)\n\n",
+        );
         prompt.push_str("## Current Step Context\n");
         prompt.push_str(step_context);
         prompt.push_str("\n\n");
-        prompt.push_str("## Output Format\n");
-        prompt.push_str("Respond with a JSON object matching this schema:\n");
+        prompt.push_str("## Final Output Format\n");
+        prompt.push_str(
+            "When you have finished all tool calls and your code is working, respond with ONLY\n",
+        );
+        prompt.push_str("a JSON object matching this schema (no more tool calls after this):\n");
         prompt.push_str("```json\n");
         prompt.push_str("{\n");
         prompt.push_str("  \"approach\": \"one-line description\",\n");
@@ -61,8 +77,9 @@ pub(crate) mod prompts {
         prompt.push_str("## Rules\n");
         prompt.push_str("- Make minimal changes for the current step only\n");
         prompt.push_str("- Include error handling for anything that can fail\n");
-        prompt.push_str("- Claims must be verifiable\n");
+        prompt.push_str("- Claims must be verifiable — run tests to verify before claiming done\n");
         prompt.push_str("- Set done: true ONLY when ALL plan steps are complete\n");
+        prompt.push_str("- ACTUALLY USE the tools. Write files. Run commands. Do not just plan.\n");
         prompt
     }
 
@@ -74,17 +91,28 @@ pub(crate) mod prompts {
         prompt.push_str(
             "Check for bugs, missing error handling, security issues, hallucinations.\n\n",
         );
+        prompt.push_str("## Tools\n");
+        prompt.push_str(
+            "You have tools: read_file, grep, glob. Use them to actually read the files\n",
+        );
+        prompt.push_str("the Builder modified. Do NOT approve claims you haven't verified.\n\n");
+        prompt.push_str("## Workflow\n");
+        prompt.push_str("1. Read each file the Builder claims to have modified\n");
+        prompt.push_str("2. Verify each claim against the actual code\n");
+        prompt.push_str("3. Check for bugs, security issues, missing error handling\n");
+        prompt.push_str("4. Respond with your verdict\n\n");
         prompt.push_str("## Current Step Context\n");
         prompt.push_str(step_context);
         prompt.push_str("\n\n");
-        prompt.push_str("## Output Format\n");
-        prompt.push_str("Respond with a JSON object:\n");
+        prompt.push_str("## Final Output Format\n");
+        prompt.push_str("Respond with a JSON object (no more tool calls):\n");
         prompt.push_str("{\"verdict\": \"approve|needs_work|veto\", ");
         prompt.push_str("\"verified\": [...], \"refuted\": [...], \"insights\": [...]}\n\n");
         prompt.push_str("## Rules\n");
         prompt.push_str("- approve: All claims verified, code is correct\n");
         prompt.push_str("- needs_work: Some claims wrong or code has issues\n");
         prompt.push_str("- veto: Hallucination or critical security bug\n");
+        prompt.push_str("- ALWAYS read the actual files before approving\n");
         prompt
     }
 
@@ -122,15 +150,22 @@ pub(crate) mod prompts {
         prompt.push_str("You are the **Judge** agent in a multi-agent coding team.\n\n");
         prompt.push_str("## Your Job\n");
         prompt.push_str("Verify changes by running compilation and tests. Report only facts.\n\n");
+        prompt.push_str("## Tools\n");
+        prompt
+            .push_str("You have tools: bash, read_file. Use bash to run build/test commands.\n\n");
+        prompt.push_str("## Workflow\n");
+        prompt.push_str("1. Run `cargo check` (or equivalent build command) via bash\n");
+        prompt.push_str("2. Run `cargo test` (or equivalent test command) via bash\n");
+        prompt.push_str("3. Report results as facts\n\n");
         prompt.push_str("## Current Step Context\n");
         prompt.push_str(step_context);
         prompt.push_str("\n\n");
-        prompt.push_str("## Output Format\n");
-        prompt.push_str("Respond with JSON: ");
+        prompt.push_str("## Final Output Format\n");
+        prompt.push_str("Respond with JSON (no more tool calls):\n");
         prompt.push_str("{\"compiles\": bool, \"tests\": TestSummary, ");
         prompt.push_str("\"dirty_files\": [...], \"compile_errors\": [...]}\n\n");
         prompt.push_str("## Rules\n");
-        prompt.push_str("- Run cargo check and cargo test\n");
+        prompt.push_str("- Run actual commands, do not guess\n");
         prompt.push_str("- Report facts, not opinions\n");
         prompt
     }
@@ -149,11 +184,20 @@ pub(crate) mod prompts {
         prompt.push_str(
             "You do NOT redesign or refactor — you make minimal fixes exactly where broken.\n\n",
         );
+        prompt.push_str("## Tools\n");
+        prompt.push_str("You have tools: read_file, write_file, bash. USE THEM.\n");
+        prompt.push_str("Read the broken file, fix it, verify it compiles.\n\n");
+        prompt.push_str("## Workflow\n");
+        prompt.push_str("1. read_file the file with the error\n");
+        prompt.push_str("2. write_file to apply the fix\n");
+        prompt.push_str("3. bash to verify the fix compiles\n");
+        prompt.push_str("4. If still broken, iterate (max 3 attempts)\n");
+        prompt.push_str("5. Respond with Final Output Format when done\n\n");
         prompt.push_str("## Current Step Context\n");
         prompt.push_str(step_context);
         prompt.push_str("\n\n");
-        prompt.push_str("## Output Format\n");
-        prompt.push_str("Respond with a JSON object matching this schema:\n");
+        prompt.push_str("## Final Output Format\n");
+        prompt.push_str("Respond with a JSON object (no more tool calls):\n");
         prompt.push_str("```json\n");
         prompt.push_str("{\n");
         prompt.push_str("  \"approach\": \"one-line description of the fix\",\n");
@@ -170,6 +214,7 @@ pub(crate) mod prompts {
         prompt.push_str("- Make one precise edit per failure, maximum 5 lines changed per file\n");
         prompt.push_str("- Never introduce new dependencies\n");
         prompt.push_str("- Always set done: true (you complete your fix in one turn)\n");
+        prompt.push_str("- Verify your fix compiles before responding\n");
         prompt
     }
 
@@ -182,11 +227,19 @@ pub(crate) mod prompts {
         prompt.push_str(
             "all subsequent Builder work. You have READ-ONLY access — you never write code.\n\n",
         );
+        prompt.push_str("## Tools\n");
+        prompt.push_str("You have tools: read_file, grep, glob, lsp_references, lsp_hover.\n");
+        prompt.push_str("Use them to explore the codebase before making declarations.\n\n");
+        prompt.push_str("## Workflow\n");
+        prompt.push_str("1. glob to discover project structure\n");
+        prompt.push_str("2. read_file key files to understand patterns\n");
+        prompt.push_str("3. grep for interfaces and dependencies\n");
+        prompt.push_str("4. Respond with structural declaration\n\n");
         prompt.push_str("## Current Step Context\n");
         prompt.push_str(step_context);
         prompt.push_str("\n\n");
-        prompt.push_str("## Output Format\n");
-        prompt.push_str("Respond with a JSON object matching this schema:\n");
+        prompt.push_str("## Final Output Format\n");
+        prompt.push_str("Respond with a JSON object (no more tool calls):\n");
         prompt.push_str("```json\n");
         prompt.push_str("{\n");
         prompt.push_str("  \"declaration\": {\n");

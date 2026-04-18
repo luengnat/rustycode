@@ -114,9 +114,18 @@ impl LoadScenario {
 
     /// Calculate total number of requests to execute
     pub fn estimate_total_requests(&self) -> usize {
-        let requests_per_second = 1000.0 / self.think_time.as_millis() as f64;
+        let think_ms = self.think_time.as_millis() as f64;
+        if think_ms <= 0.0 {
+            return 0;
+        }
+        let requests_per_second = 1000.0 / think_ms;
         let total_seconds = self.duration.as_secs_f64();
-        (requests_per_second * total_seconds * self.concurrent_users as f64) as usize
+        let total = requests_per_second * total_seconds * self.concurrent_users as f64;
+        if total >= usize::MAX as f64 {
+            usize::MAX
+        } else {
+            total as usize
+        }
     }
 }
 

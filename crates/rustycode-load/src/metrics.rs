@@ -185,7 +185,11 @@ impl ResponseTimeMetrics {
 
         let count = self.samples.len();
         let sum: Duration = self.samples.iter().sum();
-        self.mean = sum / count as u32;
+        if count > 0 {
+            // Use nanosecond arithmetic to avoid Duration / u32 panic on large counts
+            let mean_ns = (sum.as_nanos() as u64) / count as u64;
+            self.mean = Duration::from_nanos(mean_ns);
+        }
 
         // Calculate percentiles
         self.p50 = self.percentile(0.50);
@@ -684,5 +688,19 @@ mod tests {
             "average should be ~10s, got {}ms",
             avg_ms
         );
+    }
+
+    #[test]
+    fn test_response_time_metrics_finalize_large_sample_count() {
+        // Verify that finalize() does not panic with many samples
+        // (tests the Duration / count as u32 fix — uses nanosecond arithmetic)
+        let mut metrics = ResponseTimeMetrics::default();
+        for _ in 0..100_000 {
+            metrics.add_sample(Duration::from_millis(10));
+        }
+        metrics.finalize();
+        assert_eq!(metrics.min, Duration::from_millis(10));
+        assert_eq!(metrics.max, Duration::from_millis(10));
+        assert!(metrics.mean <= Duration::from_millis(11));
     }
 }

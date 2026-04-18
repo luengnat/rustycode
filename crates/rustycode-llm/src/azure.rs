@@ -30,7 +30,7 @@
 use crate::provider_metadata::{ConfigField, ConfigFieldType, ConfigSchema, ProviderMetadata};
 use crate::provider_v2::{
     CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError, StreamChunk,
-    Usage,
+    Usage, build_openai_response_format,
 };
 use crate::retry::extract_retry_after_ms;
 use async_trait::async_trait;
@@ -51,6 +51,8 @@ struct AzureRequest {
     temperature: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -299,6 +301,7 @@ impl AzureProvider {
             max_tokens: request.max_tokens.unwrap_or(4096),
             temperature: request.temperature.unwrap_or(0.7),
             stream: Some(false),
+            response_format: build_openai_response_format(&request.output_config),
         };
 
         let response = self
@@ -430,6 +433,7 @@ impl LLMProvider for AzureProvider {
             max_tokens: 1,
             temperature: 0.0,
             stream: Some(false),
+            response_format: None,
         };
 
         let response = self
@@ -512,7 +516,8 @@ impl LLMProvider for AzureProvider {
         let body = serde_json::json!({
             "messages": messages,
             "temperature": request.temperature.unwrap_or(0.7),
-            "stream": true
+            "stream": true,
+            "response_format": build_openai_response_format(&request.output_config),
         });
 
         let response = self
@@ -730,6 +735,7 @@ mod tests {
             max_tokens: 1024,
             temperature: 0.5,
             stream: Some(true),
+            response_format: None,
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"max_tokens\":1024"));

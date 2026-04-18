@@ -634,6 +634,48 @@ pub struct Storage {
     conn: Arc<StdMutex<Connection>>,
 }
 
+/// Statistics about the database contents and size.
+#[derive(Debug, Clone)]
+pub struct DatabaseStats {
+    /// Total number of sessions.
+    pub session_count: i64,
+    /// Total number of events.
+    pub event_count: i64,
+    /// Total number of API call records.
+    pub api_call_count: i64,
+    /// Total number of hook execution records.
+    pub hook_execution_count: i64,
+    /// Total number of checkpoint records.
+    pub checkpoint_count: i64,
+    /// Database file size in bytes.
+    pub db_size_bytes: u64,
+    /// Date of the oldest session, if any.
+    pub oldest_session: Option<String>,
+    /// Date of the most recent session, if any.
+    pub newest_session: Option<String>,
+}
+
+/// Statistics returned by cleanup operations.
+#[derive(Debug, Clone, Default)]
+pub struct CleanupStats {
+    /// Number of sessions removed.
+    pub sessions_removed: u64,
+    /// Number of events removed.
+    pub events_removed: u64,
+    /// Number of API call records removed.
+    pub api_calls_removed: u64,
+    /// Number of hook execution records removed.
+    pub hook_executions_removed: u64,
+    /// Number of checkpoint records removed.
+    pub checkpoints_removed: u64,
+    /// Number of rewind snapshots removed.
+    pub rewind_snapshots_removed: u64,
+    /// Number of session snapshots removed.
+    pub snapshots_removed: u64,
+    /// Number of FTS entries removed.
+    pub fts_entries_removed: u64,
+}
+
 impl Storage {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
@@ -1755,9 +1797,261 @@ impl Storage {
 
         Ok(())
     }
-}
 
-/// A single search hit from conversation search.
+    // ── Database Cleanup & Maintenance ─────────────────────────────────────────
+
+    /// Get statistics about the database.
+    pub fn db_stats(&self) -> Result<DatabaseStats> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+
+        let session_count: i64 = conn
+            .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+            .unwrap_or(0);
+        let event_count: i64 = conn
+            .query_row("SELECT count(*) FROM events", [], |row| row.get(0))
+            .unwrap_or(0);
+        let api_call_count: i64 = conn
+            .query_row("SELECT count(*) FROM api_calls", [], |row| row.get(0))
+            .unwrap_or(0);
+        let hook_execution_count: i64 = conn
+            .query_row("SELECT count(*) FROM hook_executions", [], |row| row.get(0))
+            .unwrap_or(0);
+        let checkpoint_count: i64 = conn
+            .query_row("SELECT count(*) FROM checkpoints", [], |row| row.get(0))
+            .unwrap_or(0);
+
+        let oldest_session: Option<String> = conn
+            .query_row(
+                "SELECT created_at FROM sessions ORDER BY created_at ASC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+        let newest_session: Option<String> = conn
+            .query_row(
+                "SELECT created_at FROM sessions ORDER BY created_at DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let db_size_bytes = conn
+            .query_row("PRAGMA page_count", [], |row| row.get::<_, i64>(0))
+            .ok()
+            .zip(
+                conn.query_row("PRAGMA page_size", [], |row| row.get::<_, i64>(0))
+                    .ok(),
+            )
+            .map(|(pages, size)| (pages as u64) * (size as u64))
+            .unwrap_or(0);
+
+        Ok(DatabaseStats {
+            session_count,
+            event_count,
+            api_call_count,
+            hook_execution_count,
+            checkpoint_count,
+            db_size_bytes,
+            oldest_session,
+            newest_session,
+        })
+    }
+
+    /// Remove sessions older than `max_age_days` and all related data.
+    ///
+    /// Tables with `ON DELETE CASCADE` (checkpoints, rewind_snapshots,
+    /// hook_executions, api_calls) are cleaned automatically when their
+    /// parent session is deleted. The `events` table lacks cascade, so
+    /// it is cleaned explicitly.
+    pub fn cleanup_old_sessions(&self, max_age_days: u64) -> Result<CleanupStats> {
+        let max_days_i64 = i64::try_from(max_age_days).unwrap_or(i64::MAX);
+        let cutoff = Utc::now()
+            - chrono::Duration::try_days(max_days_i64)
+                .unwrap_or_else(|| chrono::Duration::days(i64::MAX));
+
+        let cutoff_str = cutoff.to_rfc3339();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Find sessions to delete
+        let old_session_ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM sessions WHERE created_at < ?1")?;
+            let rows = stmt.query_map(params![cutoff_str], |row| row.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        if old_session_ids.is_empty() {
+            return Ok(CleanupStats::default());
+        }
+
+        let mut stats = CleanupStats::default();
+
+        for sid in &old_session_ids {
+            // Count related records for stats before deletion
+            stats.events_removed += u64::try_from(
+                conn.query_row(
+                    "SELECT count(*) FROM events WHERE session_id = ?1",
+                    params![sid],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0),
+            )
+            .unwrap_or(0);
+            stats.api_calls_removed += u64::try_from(
+                conn.query_row(
+                    "SELECT count(*) FROM api_calls WHERE session_id = ?1",
+                    params![sid],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0),
+            )
+            .unwrap_or(0);
+            stats.hook_executions_removed += u64::try_from(
+                conn.query_row(
+                    "SELECT count(*) FROM hook_executions WHERE session_id = ?1",
+                    params![sid],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0),
+            )
+            .unwrap_or(0);
+            stats.checkpoints_removed += u64::try_from(
+                conn.query_row(
+                    "SELECT count(*) FROM checkpoints WHERE session_id = ?1",
+                    params![sid],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0),
+            )
+            .unwrap_or(0);
+            stats.rewind_snapshots_removed += u64::try_from(
+                conn.query_row(
+                    "SELECT count(*) FROM rewind_snapshots WHERE session_id = ?1",
+                    params![sid],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0),
+            )
+            .unwrap_or(0);
+            stats.snapshots_removed += u64::try_from(
+                conn.query_row(
+                    "SELECT count(*) FROM session_snapshots WHERE session_id = ?1",
+                    params![sid],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0),
+            )
+            .unwrap_or(0);
+
+            // Delete events explicitly (no cascade)
+            conn.execute("DELETE FROM events WHERE session_id = ?1", params![sid])?;
+
+            // Delete FTS entries explicitly (may not exist, ignore error)
+            let fts_removed = conn
+                .execute(
+                    "DELETE FROM conversation_fts WHERE session_id = ?1",
+                    params![sid],
+                )
+                .unwrap_or(0);
+            stats.fts_entries_removed += u64::try_from(fts_removed).unwrap_or(0);
+
+            // Delete session snapshots explicitly (no FK cascade)
+            conn.execute(
+                "DELETE FROM session_snapshots WHERE session_id = ?1",
+                params![sid],
+            )?;
+
+            // Delete session (cascades to checkpoints, rewind_snapshots, hook_executions, api_calls)
+            conn.execute("DELETE FROM sessions WHERE id = ?1", params![sid])?;
+            stats.sessions_removed += 1;
+        }
+
+        Ok(stats)
+    }
+
+    /// Remove ALL sessions and related data.
+    pub fn cleanup_all_sessions(&self) -> Result<CleanupStats> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+
+        let stats = CleanupStats {
+            sessions_removed: u64::try_from(
+                conn.query_row("SELECT count(*) FROM sessions", [], |row| row.get::<_, i64>(0))
+                    .unwrap_or(0),
+            )
+            .unwrap_or(0),
+            events_removed: u64::try_from(
+                conn.query_row("SELECT count(*) FROM events", [], |row| row.get::<_, i64>(0))
+                    .unwrap_or(0),
+            )
+            .unwrap_or(0),
+            api_calls_removed: u64::try_from(
+                conn.query_row("SELECT count(*) FROM api_calls", [], |row| row.get::<_, i64>(0))
+                    .unwrap_or(0),
+            )
+            .unwrap_or(0),
+            hook_executions_removed: u64::try_from(
+                conn.query_row("SELECT count(*) FROM hook_executions", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap_or(0),
+            )
+            .unwrap_or(0),
+            checkpoints_removed: u64::try_from(
+                conn.query_row("SELECT count(*) FROM checkpoints", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap_or(0),
+            )
+            .unwrap_or(0),
+            rewind_snapshots_removed: u64::try_from(
+                conn.query_row("SELECT count(*) FROM rewind_snapshots", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap_or(0),
+            )
+            .unwrap_or(0),
+            snapshots_removed: u64::try_from(
+                conn.query_row("SELECT count(*) FROM session_snapshots", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap_or(0),
+            )
+            .unwrap_or(0),
+            fts_entries_removed: 0,
+        };
+
+        // Delete from all tables (order matters for FK constraints)
+        conn.execute("DELETE FROM events", [])?;
+        conn.execute("DELETE FROM conversation_fts", []).ok();
+        conn.execute("DELETE FROM session_snapshots", [])?;
+        conn.execute("DELETE FROM api_calls", [])?;
+        conn.execute("DELETE FROM hook_executions", [])?;
+        conn.execute("DELETE FROM rewind_snapshots", [])?;
+        conn.execute("DELETE FROM checkpoints", [])?;
+        conn.execute("DELETE FROM sessions", [])?;
+
+        Ok(stats)
+    }
+
+    /// Run `VACUUM` to reclaim disk space and defragment the database.
+    pub fn vacuum(&self) -> Result<()> {
+        self.conn
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .execute_batch("VACUUM")
+            .context("failed to vacuum database")?;
+        Ok(())
+    }
+
+    /// Remove orphaned events that reference sessions that no longer exist.
+    pub fn cleanup_orphaned_events(&self) -> Result<u64> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let removed = conn.execute(
+            "DELETE FROM events WHERE session_id NOT IN (SELECT id FROM sessions)",
+            [],
+        )?;
+        Ok(u64::try_from(removed).unwrap_or(0))
+    }
+}
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConversationSearchHit {
     /// Session ID where the match was found
@@ -3155,5 +3449,154 @@ mod tests {
 
         let recent = storage.recent_sessions(10).unwrap();
         assert_eq!(recent.len(), 2);
+    }
+
+    #[test]
+    fn test_db_stats_empty() {
+        let path = temp_db_path();
+        let storage = Storage::open(&path).unwrap();
+        let stats = storage.db_stats().unwrap();
+
+        assert_eq!(stats.session_count, 0);
+        assert_eq!(stats.event_count, 0);
+        assert_eq!(stats.api_call_count, 0);
+        assert!(stats.oldest_session.is_none());
+        assert!(stats.newest_session.is_none());
+    }
+
+    #[test]
+    fn test_db_stats_with_data() {
+        let path = temp_db_path();
+        let storage = Storage::open(&path).unwrap();
+
+        let session = make_session("stats test");
+        storage.insert_session(&session).unwrap();
+        storage
+            .insert_event(&SessionEvent {
+                session_id: session.id.clone(),
+                at: Utc::now(),
+                kind: EventKind::SessionStarted,
+                detail: "test".to_string(),
+            })
+            .unwrap();
+
+        let stats = storage.db_stats().unwrap();
+        assert_eq!(stats.session_count, 1);
+        assert_eq!(stats.event_count, 1);
+        assert!(stats.oldest_session.is_some());
+        assert!(stats.newest_session.is_some());
+    }
+
+    #[test]
+    fn test_cleanup_old_sessions_removes_nothing_when_all_recent() {
+        let path = temp_db_path();
+        let storage = Storage::open(&path).unwrap();
+
+        let session = make_session("recent task");
+        storage.insert_session(&session).unwrap();
+
+        // Cleanup sessions older than 365 days — nothing should be removed
+        let stats = storage.cleanup_old_sessions(365).unwrap();
+        assert_eq!(stats.sessions_removed, 0);
+
+        // Session should still be there
+        assert!(storage.load_session(&session.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn test_cleanup_all_sessions() {
+        let path = temp_db_path();
+        let storage = Storage::open(&path).unwrap();
+
+        // Insert sessions and events
+        let s1 = make_session("task one");
+        let s2 = make_session("task two");
+        storage.insert_session(&s1).unwrap();
+        storage.insert_session(&s2).unwrap();
+        storage
+            .insert_event(&SessionEvent {
+                session_id: s1.id.clone(),
+                at: Utc::now(),
+                kind: EventKind::SessionStarted,
+                detail: "event1".to_string(),
+            })
+            .unwrap();
+        storage
+            .insert_event(&SessionEvent {
+                session_id: s2.id.clone(),
+                at: Utc::now(),
+                kind: EventKind::SessionStarted,
+                detail: "event2".to_string(),
+            })
+            .unwrap();
+
+        let stats = storage.cleanup_all_sessions().unwrap();
+        assert_eq!(stats.sessions_removed, 2);
+        assert_eq!(stats.events_removed, 2);
+
+        // Verify everything is gone
+        let db_stats = storage.db_stats().unwrap();
+        assert_eq!(db_stats.session_count, 0);
+        assert_eq!(db_stats.event_count, 0);
+    }
+
+    #[test]
+    fn test_vuum_compacts_database() {
+        let path = temp_db_path();
+        let storage = Storage::open(&path).unwrap();
+
+        // Insert and delete data to create fragmentation
+        for i in 0..50 {
+            let session = make_session(&format!("task {}", i));
+            storage.insert_session(&session).unwrap();
+        }
+        storage.cleanup_all_sessions().unwrap();
+
+        let size_before = storage.db_stats().unwrap().db_size_bytes;
+
+        // Vacuum should succeed
+        storage.vacuum().unwrap();
+
+        let size_after = storage.db_stats().unwrap().db_size_bytes;
+        // After vacuum, the DB should be smaller or equal (pages reclaimed)
+        assert!(size_after <= size_before);
+    }
+
+    #[test]
+    fn test_cleanup_orphaned_events() {
+        let path = temp_db_path();
+        let storage = Storage::open(&path).unwrap();
+
+        // Insert a session and its event
+        let session = make_session("orphan test");
+        storage.insert_session(&session).unwrap();
+        storage
+            .insert_event(&SessionEvent {
+                session_id: session.id.clone(),
+                at: Utc::now(),
+                kind: EventKind::SessionStarted,
+                detail: "event".to_string(),
+            })
+            .unwrap();
+
+        // Insert an event for a session that doesn't exist
+        let fake_id = SessionId::new();
+        storage
+            .insert_event(&SessionEvent {
+                session_id: fake_id,
+                at: Utc::now(),
+                kind: EventKind::SessionStarted,
+                detail: "orphan event".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(storage.db_stats().unwrap().event_count, 2);
+
+        // Cleanup orphans
+        let removed = storage.cleanup_orphaned_events().unwrap();
+        assert_eq!(removed, 1);
+
+        // Only the real session's event should remain
+        assert_eq!(storage.db_stats().unwrap().event_count, 1);
     }
 }

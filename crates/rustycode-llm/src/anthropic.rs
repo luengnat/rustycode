@@ -2261,7 +2261,7 @@ mod tests {
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"output_config\""));
-        assert!(json.contains("\"json_schema\""));
+        assert!(json.contains("\"schema\""));
     }
 
     #[test]

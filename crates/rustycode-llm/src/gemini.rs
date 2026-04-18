@@ -40,7 +40,7 @@ use crate::provider_metadata::{
 };
 use crate::provider_v2::{
     ChatMessage, CompletionRequest, CompletionResponse, LLMProvider, MessageRole, ProviderConfig,
-    ProviderError, StreamChunk,
+    ProviderError, StreamChunk, build_gemini_response_schema,
 };
 use crate::retry::extract_retry_after_ms;
 use anyhow::{Context, Result};
@@ -80,6 +80,10 @@ struct GeminiGenerationConfig {
     temperature: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_schema: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -346,10 +350,12 @@ impl GeminiProvider {
     ) -> Result<CompletionResponse, ProviderError> {
         let url = self.endpoint(&request.model);
 
-        // Build request
+        let response_schema = build_gemini_response_schema(&request.output_config);
         let generation_config = GeminiGenerationConfig {
             temperature: request.temperature.unwrap_or(0.7),
             max_output_tokens: request.max_tokens,
+            response_mime_type: response_schema.as_ref().map(|_| "application/json".to_string()),
+            response_schema: response_schema.and_then(|v| v.get("responseSchema").cloned()),
         };
 
         let system_instruction =
@@ -498,9 +504,12 @@ impl LLMProvider for GeminiProvider {
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>, ProviderError> {
         let url = self.stream_endpoint(&request.model);
 
+        let response_schema = build_gemini_response_schema(&request.output_config);
         let generation_config = GeminiGenerationConfig {
             temperature: request.temperature.unwrap_or(0.7),
             max_output_tokens: request.max_tokens,
+            response_mime_type: response_schema.as_ref().map(|_| "application/json".to_string()),
+            response_schema: response_schema.and_then(|v| v.get("responseSchema").cloned()),
         };
 
         let system_instruction =
@@ -773,6 +782,8 @@ mod tests {
             generation_config: Some(GeminiGenerationConfig {
                 temperature: 0.5,
                 max_output_tokens: Some(1024),
+                response_mime_type: None,
+                response_schema: None,
             }),
             system_instruction: Some(GeminiSystemInstruction {
                 parts: vec![GeminiPart {

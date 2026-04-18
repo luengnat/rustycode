@@ -40,7 +40,7 @@ use crate::provider_metadata::{
 };
 use crate::provider_v2::{
     CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError, StreamChunk,
-    Usage,
+    Usage, build_openai_response_format,
 };
 
 // Import macros exported at crate root
@@ -63,6 +63,8 @@ struct TogetherRequest {
     messages: Vec<TogetherMessage>,
     max_tokens: u32,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -323,6 +325,7 @@ impl LLMProvider for TogetherProvider {
             messages,
             max_tokens: request.max_tokens.unwrap_or(4096),
             temperature: request.temperature.unwrap_or(0.7),
+            response_format: build_openai_response_format(&request.output_config),
         };
 
         // Build request with provider-specific headers

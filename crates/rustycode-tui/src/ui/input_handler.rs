@@ -135,6 +135,12 @@ impl InputHandler {
                 InputAction::Consumed
             }
 
+            (KeyCode::Enter, KeyModifiers::CONTROL) => {
+                // Ctrl+Enter: Send message in both modes (standard multi-line submit)
+                let lines: Vec<String> = self.state.lines.to_vec();
+                InputAction::SendMessage(lines)
+            }
+
             (KeyCode::Enter, KeyModifiers::NONE) => {
                 // Handle reverse search mode
                 if self.history.is_in_reverse_search() {

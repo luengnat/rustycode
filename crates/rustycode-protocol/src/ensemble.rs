@@ -1167,12 +1167,16 @@ pub struct FileChange {
     /// Path relative to project root.
     pub path: String,
     /// One-line human summary: "added fn validate_jwt()", "fixed null check on line 42".
+    #[serde(default)]
     pub summary: String,
     /// Unified diff hunk — only changed lines with ±3 lines of context.
+    #[serde(default)]
     pub diff_hunk: String,
     /// Lines added (approximate, from diff).
+    #[serde(default)]
     pub lines_added: usize,
     /// Lines removed (approximate, from diff).
+    #[serde(default)]
     pub lines_removed: usize,
 }
 
@@ -1188,14 +1192,19 @@ pub struct FileChange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuilderTurn {
     /// What approach was taken, in one line.
+    #[serde(default)]
     pub approach: String,
     /// Files changed, with summaries and diff hunks.
+    #[serde(default)]
     pub changes: Vec<FileChange>,
     /// What the builder claims to have accomplished.
+    #[serde(default)]
     pub claims: Vec<String>,
     /// Confidence level 0.0–1.0.
+    #[serde(default = "default_confidence")]
     pub confidence: f64,
     /// Whether the builder considers the task done.
+    #[serde(default)]
     pub done: bool,
     /// Optional: request escalation to another phase (e.g., "Architect", "SecurityReview").
     /// Set when Builder encounters structural uncertainty or security-sensitive changes.
@@ -1248,12 +1257,16 @@ pub struct RefutedClaim {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkepticTurn {
     /// Overall verdict.
+    #[serde(default = "default_skeptic_verdict")]
     pub verdict: SkepticVerdict,
     /// Claims verified against the actual code.
+    #[serde(default)]
     pub verified: Vec<String>,
     /// Claims refuted with evidence from disk.
+    #[serde(default)]
     pub refuted: Vec<RefutedClaim>,
     /// New insights discovered during review.
+    #[serde(default)]
     pub insights: Vec<String>,
 }
 
@@ -1278,12 +1291,16 @@ pub enum SkepticVerdict {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JudgeTurn {
     /// Does the code compile?
+    #[serde(default)]
     pub compiles: bool,
     /// Test results.
+    #[serde(default = "default_test_summary")]
     pub tests: TestSummary,
     /// Files that were modified since last judge run.
+    #[serde(default)]
     pub dirty_files: Vec<String>,
     /// Compilation errors (if any), truncated to first 10 lines.
+    #[serde(default)]
     pub compile_errors: Vec<String>,
 }
 
@@ -1361,14 +1378,116 @@ pub struct DependencySpec {
     pub reason: String,
 }
 
+// Default functions for serde(default) attributes
+
+fn default_confidence() -> f64 {
+    0.5
+}
+
+fn default_skeptic_verdict() -> SkepticVerdict {
+    SkepticVerdict::NeedsWork
+}
+
+fn default_test_summary() -> TestSummary {
+    TestSummary::default()
+}
+
+impl Default for TestSummary {
+    fn default() -> Self {
+        Self {
+            total: 0,
+            passed: 0,
+            failed: 0,
+            failed_names: vec![],
+        }
+    }
+}
+
+impl Default for BuilderTurn {
+    fn default() -> Self {
+        Self {
+            approach: String::new(),
+            changes: vec![],
+            claims: vec![],
+            confidence: 0.5,
+            done: false,
+            escalation: None,
+        }
+    }
+}
+
+impl Default for SkepticTurn {
+    fn default() -> Self {
+        Self {
+            verdict: SkepticVerdict::NeedsWork,
+            verified: vec![],
+            refuted: vec![],
+            insights: vec![],
+        }
+    }
+}
+
+impl Default for JudgeTurn {
+    fn default() -> Self {
+        Self {
+            compiles: false,
+            tests: TestSummary::default(),
+            dirty_files: vec![],
+            compile_errors: vec![],
+        }
+    }
+}
+
+impl Default for ArchitectTurn {
+    fn default() -> Self {
+        Self {
+            declaration: StructuralDeclaration::default(),
+            rationale: String::new(),
+            confidence: 0.5,
+        }
+    }
+}
+
+impl Default for ScalpelTurn {
+    fn default() -> Self {
+        Self {
+            fixes: vec![],
+            done: false,
+        }
+    }
+}
+
+impl Default for StructuralDeclaration {
+    fn default() -> Self {
+        Self {
+            modules: vec![],
+            interfaces: vec![],
+            dependencies: DependencyChanges::default(),
+        }
+    }
+}
+
+impl Default for DependencyChanges {
+    fn default() -> Self {
+        Self {
+            add: vec![],
+            remove: vec![],
+            keep: vec![],
+        }
+    }
+}
+
 /// The Architect's structured output turn.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArchitectTurn {
     /// The binding structural declaration.
+    #[serde(default)]
     pub declaration: StructuralDeclaration,
     /// Why this structure was chosen.
+    #[serde(default)]
     pub rationale: String,
     /// Architect's confidence in the declaration (0.0–1.0).
+    #[serde(default = "default_confidence")]
     pub confidence: f64,
 }
 
@@ -1376,8 +1495,10 @@ pub struct ArchitectTurn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScalpelTurn {
     /// Specific fixes applied.
+    #[serde(default)]
     pub fixes: Vec<ScalpelFix>,
     /// Whether all targeted failures are resolved.
+    #[serde(default)]
     pub done: bool,
 }
 
