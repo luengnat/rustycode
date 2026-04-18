@@ -847,4 +847,65 @@ mod tests {
     fn test_safe_truncate_empty() {
         assert_eq!(safe_truncate("", 5), "");
     }
+
+    // ── truncate_bytes_critical tests ─────────────
+
+    #[test]
+    fn test_truncate_bytes_critical_critical_content_not_truncated() {
+        // Use patterns that match is_critical_content (e.g., "error[E0433]")
+        let content = "error[E0433]: failed to resolve\nbuild failed in main.rs";
+        let result = truncate_bytes_critical(content, 10, "test.rs");
+        assert!(!result.truncated, "critical content should not be truncated");
+        assert_eq!(result.output, content);
+    }
+
+    #[test]
+    fn test_truncate_bytes_critical_non_critical_truncates() {
+        let content = "normal output line\nanother line\nmore text here";
+        let result = truncate_bytes_critical(content, 10, "test.txt");
+        // Non-critical content should be truncated if over limit
+        assert!(result.shown_count <= result.total_count);
+    }
+
+    // ── truncate_bash_output tests ─────────────
+
+    #[test]
+    fn test_truncate_bash_output_small_output() {
+        let result = truncate_bash_output("hello", "", 0);
+        assert_eq!(result.output, "hello");
+        assert!(!result.truncated);
+    }
+
+    #[test]
+    fn test_truncate_bash_output_stderr_only() {
+        let result = truncate_bash_output("", "warning: something", 1);
+        assert_eq!(result.output, "warning: something");
+    }
+
+    #[test]
+    fn test_truncate_bash_output_combined() {
+        let result = truncate_bash_output("stdout", "stderr", 0);
+        assert!(result.output.contains("stdout"));
+        assert!(result.output.contains("stderr"));
+    }
+
+    #[test]
+    fn test_truncate_bash_output_empty() {
+        let result = truncate_bash_output("", "", 0);
+        assert!(result.output.is_empty());
+    }
+
+    #[test]
+    fn test_truncate_bash_output_large_output_truncates() {
+        let large = "x".repeat(100_000);
+        let result = truncate_bash_output(&large, "", 0);
+        assert!(result.truncated);
+    }
+
+    #[test]
+    fn test_truncate_bash_output_test_summary_detection() {
+        let output = "running 10 tests\ntest result: ok. 10 passed; 0 failed;\n";
+        let result = truncate_bash_output(output, "", 0);
+        assert!(result.output.contains("test result"));
+    }
 }

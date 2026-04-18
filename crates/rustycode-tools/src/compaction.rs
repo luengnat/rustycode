@@ -428,9 +428,11 @@ impl Compactor {
 
         for msg in removed {
             if current_role.as_ref() != Some(&msg.role) {
-                if !current_content.is_empty() {
-                    parts.push(format!("{:?}", current_role.unwrap()));
-                    parts.push(current_content.clone());
+                if let Some(role) = current_role.take() {
+                    if !current_content.is_empty() {
+                        parts.push(format!("{:?}", role));
+                        parts.push(current_content.clone());
+                    }
                 }
                 current_role = Some(msg.role.clone());
                 current_content = msg.content.clone();
@@ -440,9 +442,11 @@ impl Compactor {
             }
         }
 
-        if !current_content.is_empty() {
-            parts.push(format!("{:?}", current_role.unwrap()));
-            parts.push(current_content);
+        if let Some(role) = current_role {
+            if !current_content.is_empty() {
+                parts.push(format!("{:?}", role));
+                parts.push(current_content);
+            }
         }
 
         // Truncate summary if too long
