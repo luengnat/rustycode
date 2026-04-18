@@ -496,6 +496,7 @@ pub mod predefined {
             alibaba_cn_models(),
             alibaba_global_models(),
             vertex_models(),
+            litert_lm_models(),
         ]
         .into_iter()
         .flatten()
@@ -759,6 +760,124 @@ pub mod predefined {
                     "Chat".to_string(),
                 ],
                 cost_tier: 2,
+            },
+        ]
+    }
+
+    /// LiteRT-LM local models
+    pub fn litert_lm_models() -> Vec<ModelInfo> {
+        vec![
+            ModelInfo {
+                id: "gemma-4-e2b-it".to_string(),
+                name: "Gemma 4 E2B (LiteRT-LM)".to_string(),
+                provider_id: "litert-lm".to_string(),
+                description: "Gemma 4 2B parameter instruction-tuned model for local inference".to_string(),
+                context_window: 8_192,
+                supports_tools: false,
+                supports_vision: false,
+                max_tokens: 4096,
+                input_cost_per_1k: 0.0,
+                output_cost_per_1k: 0.0,
+                use_cases: vec!["Local inference".to_string(), "Chat".to_string()],
+                cost_tier: 1,
+            },
+            ModelInfo {
+                id: "gemma-4-e4b-it".to_string(),
+                name: "Gemma 4 E4B (LiteRT-LM)".to_string(),
+                provider_id: "litert-lm".to_string(),
+                description: "Gemma 4 4B parameter instruction-tuned model, best quality for local inference".to_string(),
+                context_window: 8_192,
+                supports_tools: false,
+                supports_vision: false,
+                max_tokens: 4096,
+                input_cost_per_1k: 0.0,
+                output_cost_per_1k: 0.0,
+                use_cases: vec!["Local inference".to_string(), "Best local quality".to_string()],
+                cost_tier: 1,
+            },
+            ModelInfo {
+                id: "gemma3-1b".to_string(),
+                name: "Gemma 3 1B (LiteRT-LM)".to_string(),
+                provider_id: "litert-lm".to_string(),
+                description: "Lightweight Gemma 3 model for local inference".to_string(),
+                context_window: 8_192,
+                supports_tools: false,
+                supports_vision: false,
+                max_tokens: 4096,
+                input_cost_per_1k: 0.0,
+                output_cost_per_1k: 0.0,
+                use_cases: vec!["Local inference".to_string(), "Privacy".to_string()],
+                cost_tier: 1,
+            },
+            ModelInfo {
+                id: "gemma-3n-e2b".to_string(),
+                name: "Gemma 3N E2B (LiteRT-LM)".to_string(),
+                provider_id: "litert-lm".to_string(),
+                description: "Gemma 3N 2B parameter model for local inference".to_string(),
+                context_window: 8_192,
+                supports_tools: false,
+                supports_vision: false,
+                max_tokens: 4096,
+                input_cost_per_1k: 0.0,
+                output_cost_per_1k: 0.0,
+                use_cases: vec!["Local inference".to_string(), "Fast response".to_string()],
+                cost_tier: 1,
+            },
+            ModelInfo {
+                id: "gemma-3n-e4b".to_string(),
+                name: "Gemma 3N E4B (LiteRT-LM)".to_string(),
+                provider_id: "litert-lm".to_string(),
+                description: "Gemma 3N 4B parameter model for local inference".to_string(),
+                context_window: 8_192,
+                supports_tools: false,
+                supports_vision: false,
+                max_tokens: 4096,
+                input_cost_per_1k: 0.0,
+                output_cost_per_1k: 0.0,
+                use_cases: vec!["Local inference".to_string(), "Balanced quality".to_string()],
+                cost_tier: 1,
+            },
+            ModelInfo {
+                id: "phi-4-mini".to_string(),
+                name: "Phi-4 Mini (LiteRT-LM)".to_string(),
+                provider_id: "litert-lm".to_string(),
+                description: "Microsoft Phi-4 Mini for local inference".to_string(),
+                context_window: 8_192,
+                supports_tools: false,
+                supports_vision: false,
+                max_tokens: 4096,
+                input_cost_per_1k: 0.0,
+                output_cost_per_1k: 0.0,
+                use_cases: vec!["Local inference".to_string(), "Coding".to_string()],
+                cost_tier: 1,
+            },
+            ModelInfo {
+                id: "qwen2.5-1.5b".to_string(),
+                name: "Qwen 2.5 1.5B (LiteRT-LM)".to_string(),
+                provider_id: "litert-lm".to_string(),
+                description: "Alibaba Qwen 2.5 1.5B for local inference".to_string(),
+                context_window: 8_192,
+                supports_tools: false,
+                supports_vision: false,
+                max_tokens: 4096,
+                input_cost_per_1k: 0.0,
+                output_cost_per_1k: 0.0,
+                use_cases: vec!["Local inference".to_string(), "Multilingual".to_string()],
+                cost_tier: 1,
+            },
+            ModelInfo {
+                id: "functiongemma-270m".to_string(),
+                name: "FunctionGemma 270M (LiteRT-LM)".to_string(),
+                provider_id: "litert-lm".to_string(),
+                description: "Ultra-light function calling model for local inference".to_string(),
+                context_window: 4_096,
+                supports_tools: true,
+                supports_vision: false,
+                max_tokens: 2048,
+                input_cost_per_1k: 0.0,
+                output_cost_per_1k: 0.0,
+                use_cases: vec!["Function calling".to_string(), "Tool use".to_string()],
+                cost_tier: 1,
             },
         ]
     }
@@ -1365,5 +1484,21 @@ mod tests {
         for m in predefined::vertex_models() {
             assert_eq!(m.provider_id, "vertex");
         }
+    }
+
+    #[test]
+    fn test_predefined_litert_lm_models() {
+        let models = predefined::litert_lm_models();
+        assert_eq!(models.len(), 8);
+        assert!(models.iter().all(|m| m.provider_id == "litert-lm"));
+        assert!(models.iter().all(|m| m.is_free()));
+        assert!(models.iter().any(|m| m.id == "gemma-4-e2b-it"));
+        assert!(models.iter().any(|m| m.id == "gemma-4-e4b-it"));
+    }
+
+    #[test]
+    fn test_context_window_for_litert_lm_models() {
+        assert_eq!(predefined::context_window_for_model("gemma-4-e2b-it"), 8_192);
+        assert_eq!(predefined::context_window_for_model("gemma-4-e4b-it"), 8_192);
     }
 }

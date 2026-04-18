@@ -281,7 +281,7 @@ pub async fn stream_llm_response(config: StreamConfig) -> Result<()> {
     // Validate API key (skip for providers that don't require one)
     let needs_api_key = !matches!(
         provider_type.to_lowercase().as_str(),
-        "ollama" | "local" | "lmstudio"
+        "ollama" | "local" | "lmstudio" | "litert-lm" | "litert_lm" | "litert"
     );
     if needs_api_key && v2_config.api_key.is_none() {
         let _ = stream_tx.send(StreamChunk::Error(

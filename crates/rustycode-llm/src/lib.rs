@@ -638,13 +638,15 @@ pub fn create_provider_with_config(
             let provider = LiteRtLmProvider::new(v2_config, model.to_string())?;
             let boxed: Box<dyn LLMProvider> = Box::new(provider);
             std::sync::Arc::<dyn LLMProvider>::from(boxed)
-        },
+        }
         #[cfg(not(feature = "litert"))]
         "litert-lm" | "litert_lm" | "litert" => {
             return Err(ProviderError::Configuration(
-                "LiteRT-LM provider requires the 'litert' feature flag (needs C++ toolchain)".into(),
-            ).into());
-        },
+                "LiteRT-LM provider requires the 'litert' feature flag (needs C++ toolchain)"
+                    .into(),
+            )
+            .into());
+        }
         _ => match AnthropicProvider::new(v2_config.clone(), model.to_string()) {
             Ok(p) => std::sync::Arc::new(p),
             Err(e) => {

@@ -337,7 +337,10 @@ fn cross_provider_thinking_block() {
             // Thinking block is converted to text with thinking content
             let think_json = serde_json::to_value(&blocks[0]).unwrap();
             assert_eq!(think_json["type"], "text");
-            assert!(think_json["text"].as_str().unwrap().contains("Let me reason about this"));
+            assert!(think_json["text"]
+                .as_str()
+                .unwrap()
+                .contains("Let me reason about this"));
             // Text block works fine
             let text_json = serde_json::to_value(&blocks[1]).unwrap();
             assert_eq!(text_json["type"], "text");

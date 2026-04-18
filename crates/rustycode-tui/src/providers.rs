@@ -240,6 +240,44 @@ pub fn get_all_available_models() -> Vec<SelectorModelInfo> {
         }
     };
 
+    let add_litert_lm_models = |list: &mut Vec<SelectorModelInfo>| {
+        let models: Vec<(&str, &str, &str, usize)> = vec![
+            (
+                "gemma-4-e2b-it",
+                "Gemma 4 E2B (LiteRT-LM)",
+                "Gemma 4 2B local inference",
+                8192,
+            ),
+            (
+                "gemma-4-e4b-it",
+                "Gemma 4 E4B (LiteRT-LM)",
+                "Gemma 4 4B local inference",
+                8192,
+            ),
+            (
+                "gemma-3n-e4b",
+                "Gemma 3N E4B (LiteRT-LM)",
+                "Gemma 3N local inference",
+                8192,
+            ),
+            (
+                "phi-4-mini",
+                "Phi-4 Mini (LiteRT-LM)",
+                "Phi-4 local inference",
+                8192,
+            ),
+        ];
+        for (idx, (id, name, desc, ctx)) in models.into_iter().enumerate() {
+            list.push(
+                SelectorModelInfo::new(id, name, "litert-lm".to_string(), desc)
+                    .with_context_window(ctx)
+                    .with_costs(0.0, 0.0)
+                    .with_capabilities(vec!["local".to_string(), "free".to_string()])
+                    .with_shortcut(if idx < 4 { idx + 1 } else { 0 }),
+            );
+        }
+    };
+
     // Partition models by whether the provider has credentials
     for provider in &["anthropic", "openai", "gemini"] {
         let target = if provider_has_credentials(provider) {
@@ -252,6 +290,9 @@ pub fn get_all_available_models() -> Vec<SelectorModelInfo> {
 
     // Ollama always configured
     add_ollama_models(&mut configured);
+
+    // LiteRT-LM always available (local, no credentials needed)
+    add_litert_lm_models(&mut configured);
 
     // OpenRouter needs credentials check
     if provider_has_credentials("openrouter") {

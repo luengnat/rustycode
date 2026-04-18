@@ -136,7 +136,11 @@ impl ConversationService {
             .collect();
 
         // Sort by similarity (highest first)
-        all_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        all_results.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         all_results.truncate(TOP_N);
 
         // Record metrics

@@ -95,6 +95,14 @@ pub fn handle_model_command(parts: &[&str], _ctx: CommandContext<'_>) -> Result<
         "openrouter"
     } else if new_model.contains("copilot") {
         "copilot"
+    } else if new_model.contains("gemma-4")
+        || new_model.contains("gemma-3n")
+        || new_model.contains("gemma3-")
+        || new_model.contains("phi-4-mini")
+        || new_model.contains("qwen2.5")
+        || new_model.contains("functiongemma")
+    {
+        "litert-lm"
     } else {
         ""
     };
