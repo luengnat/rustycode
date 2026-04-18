@@ -163,7 +163,7 @@ impl TimeoutSupervisor {
 
         // Idle timeout check
         if idle > self.config.idle_timeout_secs {
-            if in_flight_tool_count > 0 && oldest_tool_age_secs <= self.config.idle_timeout_secs {
+            if in_flight_tool_count > 0 && oldest_tool_age_secs < self.config.idle_timeout_secs {
                 info!(
                     "⏱️  TOOL WAIT: {} has been idle for {}s but {} tool(s) are still running (oldest {}s)",
                     state.unit_id,
