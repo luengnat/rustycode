@@ -53,19 +53,15 @@ impl JsoncParser {
                                 let mut comment_depth = 1;
                                 while let Some(ch) = chars.next() {
                                     match ch {
-                                        '/' => {
-                                            if chars.peek() == Some(&'*') {
-                                                chars.next();
-                                                comment_depth += 1;
-                                            }
+                                        '/' if chars.peek() == Some(&'*') => {
+                                            chars.next();
+                                            comment_depth += 1;
                                         }
-                                        '*' => {
-                                            if chars.peek() == Some(&'/') {
-                                                chars.next();
-                                                comment_depth -= 1;
-                                                if comment_depth == 0 {
-                                                    break;
-                                                }
+                                        '*' if chars.peek() == Some(&'/') => {
+                                            chars.next();
+                                            comment_depth -= 1;
+                                            if comment_depth == 0 {
+                                                break;
                                             }
                                         }
                                         _ => {}
