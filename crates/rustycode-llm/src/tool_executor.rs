@@ -379,11 +379,21 @@ fn parse_tool_call_item(item: &Value) -> Option<ParsedToolCall> {
     }
 
     // Anthropic/flat format: {"name": "...", "arguments": {...}}
+    // Also handles: {"name": "...", "arguments": "{...}"} (string-encoded JSON)
     if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
-        let arguments = item
+        let raw_arguments = item
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| Value::Object(Default::default()));
+
+        // If arguments is a string, try to parse it as JSON
+        let arguments = match &raw_arguments {
+            Value::String(s) => {
+                serde_json::from_str::<Value>(s).unwrap_or(raw_arguments)
+            }
+            _ => raw_arguments,
+        };
+
         let id = item
             .get("id")
             .and_then(|i| i.as_str())
