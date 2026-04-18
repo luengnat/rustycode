@@ -2080,12 +2080,8 @@ impl TUI {
                 let x = (size.width.saturating_sub(panel_width)) / 2;
                 let y = (size.height.saturating_sub(panel_height)) / 2;
                 let panel_area = ratatui::layout::Rect::new(x, y, panel_width, panel_height);
-                
-                if let Some(ref session) = req.questionnaire {
-                    crate::ui::wizard_renderer::WizardRenderer::render(frame, panel_area, session);
-                } else {
-                    crate::tool_approval::render_approval_prompt(frame, panel_area, req);
-                }
+                // render_approval_prompt calls Clear internally
+                crate::tool_approval::render_approval_prompt(frame, panel_area, req);
             }
         }
 

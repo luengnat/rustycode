@@ -91,7 +91,7 @@ pub mod footer;
 pub mod fuzzy_matcher;
 
 // First-run configuration wizard
-pub mod wizard_renderer;
+pub mod wizard;
 
 // Tests
 pub mod tests;

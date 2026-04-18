@@ -388,9 +388,7 @@ fn parse_tool_call_item(item: &Value) -> Option<ParsedToolCall> {
 
         // If arguments is a string, try to parse it as JSON
         let arguments = match &raw_arguments {
-            Value::String(s) => {
-                serde_json::from_str::<Value>(s).unwrap_or(raw_arguments)
-            }
+            Value::String(s) => serde_json::from_str::<Value>(s).unwrap_or(raw_arguments),
             _ => raw_arguments,
         };
 

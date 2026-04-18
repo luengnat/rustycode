@@ -25,33 +25,6 @@ pub enum ApprovalState {
     RejectedAll,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ApprovalType {
-    Binary,
-    MultipleChoice { options: Vec<String> },
-    TextInput,
-}
-
-#[derive(Debug, Clone)]
-pub struct Question {
-    pub prompt: String,
-    pub approval_type: ApprovalType,
-}
-
-#[derive(Debug, Clone)]
-pub struct QuestionnaireDefinition {
-    pub title: String,
-    pub questions: Vec<Question>,
-}
-
-impl QuestionnaireSession {
-    pub fn answer(&mut self, ans: String) -> bool {
-        self.answers.push(ans);
-        self.current_step += 1;
-        self.current_step >= self.definition.questions.len()
-    }
-}
-
 /// Tool approval request
 #[derive(Debug, Clone)]
 pub struct ApprovalRequest {
@@ -61,8 +34,6 @@ pub struct ApprovalRequest {
     pub description: String,
     pub command: String,
     pub state: ApprovalState,
-    pub approval_type: ApprovalType,
-    pub questionnaire: Option<QuestionnaireSession>,
 }
 
 impl ApprovalRequest {
@@ -71,7 +42,6 @@ impl ApprovalRequest {
         tool_type: risk::ToolType,
         description: String,
         command: String,
-        approval_type: ApprovalType,
     ) -> Self {
         let risk_level = risk::classify_tool_risk(&tool_type, &command);
 
@@ -82,7 +52,6 @@ impl ApprovalRequest {
             description,
             command,
             state: ApprovalState::Pending,
-            approval_type,
         }
     }
 
@@ -213,7 +182,7 @@ pub fn render_approval_prompt(
         risk::RiskLevel::Dangerous => "This tool is destructive! Use with extreme caution.",
     };
 
-    let mut content = vec![
+    let content = vec![
         Line::from(vec![
             Span::styled("Risk: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
@@ -236,33 +205,19 @@ pub fn render_approval_prompt(
             Span::styled(&cmd_display, Style::default().fg(Color::Cyan)),
         ]),
         Line::from(""),
+        Line::from(vec![
+            Span::styled("[y] ", Style::default().fg(Color::Green)),
+            Span::styled("Yes  ", Style::default().fg(Color::White)),
+            Span::styled("[n] ", Style::default().fg(Color::Red)),
+            Span::styled("No  ", Style::default().fg(Color::White)),
+            Span::styled("[a] ", Style::default().fg(Color::Cyan)),
+            Span::styled("Always  ", Style::default().fg(Color::White)),
+            Span::styled("[N] ", Style::default().fg(Color::Rgb(255, 100, 100))),
+            Span::styled("Block  ", Style::default().fg(Color::White)),
+            Span::styled("[Esc] ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Cancel", Style::default().fg(Color::DarkGray)),
+        ]),
     ];
-
-    match &request.approval_type {
-        ApprovalType::Binary => {
-            content.push(Line::from(vec![
-                Span::styled("[y] ", Style::default().fg(Color::Green)),
-                Span::styled("Yes  ", Style::default().fg(Color::White)),
-                Span::styled("[n] ", Style::default().fg(Color::Red)),
-                Span::styled("No  ", Style::default().fg(Color::White)),
-                Span::styled("[a] ", Style::default().fg(Color::Cyan)),
-                Span::styled("Always  ", Style::default().fg(Color::White)),
-                Span::styled("[N] ", Style::default().fg(Color::Rgb(255, 100, 100))),
-                Span::styled("Block  ", Style::default().fg(Color::White)),
-                Span::styled("[Esc] ", Style::default().fg(Color::DarkGray)),
-                Span::styled("Cancel", Style::default().fg(Color::DarkGray)),
-            ]));
-        }
-        ApprovalType::MultipleChoice { options } => {
-            for (i, opt) in options.iter().enumerate() {
-                content.push(Line::from(format!("[{}] {}", i + 1, opt)));
-            }
-            content.push(Line::from("[Esc] Cancel"));
-        }
-        ApprovalType::TextInput => {
-            content.push(Line::from("Type input and press Enter. [Esc] Cancel"));
-        }
-    }
 
     let paragraph = Paragraph::new(content)
         .wrap(Wrap { trim: false })
