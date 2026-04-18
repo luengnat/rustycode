@@ -25,7 +25,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use rustycode_llm::provider_v2::{ChatMessage, CompletionRequest, CompletionResponse, LLMProvider, MessageRole};
+use rustycode_llm::provider_v2::{
+    ChatMessage, CompletionRequest, CompletionResponse, LLMProvider, MessageRole,
+};
 use rustycode_llm::tool_executor::LLMToolExecutor;
 use rustycode_protocol::team::*;
 use rustycode_protocol::EscalationTarget;
@@ -91,7 +93,10 @@ pub enum TeamEvent {
         final_trust: f64,
     },
     /// An insight was recorded by an agent.
-    Insight { role: String, message: String },
+    Insight {
+        role: String,
+        message: String,
+    },
     // ========================================================================
     // Phase 4: Event-Driven Orchestration Events
     // ========================================================================
@@ -156,11 +161,30 @@ pub enum TeamEvent {
         task: String,
     },
     /// Request for parallel agent execution.
-    ParallelExecutionRequested { agents: Vec<String>, task: String },
-    ToolStarted { role: String, tool_name: String, iteration: u32 },
-    ToolCompleted { role: String, tool_name: String, success: bool, output_preview: String },
-    ToolLoopIteration { role: String, iteration: u32, tool_count: u32 },
-    AdvisorGuidance { role: String, plan: String },
+    ParallelExecutionRequested {
+        agents: Vec<String>,
+        task: String,
+    },
+    ToolStarted {
+        role: String,
+        tool_name: String,
+        iteration: u32,
+    },
+    ToolCompleted {
+        role: String,
+        tool_name: String,
+        success: bool,
+        output_preview: String,
+    },
+    ToolLoopIteration {
+        role: String,
+        iteration: u32,
+        tool_count: u32,
+    },
+    AdvisorGuidance {
+        role: String,
+        plan: String,
+    },
 }
 
 // ============================================================================
@@ -275,11 +299,7 @@ impl Default for ToolLoopConfig {
                 "grep".into(),
                 "glob".into(),
             ],
-            scalpel_tools: vec![
-                "read_file".into(),
-                "write_file".into(),
-                "bash".into(),
-            ],
+            scalpel_tools: vec!["read_file".into(), "write_file".into(), "bash".into()],
         }
     }
 }
@@ -1523,7 +1543,11 @@ impl TeamOrchestrator {
             &[],
             structural_declaration,
         );
-        debug!("Calling LLM for role: {} ({} messages)", role, messages.len());
+        debug!(
+            "Calling LLM for role: {} ({} messages)",
+            role,
+            messages.len()
+        );
 
         match role {
             TeamRole::Builder | TeamRole::Scalpel => self.run_tool_loop(role, messages).await,
@@ -1546,7 +1570,13 @@ impl TeamOrchestrator {
         );
         let advisor_messages = vec![
             ChatMessage::system(advisor_prompt),
-            ChatMessage::user(messages.iter().map(|m| m.text()).collect::<Vec<_>>().join("\n")),
+            ChatMessage::user(
+                messages
+                    .iter()
+                    .map(|m| m.text())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
         ];
         match self.client.complete(advisor_messages).await {
             Ok(plan) => {
@@ -1585,7 +1615,10 @@ impl TeamOrchestrator {
             })
             .collect();
         if filtered_tools.is_empty() {
-            warn!("No tools available for {} role, falling back to single-shot", role_name);
+            warn!(
+                "No tools available for {} role, falling back to single-shot",
+                role_name
+            );
             return self.client.complete(initial_messages).await;
         }
 
@@ -1600,13 +1633,23 @@ impl TeamOrchestrator {
             if self.is_cancelled() {
                 return Err(anyhow::anyhow!("Tool loop cancelled"));
             }
-            debug!("Tool loop iteration {}/{} for {}", iteration + 1, self.tool_loop_config.max_iterations, role_name);
+            debug!(
+                "Tool loop iteration {}/{} for {}",
+                iteration + 1,
+                self.tool_loop_config.max_iterations,
+                role_name
+            );
 
             let response = self
                 .client
                 .complete_with_tools(messages.clone(), filtered_tools.clone())
                 .await
-                .with_context(|| format!("Tool loop LLM call failed for {} at iteration {}", role_name, iteration))?;
+                .with_context(|| {
+                    format!(
+                        "Tool loop LLM call failed for {} at iteration {}",
+                        role_name, iteration
+                    )
+                })?;
             let content = response.content.clone();
 
             let tool_calls_openai = self.tool_executor.parse_openai_tool_calls(&content)?;
@@ -1616,7 +1659,10 @@ impl TeamOrchestrator {
                 tool_calls_openai
             };
             if tool_calls.is_empty() {
-                debug!("No tool calls in response, returning final content for {}", role_name);
+                debug!(
+                    "No tool calls in response, returning final content for {}",
+                    role_name
+                );
                 return Ok(content);
             }
             self.emit(TeamEvent::ToolLoopIteration {
@@ -1634,14 +1680,19 @@ impl TeamOrchestrator {
                 });
                 match self.tool_executor.execute_tool_call(tc).await {
                     Ok(result) => {
-                        debug!("Tool {} executed: success={}", result.tool_name, result.success);
+                        debug!(
+                            "Tool {} executed: success={}",
+                            result.tool_name, result.success
+                        );
                         self.emit(TeamEvent::ToolCompleted {
                             role: role_name.clone(),
                             tool_name: result.tool_name.clone(),
                             success: result.success,
                             output_preview: result.output.chars().take(200).collect(),
                         });
-                        let tool_msg = self.tool_executor.result_to_openai_message(&result, tc.id.clone());
+                        let tool_msg = self
+                            .tool_executor
+                            .result_to_openai_message(&result, tc.id.clone());
                         messages.push(tool_msg);
                     }
                     Err(e) => {
@@ -1652,7 +1703,8 @@ impl TeamOrchestrator {
                                 serde_json::json!({
                                     "tool_call_id": tc.id.clone().unwrap_or_default(),
                                     "error": e.to_string()
-                                }).to_string(),
+                                })
+                                .to_string(),
                             ),
                         };
                         messages.push(error_msg);
@@ -1660,7 +1712,10 @@ impl TeamOrchestrator {
                 }
             }
         }
-        warn!("Tool loop exhausted max iterations ({}) for {}", self.tool_loop_config.max_iterations, role_name);
+        warn!(
+            "Tool loop exhausted max iterations ({}) for {}",
+            self.tool_loop_config.max_iterations, role_name
+        );
         let final_response = self.client.complete(messages).await?;
         Ok(final_response)
     }

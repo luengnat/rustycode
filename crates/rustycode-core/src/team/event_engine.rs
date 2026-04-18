@@ -99,9 +99,7 @@ impl TeamEventType {
             TeamEvent::ToolStarted { .. }
             | TeamEvent::ToolCompleted { .. }
             | TeamEvent::ToolLoopIteration { .. }
-            | TeamEvent::AdvisorGuidance { .. } => {
-                TeamEventType::AgentStateChanged
-            }
+            | TeamEvent::AdvisorGuidance { .. } => TeamEventType::AgentStateChanged,
         }
     }
 }
