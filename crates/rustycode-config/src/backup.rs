@@ -8,6 +8,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
+use tracing::warn;
 
 /// Default maximum number of backups to retain per config file.
 const DEFAULT_MAX_BACKUPS: usize = 5;
@@ -151,8 +152,7 @@ impl ConfigBackup {
         // Remove oldest entries beyond the limit
         for (path, _) in backups.iter().skip(self.max_backups) {
             if let Err(e) = fs::remove_file(path) {
-                // Best-effort removal; old backups don't block new ones
-                let _ = e;
+                warn!("Failed to remove old backup {:?}: {}", path, e);
             }
         }
 

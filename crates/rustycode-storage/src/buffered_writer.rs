@@ -10,6 +10,7 @@
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
+use tracing::warn;
 
 /// Default flush interval in milliseconds.
 const DEFAULT_FLUSH_INTERVAL_MS: u64 = 1000;
@@ -133,21 +134,29 @@ impl BufferedWriter {
 
     /// Write content to the buffer.
     pub fn write(&self, content: impl Into<String>) {
-        let _ = self.sender.send(WriterMessage::Write(content.into()));
+        if let Err(e) = self.sender.send(WriterMessage::Write(content.into())) {
+            warn!("BufferedWriter: failed to send write (writer thread shut down?): {}", e);
+        }
     }
 
     /// Flush the buffer, writing all buffered content immediately.
     pub fn flush(&self) {
-        let _ = self.sender.send(WriterMessage::Flush);
+        if let Err(e) = self.sender.send(WriterMessage::Flush) {
+            warn!("BufferedWriter: failed to send flush (writer thread shut down?): {}", e);
+        }
     }
 
     /// Dispose of the writer, flushing any remaining content and
     /// shutting down the background thread. Blocks until the thread
     /// has flushed and exited.
     pub fn dispose(mut self) {
-        let _ = self.sender.send(WriterMessage::Shutdown);
+        if let Err(e) = self.sender.send(WriterMessage::Shutdown) {
+            warn!("BufferedWriter: failed to send shutdown: {}", e);
+        }
         if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+            if let Err(e) = handle.join() {
+                warn!("BufferedWriter: writer thread panicked: {:?}", e);
+            }
         }
     }
 }

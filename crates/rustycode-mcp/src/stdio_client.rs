@@ -514,8 +514,18 @@ impl Drop for McpStdioClient {
                 "Dropping MCP client '{}', terminating process",
                 self.config.name
             );
-            let _ = child.kill();
-            let _ = child.wait();
+            if let Err(e) = child.kill() {
+                warn!(
+                    "Failed to kill MCP client '{}' process: {}",
+                    self.config.name, e
+                );
+            }
+            if let Err(e) = child.wait() {
+                warn!(
+                    "Failed to wait for MCP client '{}' process exit: {}",
+                    self.config.name, e
+                );
+            }
         }
     }
 }
