@@ -161,7 +161,13 @@ impl RewindState {
 
         // Persist to storage backend
         if let Some(ref store) = self.store {
-            let _ = store.save_snapshot(&self.session_id, &snapshot);
+            if let Err(e) = store.save_snapshot(&self.session_id, &snapshot) {
+                tracing::warn!(
+                    "Failed to save rewind snapshot for session {}: {}",
+                    self.session_id,
+                    e
+                );
+            }
         }
 
         self.interactions.push_back(snapshot);

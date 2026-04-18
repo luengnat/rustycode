@@ -41,8 +41,12 @@ impl CompactionSnapshot {
         let json = serde_json::to_string_pretty(self).context("serialize compaction snapshot")?;
         std::fs::write(&tmp_path, &json)
             .with_context(|| format!("Failed to write compaction snapshot to {:?}", tmp_path))?;
-        std::fs::rename(&tmp_path, &snapshot_path)
-            .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, snapshot_path))?;
+        if let Err(e) = std::fs::rename(&tmp_path, &snapshot_path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(e).with_context(|| {
+                format!("Failed to rename {:?} to {:?}", tmp_path, snapshot_path)
+            });
+        }
         Ok(())
     }
 

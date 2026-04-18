@@ -715,10 +715,11 @@ impl Cache for MultiLevelCache {
 
     /// Get cache statistics
     fn stats(&self) -> CacheStats {
-        // Note: This is a blocking read, should be async in production
-        // For now, return the last updated stats
-        // In a real implementation, we'd use tokio::sync::RwLock::try_read
-        CacheStats::default()
+        // Try to read the current stats; fall back to empty if lock is contended
+        self.stats
+            .try_read()
+            .map(|s| s.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -1034,5 +1035,31 @@ mod tests {
         assert_eq!(config.l1_capacity, 500);
         assert_eq!(config.ttl, Duration::from_secs(600));
         assert_eq!(config.enable_l2, false);
+    }
+
+    #[tokio::test]
+    async fn test_stats_returns_real_data_after_operations() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = CacheConfig::builder()
+            .l1_capacity(10)
+            .cache_dir(temp_dir.path().to_path_buf())
+            .build();
+
+        let cache = MultiLevelCache::new(config).unwrap();
+
+        // Perform some operations
+        cache
+            .set(&"key1".to_string(), &serde_json::json!("value1"))
+            .await
+            .unwrap();
+        let _ = cache.get(&"key1".to_string()).await.unwrap();
+        let _ = cache.get(&"missing".to_string()).await.unwrap();
+
+        // stats() should return real data, not defaults
+        let stats = cache.stats();
+        assert!(
+            stats.sets > 0 || stats.gets > 0,
+            "stats() should return real data, not defaults"
+        );
     }
 }
