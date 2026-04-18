@@ -244,6 +244,10 @@ fn retryable_error_keywords(msg: &str) -> bool {
         "gateway timeout",
         "overloaded",
         "529",
+        "network error",
+        "failed to send request",
+        "error sending request",
+        "connection error",
     ];
 
     retryable_keywords
@@ -376,11 +380,11 @@ mod tests {
     #[test]
     fn test_retry_config_default() {
         let config = RetryConfig::default();
-        assert_eq!(config.max_attempts, 3);
-        assert_eq!(config.base_delay, Duration::from_millis(100));
-        assert_eq!(config.max_delay, Duration::from_secs(10));
+        assert_eq!(config.max_attempts, 5);
+        assert_eq!(config.base_delay, Duration::from_millis(1000));
+        assert_eq!(config.max_delay, Duration::from_secs(60));
         assert_eq!(config.multiplier, 2.0);
-        assert_eq!(config.jitter_factor, 0.1);
+        assert_eq!(config.jitter_factor, 0.2);
     }
 
     #[test]
