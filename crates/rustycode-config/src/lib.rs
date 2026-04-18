@@ -528,8 +528,7 @@ impl Config {
     /// Keys 4-8 characters show first 2 and last 2.
     /// Shorter keys are fully masked.
     pub fn redacted_for_display(&self) -> serde_json::Value {
-        let mut json = serde_json::to_value(self)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let mut json = serde_json::to_value(self).unwrap_or_else(|_| serde_json::json!({}));
 
         // Redact provider API keys
         if let Some(providers) = json.get_mut("providers").and_then(|p| p.as_object_mut()) {

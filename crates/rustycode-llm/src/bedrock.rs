@@ -19,8 +19,8 @@
 
 use crate::provider_metadata::{ConfigField, ConfigFieldType, ConfigSchema, ProviderMetadata};
 use crate::provider_v2::{
-    CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError, StreamChunk,
-    OutputConfig,
+    CompletionRequest, CompletionResponse, LLMProvider, OutputConfig, ProviderConfig,
+    ProviderError, StreamChunk,
 };
 use crate::retry::{extract_retry_after_ms, retry_with_backoff, RetryConfig};
 use anyhow::{Context, Result};

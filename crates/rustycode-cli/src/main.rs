@@ -341,7 +341,10 @@ async fn async_main() -> Result<()> {
         Command::Config {
             command: ConfigCommand::Show,
         } => {
-            println!("{}", serde_json::to_string_pretty(&runtime.config().redacted_for_display())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&runtime.config().redacted_for_display())?
+            );
         }
         Command::Config {
             command: ConfigCommand::Get { key },
@@ -349,7 +352,9 @@ async fn async_main() -> Result<()> {
             let config = runtime.config();
             let value = match key.as_str() {
                 "model" => serde_json::json!(config.model).to_string(),
-                "provider" => serde_json::json!(config.redacted_for_display().get("providers")).to_string(),
+                "provider" => {
+                    serde_json::json!(config.redacted_for_display().get("providers")).to_string()
+                }
                 "log_level" => serde_json::json!(config.advanced.log_level).to_string(),
                 "telemetry_enabled" => {
                     serde_json::json!(config.advanced.telemetry_enabled).to_string()

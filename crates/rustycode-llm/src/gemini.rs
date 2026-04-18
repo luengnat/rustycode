@@ -39,8 +39,8 @@ use crate::provider_metadata::{
     PromptTemplate, ProviderMetadata, ToolCallingMetadata, ToolFormat,
 };
 use crate::provider_v2::{
-    ChatMessage, CompletionRequest, CompletionResponse, LLMProvider, MessageRole, ProviderConfig,
-    ProviderError, StreamChunk, build_gemini_response_schema,
+    build_gemini_response_schema, ChatMessage, CompletionRequest, CompletionResponse, LLMProvider,
+    MessageRole, ProviderConfig, ProviderError, StreamChunk,
 };
 use crate::retry::extract_retry_after_ms;
 use anyhow::{Context, Result};
@@ -354,7 +354,9 @@ impl GeminiProvider {
         let generation_config = GeminiGenerationConfig {
             temperature: request.temperature.unwrap_or(0.7),
             max_output_tokens: request.max_tokens,
-            response_mime_type: response_schema.as_ref().map(|_| "application/json".to_string()),
+            response_mime_type: response_schema
+                .as_ref()
+                .map(|_| "application/json".to_string()),
             response_schema: response_schema.and_then(|v| v.get("responseSchema").cloned()),
         };
 
@@ -508,7 +510,9 @@ impl LLMProvider for GeminiProvider {
         let generation_config = GeminiGenerationConfig {
             temperature: request.temperature.unwrap_or(0.7),
             max_output_tokens: request.max_tokens,
-            response_mime_type: response_schema.as_ref().map(|_| "application/json".to_string()),
+            response_mime_type: response_schema
+                .as_ref()
+                .map(|_| "application/json".to_string()),
             response_schema: response_schema.and_then(|v| v.get("responseSchema").cloned()),
         };
 

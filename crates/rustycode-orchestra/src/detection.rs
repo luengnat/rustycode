@@ -119,7 +119,7 @@ pub const PROJECT_FILES: &[&str] = &[
     "pyproject.toml",
     "setup.py",
     "requirements.txt",
-    "Pipfile",         // Pipenv
+    "Pipfile", // Pipenv
     // Ruby
     "Gemfile",
     "Rakefile",
@@ -127,31 +127,31 @@ pub const PROJECT_FILES: &[&str] = &[
     "pom.xml",
     "build.gradle",
     "build.gradle.kts",
-    "build.xml",       // Ant
-    "build.sbt",       // SBT (Scala)
+    "build.xml", // Ant
+    "build.sbt", // SBT (Scala)
     // C/C++
     "CMakeLists.txt",
     "Makefile",
-    "meson.build",     // Meson
+    "meson.build", // Meson
     // .NET
-    "*.sln",           // Visual Studio solution (glob — use glob check)
-    "*.csproj",        // C# project (glob)
-    "*.fsproj",        // F# project (glob)
+    "*.sln",    // Visual Studio solution (glob — use glob check)
+    "*.csproj", // C# project (glob)
+    "*.fsproj", // F# project (glob)
     // PHP
     "composer.json",
     // Dart/Flutter
     "pubspec.yaml",
     // Swift/Apple
     "Package.swift",
-    "Podfile",         // CocoaPods (iOS)
+    "Podfile", // CocoaPods (iOS)
     // Elixir/Erlang
     "mix.exs",
-    "rebar.config",    // Erlang/Rebar3
+    "rebar.config", // Erlang/Rebar3
     // R
-    ".Rproj",          // RStudio project
-    "DESCRIPTION",     // R package
+    ".Rproj",      // RStudio project
+    "DESCRIPTION", // R package
     // Jupyter/Colab
-    "*.ipynb",         // Jupyter notebook (glob)
+    "*.ipynb", // Jupyter notebook (glob)
     // Haskell
     "stack.yaml",
     "cabal.project",
@@ -163,11 +163,11 @@ pub const PROJECT_FILES: &[&str] = &[
 
 /// IDE/project directory markers (secondary signals when no build file found)
 pub const IDE_MARKERS: &[&str] = &[
-    ".vscode",    // VS Code
-    ".idea",      // JetBrains (IntelliJ, PyCharm, etc.)
-    ".project",   // Eclipse
-    ".classpath", // Eclipse Java
-    ".vs",        // Visual Studio
+    ".vscode",          // VS Code
+    ".idea",            // JetBrains (IntelliJ, PyCharm, etc.)
+    ".project",         // Eclipse
+    ".classpath",       // Eclipse Java
+    ".vs",              // Visual Studio
     "*.code-workspace", // VS Code multi-root workspace
 ];
 
@@ -179,8 +179,8 @@ pub const GLOB_MARKERS: &[&str] = &[
     "*.vbproj",
     "*.ipynb",
     "*.code-workspace",
-    "*.nimble",       // Nim package
-    "*.xcodeproj",    // Xcode project (directory)
+    "*.nimble",    // Nim package
+    "*.xcodeproj", // Xcode project (directory)
 ];
 
 /// Language mapping for project files
@@ -210,7 +210,7 @@ pub fn language_map() -> &'static HashMap<&'static str, &'static str> {
         m.insert("build.gradle.kts", "kotlin");
         m.insert("build.xml", "java"); // Ant
         m.insert("build.sbt", "scala"); // SBT
-        // C/C++
+                                        // C/C++
         m.insert("CMakeLists.txt", "c/c++");
         m.insert("Makefile", "c/c++");
         // .NET
@@ -262,10 +262,10 @@ pub fn ide_language_map() -> &'static HashMap<&'static str, &'static str> {
 
     MAP.get_or_init(|| {
         let mut m = HashMap::new();
-        m.insert(".project", "java");     // Eclipse
-        m.insert(".classpath", "java");    // Eclipse Java
-        m.insert(".idea", "java/kotlin");  // JetBrains
-        m.insert(".vs", "c#/.net");       // Visual Studio
+        m.insert(".project", "java"); // Eclipse
+        m.insert(".classpath", "java"); // Eclipse Java
+        m.insert(".idea", "java/kotlin"); // JetBrains
+        m.insert(".vs", "c#/.net"); // Visual Studio
         m.insert(".vscode", "javascript/typescript"); // VS Code (generic)
         m
     })
@@ -479,7 +479,10 @@ pub fn detect_project_signals(base_path: &Path) -> ProjectSignals {
             for glob in GLOB_MARKERS {
                 if glob_matches(glob, &name_str) {
                     let marker = format!("{}:{}", glob, name_str);
-                    if !detected_files.iter().any(|f| f.starts_with(&format!("{}:", glob))) {
+                    if !detected_files
+                        .iter()
+                        .any(|f| f.starts_with(&format!("{}:", glob)))
+                    {
                         detected_files.push(marker);
                         if let Some(lang) = language_map().get(glob as &str) {
                             let lang_str = lang.to_string();
@@ -1059,7 +1062,9 @@ mod tests {
             signals.primary_language,
             Some("javascript/typescript".to_string())
         );
-        assert!(signals.detected_languages.contains(&"javascript/typescript".to_string()));
+        assert!(signals
+            .detected_languages
+            .contains(&"javascript/typescript".to_string()));
         assert!(signals.is_git_repo);
         assert!(!signals.is_monorepo);
         assert_eq!(signals.package_manager, Some("npm".to_string()));
@@ -1317,10 +1322,7 @@ lint:
         fs::write(base_path.join("MyApp.sln"), "").unwrap();
 
         let signals = detect_project_signals(base_path);
-        assert!(signals
-            .detected_files
-            .iter()
-            .any(|f| f.contains("*.sln")));
+        assert!(signals.detected_files.iter().any(|f| f.contains("*.sln")));
         assert!(signals.detected_languages.contains(&"c#/.net".to_string()));
         assert_eq!(signals.package_manager, Some("dotnet".to_string()));
         assert!(signals
@@ -1367,10 +1369,7 @@ lint:
         fs::write(base_path.join(".Rproj"), "Version: 1.0").unwrap();
 
         let signals = detect_project_signals(base_path);
-        assert!(signals
-            .detected_files
-            .iter()
-            .any(|f| f.contains(".Rproj")));
+        assert!(signals.detected_files.iter().any(|f| f.contains(".Rproj")));
         assert!(signals.detected_languages.contains(&"r".to_string()));
     }
 
@@ -1386,10 +1385,7 @@ lint:
         .unwrap();
 
         let signals = detect_project_signals(base_path);
-        assert!(signals
-            .detected_files
-            .iter()
-            .any(|f| f == "DESCRIPTION"));
+        assert!(signals.detected_files.iter().any(|f| f == "DESCRIPTION"));
         assert!(signals.detected_languages.contains(&"r".to_string()));
     }
 
@@ -1405,10 +1401,7 @@ lint:
         .unwrap();
 
         let signals = detect_project_signals(base_path);
-        assert!(signals
-            .detected_files
-            .iter()
-            .any(|f| f.contains("*.ipynb")));
+        assert!(signals.detected_files.iter().any(|f| f.contains("*.ipynb")));
         assert!(signals
             .detected_languages
             .contains(&"python/jupyter".to_string()));
@@ -1443,11 +1436,7 @@ lint:
         let temp_dir = TempDir::new().unwrap();
         let base_path = temp_dir.path();
 
-        fs::write(
-            base_path.join("build.sbt"),
-            r#"name := "myapp""#,
-        )
-        .unwrap();
+        fs::write(base_path.join("build.sbt"), r#"name := "myapp""#).unwrap();
 
         let signals = detect_project_signals(base_path);
         assert!(signals
@@ -1467,7 +1456,11 @@ lint:
         let temp_dir = TempDir::new().unwrap();
         let base_path = temp_dir.path();
 
-        fs::write(base_path.join("deno.json"), r#"{"tasks": {"test": "deno test"}}"#).unwrap();
+        fs::write(
+            base_path.join("deno.json"),
+            r#"{"tasks": {"test": "deno test"}}"#,
+        )
+        .unwrap();
 
         let pm = detect_package_manager(base_path);
         assert_eq!(pm, Some("deno".to_string()));
@@ -1511,13 +1504,23 @@ lint:
             r#"{"name": "monorepo", "workspaces": ["packages/*"]}"#,
         )
         .unwrap();
-        fs::write(base_path.join("Cargo.toml"), "[workspace]\nmembers = [\"crates/*\"]").unwrap();
-        fs::write(base_path.join("pnpm-workspace.yaml"), "packages:\n  - 'packages/*'").unwrap();
+        fs::write(
+            base_path.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/*\"]",
+        )
+        .unwrap();
+        fs::write(
+            base_path.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'",
+        )
+        .unwrap();
 
         let signals = detect_project_signals(base_path);
         assert!(signals.is_monorepo);
         assert!(signals.detected_languages.len() >= 2);
-        assert!(signals.detected_languages.contains(&"javascript/typescript".to_string()));
+        assert!(signals
+            .detected_languages
+            .contains(&"javascript/typescript".to_string()));
         assert!(signals.detected_languages.contains(&"rust".to_string()));
     }
 

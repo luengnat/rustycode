@@ -1974,18 +1974,24 @@ impl Storage {
 
         let stats = CleanupStats {
             sessions_removed: u64::try_from(
-                conn.query_row("SELECT count(*) FROM sessions", [], |row| row.get::<_, i64>(0))
-                    .unwrap_or(0),
+                conn.query_row("SELECT count(*) FROM sessions", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap_or(0),
             )
             .unwrap_or(0),
             events_removed: u64::try_from(
-                conn.query_row("SELECT count(*) FROM events", [], |row| row.get::<_, i64>(0))
-                    .unwrap_or(0),
+                conn.query_row("SELECT count(*) FROM events", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap_or(0),
             )
             .unwrap_or(0),
             api_calls_removed: u64::try_from(
-                conn.query_row("SELECT count(*) FROM api_calls", [], |row| row.get::<_, i64>(0))
-                    .unwrap_or(0),
+                conn.query_row("SELECT count(*) FROM api_calls", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap_or(0),
             )
             .unwrap_or(0),
             hook_executions_removed: u64::try_from(

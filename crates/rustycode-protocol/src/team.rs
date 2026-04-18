@@ -1289,7 +1289,6 @@ pub enum SkepticVerdict {
     Veto,
 }
 
-
 /// Judge's structured response — empirical results only.
 ///
 /// The judge doesn't read claims or opinions. It runs tests and compilation

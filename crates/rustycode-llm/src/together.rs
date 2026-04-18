@@ -39,8 +39,8 @@ use crate::provider_metadata::{
     PromptTemplate, ProviderMetadata, ToolCallingMetadata, ToolFormat,
 };
 use crate::provider_v2::{
-    CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, ProviderError, StreamChunk,
-    Usage, build_openai_response_format,
+    build_openai_response_format, CompletionRequest, CompletionResponse, LLMProvider,
+    ProviderConfig, ProviderError, StreamChunk, Usage,
 };
 
 // Import macros exported at crate root

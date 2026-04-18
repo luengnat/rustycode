@@ -1345,7 +1345,9 @@ impl TUI {
                 // Insert middle lines
                 #[allow(clippy::needless_range_loop)]
                 for i in 1..lines.len() - 1 {
-                    state.lines.insert(state.cursor_row + i, lines[i].to_string());
+                    state
+                        .lines
+                        .insert(state.cursor_row + i, lines[i].to_string());
                 }
 
                 // Last line: last pasted part + "after"

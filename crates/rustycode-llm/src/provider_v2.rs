@@ -142,12 +142,17 @@ pub enum OutputFormatType {
 }
 
 /// Build an OpenAI-compatible `response_format` JSON value from an `OutputConfig`.
-pub fn build_openai_response_format(output_config: &Option<OutputConfig>) -> Option<serde_json::Value> {
+pub fn build_openai_response_format(
+    output_config: &Option<OutputConfig>,
+) -> Option<serde_json::Value> {
     let oc = output_config.as_ref()?;
     let format = oc.format.as_ref()?;
     match format.format_type {
         OutputFormatType::JsonSchema => {
-            let schema = format.json_schema.clone().unwrap_or(serde_json::Value::Null);
+            let schema = format
+                .json_schema
+                .clone()
+                .unwrap_or(serde_json::Value::Null);
             Some(serde_json::json!({
                 "type": "json_schema",
                 "json_schema": {
@@ -161,12 +166,17 @@ pub fn build_openai_response_format(output_config: &Option<OutputConfig>) -> Opt
 }
 
 /// Build a Gemini-compatible response schema from an `OutputConfig`.
-pub fn build_gemini_response_schema(output_config: &Option<OutputConfig>) -> Option<serde_json::Value> {
+pub fn build_gemini_response_schema(
+    output_config: &Option<OutputConfig>,
+) -> Option<serde_json::Value> {
     let oc = output_config.as_ref()?;
     let format = oc.format.as_ref()?;
     match format.format_type {
         OutputFormatType::JsonSchema => {
-            let schema = format.json_schema.clone().unwrap_or(serde_json::Value::Null);
+            let schema = format
+                .json_schema
+                .clone()
+                .unwrap_or(serde_json::Value::Null);
             Some(serde_json::json!({
                 "responseMimeType": "application/json",
                 "responseSchema": schema

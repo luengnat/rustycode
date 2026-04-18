@@ -232,7 +232,7 @@ fn collect_workspace_progress(
     let task_summary = summarize_tasks(tasks);
     let todo_summary = summarize_todos(&tasks.todos);
     let agent_summary = summarize_agents(agents);
-    let mcp_summary = summarize_mcp();
+    let mcp_summary = summarize_mcp(cwd);
     let harness_summary = summarize_harness(cwd);
     let orchestra_summary = summarize_orchestra(cwd);
 
@@ -263,7 +263,7 @@ fn collect_workspace_progress(
         if summary.total > 0 {
             sections.push(Section {
                 title: "MCP".to_string(),
-                lines: format_mcp_lines(),
+                lines: format_mcp_lines(cwd),
             });
         }
     }
@@ -351,8 +351,16 @@ fn summarize_agents(agents: &[AgentTask]) -> CountSummary {
     summary
 }
 
-fn summarize_mcp() -> Option<CountSummary> {
-    let configs = rustycode_mcp::McpConfigFile::load_from_standard_locations();
+fn summarize_mcp(cwd: &Path) -> Option<CountSummary> {
+    let mut configs = rustycode_mcp::McpConfigFile::load_from_standard_locations();
+
+    // Also check for project-local mcp.json in cwd
+    let local_mcp = cwd.join("mcp.json");
+    if let Ok(content) = std::fs::read_to_string(&local_mcp) {
+        if let Ok(config) = serde_json::from_str::<rustycode_mcp::McpConfigFile>(&content) {
+            configs.push((local_mcp, config));
+        }
+    }
     let mut summary = CountSummary::default();
 
     for (_path, config) in configs {
@@ -481,9 +489,17 @@ fn format_agent_lines(agents: &[AgentTask]) -> Vec<String> {
         .collect()
 }
 
-fn format_mcp_lines() -> Vec<String> {
+fn format_mcp_lines(cwd: &Path) -> Vec<String> {
     let mut lines = Vec::new();
-    let configs = rustycode_mcp::McpConfigFile::load_from_standard_locations();
+    let mut configs = rustycode_mcp::McpConfigFile::load_from_standard_locations();
+
+    // Also check for project-local mcp.json in cwd
+    let local_mcp = cwd.join("mcp.json");
+    if let Ok(content) = std::fs::read_to_string(&local_mcp) {
+        if let Ok(config) = serde_json::from_str::<rustycode_mcp::McpConfigFile>(&content) {
+            configs.push((local_mcp, config));
+        }
+    }
 
     if configs.is_empty() {
         lines.push("No MCP config files found".to_string());

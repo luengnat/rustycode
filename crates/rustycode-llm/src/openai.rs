@@ -766,14 +766,12 @@ impl OpenAiProvider {
         };
 
         let response_format = output_config.and_then(|cfg| {
-            cfg.format.as_ref().map(|fmt| {
-                match fmt.format_type {
-                    crate::provider_v2::OutputFormatType::JsonSchema => {
-                        serde_json::json!({
-                            "type": "json_schema",
-                            "json_schema": fmt.json_schema.as_ref().unwrap_or(&serde_json::json!({}))
-                        })
-                    }
+            cfg.format.as_ref().map(|fmt| match fmt.format_type {
+                crate::provider_v2::OutputFormatType::JsonSchema => {
+                    serde_json::json!({
+                        "type": "json_schema",
+                        "json_schema": fmt.json_schema.as_ref().unwrap_or(&serde_json::json!({}))
+                    })
                 }
             })
         });
@@ -1272,7 +1270,16 @@ mod tests {
     fn test_build_request_body_standard_model() {
         let provider =
             OpenAiProvider::new(make_config(Some("sk-test")), "gpt-4o".to_string()).unwrap();
-        let body = provider.build_request_body("gpt-4o".to_string(), vec![], vec![], Some(2048), Some(0.7), None, Some(false), None);
+        let body = provider.build_request_body(
+            "gpt-4o".to_string(),
+            vec![],
+            vec![],
+            Some(2048),
+            Some(0.7),
+            None,
+            Some(false),
+            None,
+        );
         assert_eq!(body.max_tokens, Some(2048));
         assert_eq!(body.max_completion_tokens, None);
         assert_eq!(body.reasoning_effort, None);
@@ -1282,7 +1289,16 @@ mod tests {
     fn test_build_request_body_reasoning_model() {
         let provider =
             OpenAiProvider::new(make_config(Some("sk-test")), "gpt-4o".to_string()).unwrap();
-        let body = provider.build_request_body("o4-mini".to_string(), vec![], vec![], Some(4096), None, Some(&crate::provider_v2::EffortLevel::High), None, None);
+        let body = provider.build_request_body(
+            "o4-mini".to_string(),
+            vec![],
+            vec![],
+            Some(4096),
+            None,
+            Some(&crate::provider_v2::EffortLevel::High),
+            None,
+            None,
+        );
         assert_eq!(body.max_tokens, None);
         assert_eq!(body.max_completion_tokens, Some(4096));
         assert_eq!(body.reasoning_effort, Some("high".to_string()));
@@ -2393,13 +2409,22 @@ data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"funct
     fn test_build_request_body_standard_model_uses_max_tokens() {
         let provider =
             OpenAiProvider::new(make_config(Some("sk-test")), "gpt-4o".to_string()).unwrap();
-        let body = provider.build_request_body("gpt-4o".to_string(), vec![OpenAiMessage {
-            role: "user".to_string(),
-            content: Some(serde_json::Value::String("test".to_string())),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-        }], vec![], Some(1024), Some(0.3), None, Some(true), None);
+        let body = provider.build_request_body(
+            "gpt-4o".to_string(),
+            vec![OpenAiMessage {
+                role: "user".to_string(),
+                content: Some(serde_json::Value::String("test".to_string())),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            }],
+            vec![],
+            Some(1024),
+            Some(0.3),
+            None,
+            Some(true),
+            None,
+        );
         assert_eq!(body.max_tokens, Some(1024));
         assert_eq!(body.max_completion_tokens, None);
         assert_eq!(body.reasoning_effort, None);
@@ -2415,13 +2440,22 @@ data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"funct
     #[test]
     fn test_build_request_body_reasoning_model_uses_max_completion_tokens() {
         let provider = OpenAiProvider::new(make_config(Some("sk-test")), "o3".to_string()).unwrap();
-        let body = provider.build_request_body("o3".to_string(), vec![OpenAiMessage {
-            role: "user".to_string(),
-            content: Some(serde_json::Value::String("solve it".to_string())),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-        }], vec![], Some(8192), None, Some(&crate::provider_v2::EffortLevel::Max), Some(false), None);
+        let body = provider.build_request_body(
+            "o3".to_string(),
+            vec![OpenAiMessage {
+                role: "user".to_string(),
+                content: Some(serde_json::Value::String("solve it".to_string())),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            }],
+            vec![],
+            Some(8192),
+            None,
+            Some(&crate::provider_v2::EffortLevel::Max),
+            Some(false),
+            None,
+        );
         assert_eq!(body.max_tokens, None);
         assert_eq!(body.max_completion_tokens, Some(8192));
         assert_eq!(body.reasoning_effort, Some("xhigh".to_string()));
@@ -2445,7 +2479,16 @@ data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"funct
         ];
 
         for (effort, expected_str) in cases {
-            let body = provider.build_request_body("o4-mini".to_string(), vec![], vec![], Some(4096), None, Some(&effort), None, None);
+            let body = provider.build_request_body(
+                "o4-mini".to_string(),
+                vec![],
+                vec![],
+                Some(4096),
+                None,
+                Some(&effort),
+                None,
+                None,
+            );
             assert_eq!(
                 body.reasoning_effort,
                 Some(expected_str.to_string()),
@@ -2460,7 +2503,16 @@ data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"funct
     fn test_build_request_body_standard_model_no_effort() {
         let provider =
             OpenAiProvider::new(make_config(Some("sk-test")), "gpt-5.2".to_string()).unwrap();
-        let body = provider.build_request_body("gpt-5.2".to_string(), vec![], vec![], Some(2048), Some(0.5), Some(&crate::provider_v2::EffortLevel::High), None, None);
+        let body = provider.build_request_body(
+            "gpt-5.2".to_string(),
+            vec![],
+            vec![],
+            Some(2048),
+            Some(0.5),
+            Some(&crate::provider_v2::EffortLevel::High),
+            None,
+            None,
+        );
         assert_eq!(body.max_tokens, Some(2048));
         assert_eq!(body.max_completion_tokens, None);
         assert_eq!(body.reasoning_effort, None);
@@ -2488,7 +2540,16 @@ data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"funct
                 }
             }),
         ];
-        let body = provider.build_request_body("gpt-4o".to_string(), vec![], tools, Some(4096), None, None, Some(true), None);
+        let body = provider.build_request_body(
+            "gpt-4o".to_string(),
+            vec![],
+            tools,
+            Some(4096),
+            None,
+            None,
+            Some(true),
+            None,
+        );
         assert!(body.tools.is_some());
         let tools_val = body.tools.as_ref().unwrap();
         assert_eq!(tools_val.len(), 2);
@@ -2501,7 +2562,16 @@ data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"funct
     fn test_build_request_body_empty_tools_omits_field() {
         let provider =
             OpenAiProvider::new(make_config(Some("sk-test")), "gpt-4o".to_string()).unwrap();
-        let body = provider.build_request_body("gpt-4o".to_string(), vec![], vec![], None, None, None, None, None);
+        let body = provider.build_request_body(
+            "gpt-4o".to_string(),
+            vec![],
+            vec![],
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
         assert!(body.tools.is_none());
         let json = serde_json::to_string(&body).unwrap();
         assert!(!json.contains("\"tools\""));
@@ -2511,13 +2581,22 @@ data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"funct
     fn test_build_request_body_no_max_tokens_no_temperature() {
         let provider =
             OpenAiProvider::new(make_config(Some("sk-test")), "gpt-4o".to_string()).unwrap();
-        let body = provider.build_request_body("gpt-4o".to_string(), vec![OpenAiMessage {
-            role: "user".to_string(),
-            content: Some(serde_json::Value::String("hi".to_string())),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-        }], vec![], None, None, None, None, None);
+        let body = provider.build_request_body(
+            "gpt-4o".to_string(),
+            vec![OpenAiMessage {
+                role: "user".to_string(),
+                content: Some(serde_json::Value::String("hi".to_string())),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            }],
+            vec![],
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
         assert_eq!(body.max_tokens, None);
         assert_eq!(body.temperature, None);
         let json = serde_json::to_string(&body).unwrap();

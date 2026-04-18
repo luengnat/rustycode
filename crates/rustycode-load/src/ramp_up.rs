@@ -219,10 +219,7 @@ mod tests {
     fn test_stepped_duration_does_not_overflow() {
         // Previously: step_duration * steps as u32 could panic on overflow
         // Now uses saturating nanosecond arithmetic
-        let strategy = RampUpStrategy::stepped(
-            1_000_000,
-            Duration::from_secs(3600),
-        );
+        let strategy = RampUpStrategy::stepped(1_000_000, Duration::from_secs(3600));
         let duration = strategy.duration(100);
         assert!(duration.is_some());
         // Should not panic — saturates instead
