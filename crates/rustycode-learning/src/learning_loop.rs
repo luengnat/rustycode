@@ -152,7 +152,9 @@ impl LearningLoop {
         }
 
         // Save updated storage
-        let _ = self.storage.save();
+        if let Err(e) = self.storage.save() {
+            tracing::warn!("Failed to save learning storage after feedback: {}", e);
+        }
     }
 
     /// Update patterns based on feedback and usage
