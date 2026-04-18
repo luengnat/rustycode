@@ -119,8 +119,10 @@ pub const PROJECT_FILES: &[&str] = &[
     "pyproject.toml",
     "setup.py",
     "requirements.txt",
+    "Pipfile",         // Pipenv
     // Ruby
     "Gemfile",
+    "Rakefile",
     // JVM
     "pom.xml",
     "build.gradle",
@@ -130,6 +132,7 @@ pub const PROJECT_FILES: &[&str] = &[
     // C/C++
     "CMakeLists.txt",
     "Makefile",
+    "meson.build",     // Meson
     // .NET
     "*.sln",           // Visual Studio solution (glob — use glob check)
     "*.csproj",        // C# project (glob)
@@ -138,15 +141,24 @@ pub const PROJECT_FILES: &[&str] = &[
     "composer.json",
     // Dart/Flutter
     "pubspec.yaml",
-    // Swift
+    // Swift/Apple
     "Package.swift",
-    // Elixir
+    "Podfile",         // CocoaPods (iOS)
+    // Elixir/Erlang
     "mix.exs",
+    "rebar.config",    // Erlang/Rebar3
     // R
     ".Rproj",          // RStudio project
     "DESCRIPTION",     // R package
     // Jupyter/Colab
     "*.ipynb",         // Jupyter notebook (glob)
+    // Haskell
+    "stack.yaml",
+    "cabal.project",
+    // Zig
+    "build.zig",
+    // Nix
+    "flake.nix",
 ];
 
 /// IDE/project directory markers (secondary signals when no build file found)
@@ -167,6 +179,8 @@ pub const GLOB_MARKERS: &[&str] = &[
     "*.vbproj",
     "*.ipynb",
     "*.code-workspace",
+    "*.nimble",       // Nim package
+    "*.xcodeproj",    // Xcode project (directory)
 ];
 
 /// Language mapping for project files
@@ -216,6 +230,27 @@ pub fn language_map() -> &'static HashMap<&'static str, &'static str> {
         m.insert("DESCRIPTION", "r");
         // Jupyter
         m.insert("*.ipynb", "python/jupyter");
+        // Haskell
+        m.insert("stack.yaml", "haskell");
+        m.insert("cabal.project", "haskell");
+        // Zig
+        m.insert("build.zig", "zig");
+        // Nix
+        m.insert("flake.nix", "nix");
+        // Meson
+        m.insert("meson.build", "c/c++");
+        // Erlang
+        m.insert("rebar.config", "erlang");
+        // Ruby
+        m.insert("Rakefile", "ruby");
+        // Pipenv
+        m.insert("Pipfile", "python");
+        // CocoaPods
+        m.insert("Podfile", "swift/objective-c");
+        // Nim
+        m.insert("*.nimble", "nim");
+        // Xcode
+        m.insert("*.xcodeproj", "swift/objective-c");
         m
     })
 }
@@ -249,6 +284,17 @@ pub const CI_MARKERS: &[&str] = &[
     ".travis.yml",
     "azure-pipelines.yml",
     "bitbucket-pipelines.yml",
+];
+
+/// Toolchain version files (for version-aware tool selection)
+pub const TOOLCHAIN_FILES: &[&str] = &[
+    ".node-version",       // Node.js version
+    ".nvmrc",              // nvm Node.js version
+    ".python-version",     // pyenv Python version
+    "rust-toolchain.toml", // Rust toolchain
+    ".tool-versions",      // asdf multi-language versions
+    ".ruby-version",       // Ruby version
+    "global.json",         // .NET SDK version
 ];
 
 /// Test directory/config markers

@@ -23,6 +23,11 @@ impl ProjectDetector {
     /// - pyproject.toml / requirements.txt → Python/pip
     /// - composer.json → Composer/PHP
     /// - Gemfile → Ruby/Bundler
+    /// - build.xml → Ant/Java
+    /// - build.sbt → SBT/Scala
+    /// - *.sln / *.csproj / *.fsproj → .NET
+    /// - .Rproj / DESCRIPTION → R
+    /// - *.ipynb → Jupyter
     pub fn detect_build_system(dir: &Path) -> Option<BuildSystem> {
         if dir.join("Cargo.toml").exists() {
             if dir.join("Cargo.lock").exists() || dir.join(".cargo").exists() {
@@ -100,7 +105,11 @@ impl ProjectDetector {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name.ends_with(".sln") || name.ends_with(".csproj") || name.ends_with(".fsproj") || name.ends_with(".vbproj") {
+                if name.ends_with(".sln")
+                    || name.ends_with(".csproj")
+                    || name.ends_with(".fsproj")
+                    || name.ends_with(".vbproj")
+                {
                     return Some(BuildSystem::Dotnet);
                 }
             }
@@ -137,6 +146,11 @@ impl ProjectDetector {
             BuildSystem::Composer => vec!["phpcs".to_string(), "php-cs-fixer".to_string()],
             BuildSystem::Ruby => vec!["rubocop".to_string()],
             BuildSystem::CMake | BuildSystem::Make | BuildSystem::CargoMake => vec![],
+            BuildSystem::Ant => vec!["checkstyle".to_string()],
+            BuildSystem::Sbt => vec!["scalafix".to_string()],
+            BuildSystem::Dotnet => vec!["dotnet format".to_string()],
+            BuildSystem::R => vec!["lintr".to_string()],
+            BuildSystem::Jupyter => vec![],
         }
     }
 
@@ -154,6 +168,11 @@ impl ProjectDetector {
             BuildSystem::Composer => vec!["php-cs-fixer".to_string()],
             BuildSystem::Ruby => vec!["rubocop".to_string()],
             BuildSystem::CMake | BuildSystem::Make | BuildSystem::CargoMake => vec![],
+            BuildSystem::Ant => vec!["google-java-format".to_string()],
+            BuildSystem::Sbt => vec!["scalafmt".to_string()],
+            BuildSystem::Dotnet => vec!["dotnet format".to_string()],
+            BuildSystem::R => vec![],
+            BuildSystem::Jupyter => vec!["black".to_string(), "nbqa".to_string()],
         }
     }
 
@@ -248,6 +267,36 @@ impl ProjectDetector {
                 );
             }
             BuildSystem::Make | BuildSystem::CargoMake => {}
+            BuildSystem::Ant => {
+                servers.insert(
+                    "java".to_string(),
+                    crate::LspServerConfig::new("jdtls", vec![]),
+                );
+            }
+            BuildSystem::Sbt => {
+                servers.insert(
+                    "scala".to_string(),
+                    crate::LspServerConfig::new("metals", vec![]),
+                );
+            }
+            BuildSystem::Dotnet => {
+                servers.insert(
+                    "csharp".to_string(),
+                    crate::LspServerConfig::new("omnisharp", vec!["--stdio".to_string()]),
+                );
+            }
+            BuildSystem::R => {
+                servers.insert(
+                    "r".to_string(),
+                    crate::LspServerConfig::new("r-languageserver", vec![]),
+                );
+            }
+            BuildSystem::Jupyter => {
+                servers.insert(
+                    "python".to_string(),
+                    crate::LspServerConfig::new("pyright-langserver", vec!["--stdio".to_string()]),
+                );
+            }
         }
 
         LspConfig { servers }
@@ -303,6 +352,11 @@ pub enum BuildSystem {
     CMake,
     Composer,
     Ruby,
+    Ant,
+    Sbt,
+    Dotnet,
+    R,
+    Jupyter,
 }
 
 impl BuildSystem {
@@ -322,6 +376,11 @@ impl BuildSystem {
             Self::CMake => "CMake",
             Self::Composer => "Composer",
             Self::Ruby => "Ruby",
+            Self::Ant => "Ant",
+            Self::Sbt => "SBT",
+            Self::Dotnet => ".NET",
+            Self::R => "R",
+            Self::Jupyter => "Jupyter",
         }
     }
 }
@@ -434,5 +493,48 @@ mod tests {
     fn test_build_system_display() {
         assert_eq!(BuildSystem::Cargo.to_string(), "Cargo");
         assert_eq!(BuildSystem::Npm.to_string(), "Npm");
+        assert_eq!(BuildSystem::Dotnet.to_string(), ".NET");
+        assert_eq!(BuildSystem::Sbt.to_string(), "SBT");
+    }
+
+    #[test]
+    fn test_detect_ant_project() {
+        let dir = temp_project(&["build.xml"]);
+        let detection = ProjectDetector::detect(dir.path()).unwrap();
+        assert!(matches!(detection.build_system, BuildSystem::Ant));
+    }
+
+    #[test]
+    fn test_detect_sbt_project() {
+        let dir = temp_project(&["build.sbt"]);
+        let detection = ProjectDetector::detect(dir.path()).unwrap();
+        assert!(matches!(detection.build_system, BuildSystem::Sbt));
+        assert!(detection.lsp_config.servers.contains_key("scala"));
+    }
+
+    #[test]
+    fn test_detect_dotnet_project() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("App.sln"), "").unwrap();
+        let detection = ProjectDetector::detect(dir.path()).unwrap();
+        assert!(matches!(detection.build_system, BuildSystem::Dotnet));
+        assert!(detection.lsp_config.servers.contains_key("csharp"));
+    }
+
+    #[test]
+    fn test_detect_r_project() {
+        let dir = temp_project(&[".Rproj"]);
+        let detection = ProjectDetector::detect(dir.path()).unwrap();
+        assert!(matches!(detection.build_system, BuildSystem::R));
+        assert!(detection.lsp_config.servers.contains_key("r"));
+    }
+
+    #[test]
+    fn test_detect_jupyter_project() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("analysis.ipynb"), "{}").unwrap();
+        let detection = ProjectDetector::detect(dir.path()).unwrap();
+        assert!(matches!(detection.build_system, BuildSystem::Jupyter));
+        assert!(detection.lsp_config.servers.contains_key("python"));
     }
 }
