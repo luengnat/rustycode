@@ -123,3 +123,4 @@ crates/rustycode-runtime/benchmark_results/
 # Task output files
 jobs/
 harbor-agent/
+.rustycode/

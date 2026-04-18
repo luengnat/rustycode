@@ -80,7 +80,18 @@ pub(crate) mod prompts {
         prompt.push_str("- Include error handling for anything that can fail\n");
         prompt.push_str("- Claims must be verifiable — run tests to verify before claiming done\n");
         prompt.push_str("- Set done: true ONLY when ALL plan steps are complete\n");
-        prompt.push_str("- ACTUALLY USE the tools. Write files. Run commands. Do not just plan.\n");
+        prompt
+            .push_str("- ACTUALLY USE the tools. Write files. Run commands. Do not just plan.\n\n");
+        prompt.push_str("## Tool Call Format (CRITICAL)\n");
+        prompt.push_str("Every tool call MUST have valid, non-null string parameters:\n");
+        prompt
+            .push_str("- bash: {\"command\": \"your shell command here\"} — NEVER null or empty\n");
+        prompt.push_str("- write_file: {\"path\": \"file.js\", \"content\": \"...\"} — path and content required\n");
+        prompt.push_str("- read_file: {\"path\": \"file.js\"} — path required\n");
+        prompt.push_str("- grep: {\"pattern\": \"regex\", \"path\": \"dir\"} — pattern required\n");
+        prompt
+            .push_str("- Do NOT use python/perl/ruby -e one-liners. Use bash commands directly.\n");
+        prompt.push_str("- Do NOT use commands with control characters or shell escapes.\n");
         prompt
     }
 

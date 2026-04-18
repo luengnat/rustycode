@@ -129,19 +129,28 @@ impl DockerEnvironment {
             )
         };
 
+        // Docker compose requires absolute paths for bind mounts.
+        // Canonicalize to resolve relative paths and symlinks.
+        let verifier_dir = std::fs::canonicalize(&self.trial_paths.verifier_dir)
+            .unwrap_or_else(|_| self.trial_paths.verifier_dir.clone());
+        let agent_dir = std::fs::canonicalize(&self.trial_paths.agent_dir)
+            .unwrap_or_else(|_| self.trial_paths.agent_dir.clone());
+        let artifacts_dir = std::fs::canonicalize(&self.trial_paths.artifacts_dir)
+            .unwrap_or_else(|_| self.trial_paths.artifacts_dir.clone());
+
         let verifier_mount = format!(
             "{}:{}",
-            self.trial_paths.verifier_dir.display(),
+            verifier_dir.display(),
             container_paths::VERIFIER_DIR
         );
         let agent_mount = format!(
             "{}:{}",
-            self.trial_paths.agent_dir.display(),
+            agent_dir.display(),
             container_paths::AGENT_DIR
         );
         let artifacts_mount = format!(
             "{}:{}",
-            self.trial_paths.artifacts_dir.display(),
+            artifacts_dir.display(),
             container_paths::ARTIFACTS_DIR
         );
 

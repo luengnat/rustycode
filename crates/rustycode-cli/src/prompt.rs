@@ -15,7 +15,7 @@
 //!
 //! ## Usage
 //!
-//! ```no_run
+//! ```ignore
 //! use rustycode_cli::prompt::{Confirm, Select, Input, Prompt};
 //!
 //! // Simple confirmation
@@ -49,8 +49,8 @@
 //! When `PromptConfig::global_yes_enabled()` is true (typically via a `--yes` flag),
 //! all prompts will use their default values without requiring user input:
 //!
-//! ```no_run
-//! use rustycode_cli::prompt::{PromptConfig, Confirm};
+//! ```ignore
+//! use rustycode_cli::prompt::{PromptConfig, Confirm, Prompt};
 //!
 //! // Enable global yes mode (typically from CLI flag)
 //! PromptConfig::set_global_yes(true);

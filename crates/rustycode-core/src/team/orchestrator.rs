@@ -30,7 +30,7 @@ use rustycode_llm::provider_v2::{
     ChatMessage, CompletionRequest, CompletionResponse, ContentBlockType, ContentDelta,
     LLMProvider, MessageRole, SSEEvent,
 };
-use rustycode_llm::tool_executor::LLMToolExecutor;
+use rustycode_llm::tool_executor::{LLMToolExecutor, ParsedToolCall};
 use rustycode_protocol::team::*;
 use rustycode_protocol::EscalationTarget;
 use serde::{Deserialize, Serialize};
@@ -1696,6 +1696,53 @@ impl TeamOrchestrator {
         }
     }
 
+    fn validate_tool_call(&self, tc: &ParsedToolCall) -> Option<String> {
+        match tc.name.as_str() {
+            "bash" => {
+                let cmd = tc.arguments.get("command").and_then(|v| v.as_str());
+                match cmd {
+                    None => Some(format!(
+                        "bash requires a non-null 'command' string. Got: {}",
+                        tc.arguments
+                            .get("command")
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "null".to_string())
+                    )),
+                    Some(s) if s.trim().is_empty() => {
+                        Some("bash requires a non-empty 'command' string.".to_string())
+                    }
+                    _ => None,
+                }
+            }
+            "write_file" => {
+                let path = tc.arguments.get("path").and_then(|v| v.as_str());
+                if path.is_none_or(|s| s.trim().is_empty()) {
+                    return Some("write_file requires a non-null 'path' string.".to_string());
+                }
+                let content = tc.arguments.get("content").and_then(|v| v.as_str());
+                if content.is_none() {
+                    return Some("write_file requires a 'content' parameter.".to_string());
+                }
+                None
+            }
+            "read_file" => {
+                let path = tc.arguments.get("path").and_then(|v| v.as_str());
+                if path.is_none_or(|s| s.trim().is_empty()) {
+                    return Some("read_file requires a non-null 'path' string.".to_string());
+                }
+                None
+            }
+            "grep" => {
+                let pattern = tc.arguments.get("pattern").and_then(|v| v.as_str());
+                if pattern.is_none_or(|s| s.trim().is_empty()) {
+                    return Some("grep requires a non-null 'pattern' string.".to_string());
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
     async fn run_tool_loop(
         &self,
         role: TeamRole,
@@ -1805,6 +1852,27 @@ impl TeamOrchestrator {
             messages.push(ChatMessage::assistant(content));
 
             for tc in &tool_calls {
+                // Validate tool call arguments before execution
+                if let Some(rejection) = self.validate_tool_call(tc) {
+                    warn!(
+                        "Tool {} rejected (invalid args): {}",
+                        tc.name, rejection
+                    );
+                    let error_msg = ChatMessage {
+                        role: MessageRole::Tool(tc.name.clone()),
+                        content: rustycode_protocol::MessageContent::simple(
+                            serde_json::json!({
+                                "tool_call_id": tc.id.clone().unwrap_or_default(),
+                                "error": rejection,
+                                "hint": "Ensure all required parameters are non-null strings."
+                            })
+                            .to_string(),
+                        ),
+                    };
+                    messages.push(error_msg);
+                    continue;
+                }
+
                 self.emit(TeamEvent::ToolStarted {
                     role: role_name.clone(),
                     tool_name: tc.name.clone(),

@@ -717,7 +717,7 @@ async fn async_main() -> Result<()> {
             execute_learnings_command(&cwd, command)?;
         }
         Command::Bench { command } => {
-            commands::bench_cmd::execute(command)?;
+            commands::bench_cmd::execute(command).await?;
         }
         #[allow(unreachable_patterns)]
         _ => {

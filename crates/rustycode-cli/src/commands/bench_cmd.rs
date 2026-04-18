@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use super::cli_args::BenchCommand;
 
-pub fn execute(cmd: BenchCommand) -> Result<()> {
+pub async fn execute(cmd: BenchCommand) -> Result<()> {
     match cmd {
         BenchCommand::Run {
             dataset,
@@ -35,14 +35,15 @@ pub fn execute(cmd: BenchCommand) -> Result<()> {
             max_turns,
             max_tokens,
             timeout,
-        ),
+        )
+        .await,
         BenchCommand::Results { job_dir } => show_results(job_dir),
         BenchCommand::ListDatasets => list_datasets(),
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_bench(
+async fn run_bench(
     dataset: Option<String>,
     path: Option<PathBuf>,
     agent: String,
@@ -87,8 +88,7 @@ fn run_bench(
     println!("Agent: {agent} (model: {model}, provider: {provider})");
     println!("Concurrency: {n_concurrent}");
 
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async_run(
+    async_run(
         &dataset_dir,
         agent,
         model,
@@ -97,7 +97,8 @@ fn run_bench(
         max_turns,
         max_tokens,
         timeout,
-    ))
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
