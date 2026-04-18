@@ -5,7 +5,7 @@ use crate::provider_metadata::{
 };
 use crate::provider_v2::{
     ChatMessage, CompletionRequest, CompletionResponse, LLMProvider, MessageRole, ProviderConfig,
-    ProviderError, StreamChunk, Usage,
+    ProviderError, StreamChunk, ThinkingBlock, Usage,
 };
 use rustycode_tools::{ToolProfile, ToolRegistry, ToolSelector};
 
@@ -102,6 +102,8 @@ struct OpenAiResponseMessage {
     content: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<OpenAiToolCall>>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
 }
 
 /// Tool call from OpenAI API response
@@ -284,7 +286,14 @@ impl OpenAiProvider {
             }),
             stop_reason: choice.finish_reason,
             citations: None,
-            thinking_blocks: None,
+            thinking_blocks: choice.message.reasoning_content.map(|rc| {
+                vec![ThinkingBlock {
+                    block_type: "thinking".to_string(),
+                    thinking: rc,
+                    signature: String::new(),
+                    data: String::new(),
+                }]
+            }),
         })
     }
 
@@ -586,13 +595,19 @@ impl LLMProvider for OpenAiProvider {
 }
 
 impl OpenAiProvider {
-    /// Check if a model is an o-series reasoning model
+    /// Check if a model is a reasoning model (o-series or GLM-5.x).
     fn is_reasoning_model(model: &str) -> bool {
-        model.starts_with('o')
+        // o-series: o1, o3, o4-mini, etc.
+        if model.starts_with('o')
             && model[1..]
                 .chars()
                 .next()
                 .is_some_and(|c| c.is_ascii_digit())
+        {
+            return true;
+        }
+        // GLM-5.x reasoning models (z.ai)
+        model.starts_with("glm-5")
     }
 
     /// Convert protocol ChatMessages to OpenAI messages, handling structured content blocks.
@@ -822,6 +837,32 @@ impl OpenAiProvider {
                                                     delta: crate::provider_v2::ContentDelta::Text {
                                                         text: content_str.to_string(),
                                                     },
+                                                },
+                                            ));
+                                        }
+                                    }
+                                }
+
+                                // Handle reasoning content (GLM-5 via Z.AI official API)
+                                if let Some(reasoning) = delta.get("reasoning_content") {
+                                    if let Some(reasoning_str) = reasoning.as_str() {
+                                        if !reasoning_str.is_empty() {
+                                            events.push(Ok(
+                                                crate::provider_v2::SSEEvent::ThinkingDelta {
+                                                    thinking: reasoning_str.to_string(),
+                                                },
+                                            ));
+                                        }
+                                    }
+                                }
+
+                                // Handle reasoning content (GLM-5 via vLLM uses "reasoning" key)
+                                if let Some(reasoning) = delta.get("reasoning") {
+                                    if let Some(reasoning_str) = reasoning.as_str() {
+                                        if !reasoning_str.is_empty() {
+                                            events.push(Ok(
+                                                crate::provider_v2::SSEEvent::ThinkingDelta {
+                                                    thinking: reasoning_str.to_string(),
                                                 },
                                             ));
                                         }
@@ -1261,9 +1302,12 @@ mod tests {
         assert!(OpenAiProvider::is_reasoning_model("o3"));
         assert!(OpenAiProvider::is_reasoning_model("o3-mini"));
         assert!(OpenAiProvider::is_reasoning_model("o4-mini"));
+        assert!(OpenAiProvider::is_reasoning_model("glm-5.1"));
+        assert!(OpenAiProvider::is_reasoning_model("glm-5"));
         assert!(!OpenAiProvider::is_reasoning_model("gpt-4o"));
         assert!(!OpenAiProvider::is_reasoning_model("gpt-5.2"));
         assert!(!OpenAiProvider::is_reasoning_model("optimum"));
+        assert!(!OpenAiProvider::is_reasoning_model("glm-4"));
     }
 
     #[test]

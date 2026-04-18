@@ -5,7 +5,7 @@ use crate::security::{
 };
 use crate::truncation::{truncate_items, truncate_lines, LIST_MAX_ITEMS, READ_MAX_LINES};
 use crate::{Tool, ToolContext, ToolOutput, ToolPermission};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -575,7 +575,7 @@ impl Tool for WriteFileTool {
     }
 
     fn description(&self) -> &str {
-        "Write UTF-8 text to a file. Creates parent directories if needed. Returns a diff showing what changed vs the previous file content."
+        "Write UTF-8 text to a file. Creates parent directories if needed. Set append=true to add content to the end of an existing file (useful for writing large files in multiple chunks). Returns a diff showing what changed vs the previous file content."
     }
 
     fn permission(&self) -> ToolPermission {
@@ -593,11 +593,15 @@ impl Tool for WriteFileTool {
                 },
                 "content": {
                     "type": "string",
-                    "description": "UTF-8 text content to write. Completely replaces any existing file content."
+                    "description": "UTF-8 text content to write. Completely replaces any existing file content unless append=true."
                 },
                 "content_base64": {
                     "type": "string",
                     "description": "Base64-encoded binary content to write. Use this for binary files."
+                },
+                "append": {
+                    "type": "boolean",
+                    "description": "If true, append content to the end of the existing file instead of overwriting. Use for writing large files in multiple chunks."
                 }
             },
             "oneOf": [
@@ -608,16 +612,23 @@ impl Tool for WriteFileTool {
     }
 
     fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        // Check permissions
         crate::check_permission(self.permission(), ctx)?;
 
         let path_str = required_string(&params, "path")?;
         let text_content = optional_string(&params, "content");
         let binary_content = optional_string(&params, "content_base64");
+        let append = params
+            .get("append")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
         if text_content.is_some() && binary_content.is_some() {
             return Err(anyhow!(
                 "use either `content` or `content_base64`, not both"
             ));
+        }
+        if append && binary_content.is_some() {
+            return Err(anyhow!("append mode is not supported for binary content"));
         }
         let binary_bytes = if let Some(encoded) = binary_content {
             Some(
@@ -630,17 +641,14 @@ impl Tool for WriteFileTool {
         };
         let content = text_content.unwrap_or("");
 
-        // Validate path and content size using security module
         let write_size = binary_bytes
             .as_ref()
             .map(|b: &Vec<u8>| b.len())
             .unwrap_or(content.len());
         let path = validate_write_path(path_str, &ctx.cwd, write_size)?;
 
-        // Validate against sandbox rules
         crate::check_sandbox_path(&path, ctx)?;
 
-        // Check for blocked extensions (writing to .env, .key files etc.)
         if is_blocked_extension(&path) {
             return Err(anyhow::anyhow!(
                 "File extension is blocked for writing: {}",
@@ -648,9 +656,17 @@ impl Tool for WriteFileTool {
             ));
         }
 
-        // Read existing content for diff generation (if file exists)
-        // Use symlink-safe read to prevent TOCTOU: an attacker could replace
-        // the file with a symlink between validate_write_path and this read
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let path_display = path.display().to_string();
+
+        if append {
+            return Self::execute_append(&path, content, write_size, path_display, ctx);
+        }
+
+        // === Non-append (overwrite) mode below ===
         let old_content = if binary_bytes.is_some() {
             Vec::new()
         } else if let Ok(mut f) = open_file_symlink_safe(&path) {
@@ -671,13 +687,6 @@ impl Tool for WriteFileTool {
             Vec::new()
         };
 
-        // Create parent directories if needed (atomic - no TOCTOU)
-        // fs::create_dir_all is idempotent - handles AlreadyExists gracefully
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // Use symlink-safe file creation to prevent TOCTOU attacks
         let mut file = create_file_symlink_safe(&path)?;
         use std::io::Write;
         if let Some(bytes) = binary_bytes.as_ref() {
@@ -687,12 +696,9 @@ impl Tool for WriteFileTool {
         }
         file.sync_all()?;
 
-        // Calculate size metrics
         let bytes = write_size;
         let lines = content.lines().count();
-        let path_display = path.display().to_string();
 
-        // Generate diff output so the LLM can see what changed
         let diff = if binary_bytes.is_some() {
             format!("Wrote binary file ({} bytes)", bytes)
         } else if old_content.is_empty() {
@@ -719,6 +725,68 @@ impl Tool for WriteFileTool {
                 "path": path_display,
                 "bytes": bytes,
                 "lines": lines
+            }),
+        ))
+    }
+}
+
+impl WriteFileTool {
+    fn execute_append(
+        path: &std::path::Path,
+        content: &str,
+        appended_bytes: usize,
+        path_display: String,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput> {
+        use std::io::Write;
+
+        let existed = path.exists();
+        let old_size = if existed {
+            fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)
+            .with_context(|| format!("Failed to open {} for append", path_display))?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+
+        let new_metadata = fs::metadata(path)?;
+        let total_bytes = new_metadata.len();
+        let total_lines = fs::read_to_string(path)
+            .map(|s| s.lines().count())
+            .unwrap_or(0);
+
+        let summary = if existed {
+            format!(
+                "appended {} bytes to {} (total: {} bytes, {} lines)",
+                appended_bytes, path_display, total_bytes, total_lines
+            )
+        } else {
+            format!(
+                "created and wrote {} bytes to {} ({} lines)",
+                appended_bytes, path_display, total_lines
+            )
+        };
+
+        let mut output_text = summary;
+
+        if let Some(formatter_diff) = file_formatter::format_file(path, &ctx.cwd) {
+            output_text.push_str(&formatter_diff);
+        }
+
+        Ok(ToolOutput::with_structured(
+            output_text,
+            json!({
+                "path": path_display,
+                "appended_bytes": appended_bytes,
+                "total_bytes": total_bytes,
+                "total_lines": total_lines,
+                "old_size": old_size,
             }),
         ))
     }

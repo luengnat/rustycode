@@ -126,13 +126,19 @@ impl LLMToolExecutor {
         Ok(tool_calls)
     }
 
-    /// Parse tool calls from OpenAI function calling response
+    /// Parse tool calls from OpenAI function calling response.
     ///
-    /// OpenAI returns tool_calls array in response:
-    /// {"tool_calls": [{"id": "...", "function": {"name": "bash", "arguments": "{...}"}}]}
+    /// Handles two formats:
+    /// 1. Pure JSON: `{"tool_calls": [{"id": "...", "function": {"name": "bash", "arguments": "{...}"}}]}`
+    /// 2. Markdown-wrapped: ```` ```tool\n[{"name": "...", "arguments": {...}}]\n``` ````
+    ///
+    /// Some providers (e.g. GLM-5.1 via OpenAI-compatible API) embed tool calls inside
+    /// ```tool fenced code blocks mixed with regular text, so we extract and parse those
+    /// as a fallback when pure-JSON parsing yields nothing.
     pub fn parse_openai_tool_calls(&self, content: &str) -> Result<Vec<ParsedToolCall>> {
         let mut tool_calls = Vec::new();
 
+        // Strategy 1: Try pure JSON first (standard OpenAI format)
         if let Ok(json_value) = serde_json::from_str::<Value>(content) {
             if let Some(tool_calls_array) = json_value.get("tool_calls").and_then(|t| t.as_array())
             {
@@ -163,6 +169,27 @@ impl LLMToolExecutor {
                             id,
                         });
                     }
+                }
+                return Ok(tool_calls);
+            }
+        }
+
+        // Strategy 2: Extract from ```tool code blocks (GLM-5.1 / Anthropic-style)
+        if let Some(json_str) = extract_tool_code_block(content) {
+            // The extracted block may be a JSON array of tool calls
+            if let Ok(items) = serde_json::from_str::<Vec<Value>>(&json_str) {
+                for item in &items {
+                    if let Some(tc) = parse_tool_call_item(item) {
+                        tool_calls.push(tc);
+                    }
+                }
+                return Ok(tool_calls);
+            }
+            // Single object (not wrapped in array)
+            if let Ok(obj) = serde_json::from_str::<Value>(&json_str) {
+                if let Some(tc) = parse_tool_call_item(&obj) {
+                    tool_calls.push(tc);
+                    return Ok(tool_calls);
                 }
             }
         }

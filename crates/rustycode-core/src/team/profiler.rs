@@ -63,8 +63,7 @@ impl TaskProfiler {
             return ReasoningStrategy::ReflectFirst;
         }
 
-        // Check for TDD-appropriate tasks (feature requests with clear scope)
-        let tdd_keywords = ["add", "implement", "feature", "create", "new"];
+        let tdd_keywords = ["add", "implement", "feature", "create", "new", "build"];
         let is_feature_request = tdd_keywords.iter().any(|kw| task_lower.contains(kw));
 
         if is_feature_request {

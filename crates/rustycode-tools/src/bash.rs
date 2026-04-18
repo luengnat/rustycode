@@ -933,7 +933,10 @@ impl Tool for BashTool {
         let command = params
             .get("command")
             .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("missing string parameter 'command'"))?
+            .ok_or_else(|| {
+                let actual = params.get("command").map(|v| v.to_string()).unwrap_or_else(|| "null".to_string());
+                anyhow!("missing string parameter 'command', got: {actual}")
+            })?
             .to_string(); // Clone to avoid lifetime issues
 
         let restart = params
@@ -1124,7 +1127,10 @@ impl ToolStreaming for BashTool {
         let command = params
             .get("command")
             .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("missing string parameter 'command'"))?
+            .ok_or_else(|| {
+                let actual = params.get("command").map(|v| v.to_string()).unwrap_or_else(|| "null".to_string());
+                anyhow!("missing string parameter 'command', got: {actual}")
+            })?
             .to_string();
 
         let restart = params

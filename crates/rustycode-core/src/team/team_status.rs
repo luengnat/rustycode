@@ -155,7 +155,9 @@ impl TeamStatusRenderer {
             | TeamEvent::ToolStarted { .. }
             | TeamEvent::ToolCompleted { .. }
             | TeamEvent::ToolLoopIteration { .. }
-            | TeamEvent::AdvisorGuidance { .. } => {}
+            | TeamEvent::AdvisorGuidance { .. }
+            | TeamEvent::LLMTextChunk { .. }
+            | TeamEvent::LLMThinkingChunk { .. } => {}
         }
     }
 

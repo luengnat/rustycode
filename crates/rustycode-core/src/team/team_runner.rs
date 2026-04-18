@@ -37,7 +37,7 @@ impl Default for TeamRunnerConfig {
         Self {
             max_turns: 20,
             streaming: true,
-            max_response_tokens: 4096,
+            max_response_tokens: 16384,
             architect_enabled: true,
             scalpel_enabled: true,
         }

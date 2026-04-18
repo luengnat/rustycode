@@ -906,7 +906,7 @@ impl Default for ProviderConfig {
         Self {
             api_key: None,
             base_url: None,
-            timeout_seconds: Some(120),
+            timeout_seconds: Some(30),
             extra_headers: None,
             retry_config: Some(crate::retry::RetryConfig::default()),
         }

@@ -21,12 +21,14 @@
 //! event engine.
 
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use rustycode_llm::provider_v2::{
-    ChatMessage, CompletionRequest, CompletionResponse, LLMProvider, MessageRole,
+    ChatMessage, CompletionRequest, CompletionResponse, ContentBlockType, ContentDelta,
+    LLMProvider, MessageRole, SSEEvent,
 };
 use rustycode_llm::tool_executor::LLMToolExecutor;
 use rustycode_protocol::team::*;
@@ -185,11 +187,30 @@ pub enum TeamEvent {
         role: String,
         plan: String,
     },
+    LLMTextChunk {
+        role: String,
+        chunk: String,
+    },
+    LLMThinkingChunk {
+        role: String,
+        chunk: String,
+    },
 }
 
 // ============================================================================
 // LLM Client abstraction
 // ============================================================================
+
+/// Events emitted during streaming LLM responses.
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    Text(String),
+    Thinking(String),
+    ToolCallStart { index: usize, id: String, name: String },
+    ToolCallDelta { index: usize, arguments: String },
+    Done,
+    Error(String),
+}
 
 /// A mockable LLM client for the orchestrator.
 #[async_trait]
@@ -211,6 +232,42 @@ pub trait TeamLLMClient: Send + Sync {
             citations: None,
             thinking_blocks: None,
         })
+    }
+
+    fn complete_stream_with_tools<'a>(
+        &'a self,
+        messages: Vec<ChatMessage>,
+        tools: Vec<serde_json::Value>,
+    ) -> Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send + 'a>> {
+        let _ = (messages, tools);
+        Box::pin(futures::stream::empty())
+    }
+}
+
+fn convert_sse_to_stream_events(event: SSEEvent) -> Vec<StreamEvent> {
+    match event {
+        SSEEvent::Text { text } => vec![StreamEvent::Text(text)],
+        SSEEvent::ContentBlockStart {
+            content_block: ContentBlockType::ToolUse { id, name, .. },
+            index,
+        } => {
+            vec![StreamEvent::ToolCallStart { index, id, name }]
+        }
+        SSEEvent::ContentBlockDelta { delta, index } => match delta {
+            ContentDelta::Text { text } => vec![StreamEvent::Text(text)],
+            ContentDelta::Thinking { thinking } => vec![StreamEvent::Thinking(thinking)],
+            ContentDelta::PartialJson { partial_json } => {
+                vec![StreamEvent::ToolCallDelta {
+                    index,
+                    arguments: partial_json,
+                }]
+            }
+            _ => vec![],
+        },
+        SSEEvent::ThinkingDelta { thinking } => vec![StreamEvent::Thinking(thinking)],
+        SSEEvent::MessageStop => vec![StreamEvent::Done],
+        SSEEvent::Error { message, .. } => vec![StreamEvent::Error(message)],
+        _ => vec![],
     }
 }
 
@@ -246,6 +303,52 @@ impl TeamLLMClient for RealLLMClient {
             .await
             .context("LLM provider call failed with tools")
     }
+
+    fn complete_stream_with_tools<'a>(
+        &'a self,
+        messages: Vec<ChatMessage>,
+        tools: Vec<serde_json::Value>,
+    ) -> Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send + 'a>> {
+        let request = CompletionRequest::new(&self.model, messages)
+            .with_max_tokens(self.max_tokens)
+            .with_tools(tools);
+
+        let provider = self.provider.clone();
+
+        // Return a stream that collects all events from the provider's SSE stream
+        // and yields them. We use an async block + unfold pattern.
+        let (tx, rx) = futures::channel::mpsc::channel(64);
+
+        tokio::spawn(async move {
+            use futures::StreamExt;
+            use futures::SinkExt;
+            let mut tx = tx;
+            match provider.complete_stream(request).await {
+                Ok(mut stream) => {
+                    while let Some(chunk_result) = stream.next().await {
+                        match chunk_result {
+                            Ok(event) => {
+                                for ev in convert_sse_to_stream_events(event) {
+                                    if tx.send(ev).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(StreamEvent::Error(e.to_string())).await;
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(StreamEvent::Error(e.to_string())).await;
+                }
+            }
+        });
+
+        Box::pin(rx)
+    }
 }
 
 // ============================================================================
@@ -273,7 +376,7 @@ impl Default for OrchestratorConfig {
             max_total_turns: 50,
             max_retries_per_step: 3,
             max_adaptations: 5,
-            max_response_tokens: 4096,
+            max_response_tokens: 16384,
             use_local_judge: true,
         }
     }
@@ -290,7 +393,7 @@ pub struct ToolLoopConfig {
 impl Default for ToolLoopConfig {
     fn default() -> Self {
         Self {
-            max_iterations: 15,
+            max_iterations: 30,
             max_advisor_tokens: 1024,
             builder_tools: vec![
                 "read_file".into(),
@@ -1640,17 +1743,19 @@ impl TeamOrchestrator {
                 role_name
             );
 
-            let response = self
-                .client
-                .complete_with_tools(messages.clone(), filtered_tools.clone())
-                .await
-                .with_context(|| {
-                    format!(
-                        "Tool loop LLM call failed for {} at iteration {}",
-                        role_name, iteration
-                    )
-                })?;
-            let content = response.content.clone();
+            let content = {
+                let response = self
+                    .client
+                    .complete_with_tools(messages.clone(), filtered_tools.clone())
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Tool loop LLM call failed for {} at iteration {}",
+                            role_name, iteration
+                        )
+                    })?;
+                response.content
+            };
 
             debug!(
                 "Tool loop {} iter {} response ({} bytes): {:.200}",
@@ -1667,13 +1772,24 @@ impl TeamOrchestrator {
             } else {
                 tool_calls_openai
             };
-            debug!(
-                "Parsed {} tool calls for {} (openai={}, anthropic fallback={})",
-                tool_calls.len(),
-                role_name,
-                used_openai,
-                !used_openai
-            );
+            if tool_calls.is_empty() {
+                debug!(
+                    "No tool calls parsed for {} from {} bytes (has ```tool block: {})",
+                    role_name,
+                    content.len(),
+                    content.contains("```tool")
+                );
+            } else {
+                let names: Vec<&str> = tool_calls.iter().map(|tc| tc.name.as_str()).collect();
+                debug!(
+                    "Parsed {} tool calls for {}: {:?} (openai={}, anthropic fallback={})",
+                    tool_calls.len(),
+                    role_name,
+                    names,
+                    used_openai,
+                    !used_openai
+                );
+            }
             if tool_calls.is_empty() {
                 debug!(
                     "No tool calls in response, returning final content for {}",
@@ -1696,10 +1812,19 @@ impl TeamOrchestrator {
                 });
                 match self.tool_executor.execute_tool_call(tc).await {
                     Ok(result) => {
-                        debug!(
-                            "Tool {} executed: success={}",
-                            result.tool_name, result.success
-                        );
+                        if result.success {
+                            info!(
+                                "Tool {} executed: success={}",
+                                result.tool_name, result.success
+                            );
+                        } else {
+                            warn!(
+                                "Tool {} executed: success={}, error={}",
+                                result.tool_name,
+                                result.success,
+                                result.error.as_deref().unwrap_or("unknown")
+                            );
+                        }
                         self.emit(TeamEvent::ToolCompleted {
                             role: role_name.clone(),
                             tool_name: result.tool_name.clone(),

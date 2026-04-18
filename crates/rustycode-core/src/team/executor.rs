@@ -27,6 +27,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rustycode_llm::provider_v2::ChatMessage;
 use rustycode_protocol::team::*;
+use tracing::warn;
 
 use super::coordinator::{BuilderAction, SkepticReview, SkepticVerdict as CoordVerdict, TurnInput};
 
@@ -335,9 +336,132 @@ pub fn parse_turn(raw: &str, role: TeamRole) -> Result<ParsedTurn> {
 
 /// Parse the Architect's JSON output into a structured ArchitectTurn.
 /// Strips markdown fences if present (LLMs often wrap JSON in ```json blocks).
+///
+/// If the LLM returns valid JSON that doesn't conform to the ArchitectTurn schema,
+/// we attempt a lenient parse: extract whatever fields we can and fill defaults
+/// for the rest, rather than failing outright.
 pub fn parse_architect_turn(raw: &str) -> Result<rustycode_protocol::team::ArchitectTurn> {
-    let cleaned = extract_json(raw)?;
-    serde_json::from_str(&cleaned).context("Failed to parse ArchitectTurn from LLM output")
+    let cleaned = match extract_json(raw) {
+        Ok(json) => json,
+        Err(e) => {
+            // If we can't extract any JSON at all, synthesize a minimal declaration
+            // from the raw text so the pipeline doesn't stall.
+            warn!(
+                "Could not extract JSON from Architect response, synthesizing default: {}",
+                e
+            );
+            return Ok(rustycode_protocol::team::ArchitectTurn {
+                declaration: rustycode_protocol::team::StructuralDeclaration::default(),
+                rationale: raw.chars().take(500).collect(),
+                confidence: 0.3,
+            });
+        }
+    };
+
+    // Try strict parse first
+    if let Ok(turn) = serde_json::from_str::<rustycode_protocol::team::ArchitectTurn>(&cleaned) {
+        return Ok(turn);
+    }
+
+    // Lenient fallback: try to parse as generic JSON and extract what we can
+    warn!("Strict ArchitectTurn parse failed, attempting lenient parse");
+    let value: serde_json::Value = serde_json::from_str(&cleaned)
+        .context("Lenient parse also failed — response is not valid JSON")?;
+
+    Ok(rustycode_protocol::team::ArchitectTurn {
+        declaration: parse_declaration_lenient(&value),
+        rationale: value
+            .get("rationale")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Auto-generated from non-standard Architect response")
+            .to_string(),
+        confidence: value
+            .get("confidence")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5),
+    })
+}
+
+/// Leniently extract a StructuralDeclaration from a JSON value.
+/// Tries the `declaration` field first, then falls back to top-level fields.
+fn parse_declaration_lenient(
+    value: &serde_json::Value,
+) -> rustycode_protocol::team::StructuralDeclaration {
+    let decl_value = value.get("declaration").unwrap_or(value);
+
+    let modules = decl_value
+        .get("modules")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| parse_module_declaration(m))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let interfaces = decl_value
+        .get("interfaces")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|i| serde_json::from_value(i.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let dependencies = decl_value
+        .get("dependencies")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    StructuralDeclaration {
+        modules,
+        interfaces,
+        dependencies,
+    }
+}
+
+/// Parse a single ModuleDeclaration leniently — fill defaults for missing fields.
+fn parse_module_declaration(
+    value: &serde_json::Value,
+) -> Option<rustycode_protocol::team::ModuleDeclaration> {
+    let path = value.get("path")?.as_str()?.to_string();
+    if path.is_empty() {
+        return None;
+    }
+
+    let action = value
+        .get("action")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or(ModuleAction::Create);
+
+    Some(ModuleDeclaration {
+        path,
+        action,
+        exports: value
+            .get("exports")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        imports: value
+            .get("imports")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        purpose: value
+            .get("purpose")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+    })
 }
 
 /// Parse the Scalpel's JSON output into a structured ScalpelTurn.
