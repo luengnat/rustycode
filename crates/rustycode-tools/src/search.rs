@@ -200,7 +200,7 @@ impl Tool for GrepTool {
             .iter()
             .map(|(path, matches)| (path.clone(), matches.len()))
             .collect();
-        file_stats.sort_by(|a, b| b.1.cmp(&a.1));
+        file_stats.sort_by_key(|a| std::cmp::Reverse(a.1));
 
         // Apply truncation
         let truncated = truncate_items(all_matches, GREP_MAX_MATCHES, "grep results");

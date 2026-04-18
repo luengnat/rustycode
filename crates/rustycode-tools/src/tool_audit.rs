@@ -349,14 +349,14 @@ impl ToolAuditLogger {
                     .values()
                     .map(|s| (s.tool_name.clone(), s.call_count))
                     .collect();
-                by_freq.sort_by(|a, b| b.1.cmp(&a.1));
+                by_freq.sort_by_key(|a| std::cmp::Reverse(a.1));
 
                 let mut by_dur: Vec<(String, u64)> = guard
                     .stats
                     .values()
                     .map(|s| (s.tool_name.clone(), s.total_duration_ms))
                     .collect();
-                by_dur.sort_by(|a, b| b.1.cmp(&a.1));
+                by_dur.sort_by_key(|a| std::cmp::Reverse(a.1));
 
                 SessionSummary {
                     total_calls,

@@ -447,7 +447,7 @@ impl CheckpointManager {
         // Fallback to in-memory cache
         let cache = self.checkpoints.read();
         let mut checkpoints: Vec<_> = cache.values().cloned().collect();
-        checkpoints.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        checkpoints.sort_by_key(|a| std::cmp::Reverse(a.created_at));
         checkpoints
     }
 

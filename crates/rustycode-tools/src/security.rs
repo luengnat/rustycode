@@ -538,7 +538,7 @@ pub fn sanitize_for_log(input: &str) -> String {
     }
 
     // Sort by position descending so we can replace without invalidating offsets
-    redactions.sort_by(|a, b| b.0.cmp(&a.0));
+    redactions.sort_by_key(|a| std::cmp::Reverse(a.0));
 
     // Remove overlapping ranges — keep the one that starts earlier (covers more)
     let mut i = 0;

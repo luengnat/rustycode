@@ -327,7 +327,7 @@ impl UsageTracker {
             .map(|(tool, time)| (tool.clone(), *time))
             .collect();
 
-        tools.sort_by(|a, b| b.1.cmp(&a.1));
+        tools.sort_by_key(|a| std::cmp::Reverse(a.1));
         tools
             .into_iter()
             .take(limit)
@@ -343,7 +343,7 @@ impl UsageTracker {
             .map(|(tool, count)| (tool.clone(), *count))
             .collect();
 
-        tools.sort_by(|a, b| b.1.cmp(&a.1));
+        tools.sort_by_key(|a| std::cmp::Reverse(a.1));
         tools
             .into_iter()
             .take(limit)

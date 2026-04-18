@@ -165,7 +165,7 @@ impl ProjectTracker {
     /// List all tracked projects, sorted by last_accessed (most recent first).
     pub fn list_projects(&self) -> Vec<&ProjectInfo> {
         let mut projects: Vec<&ProjectInfo> = self.projects.values().collect();
-        projects.sort_by(|a, b| b.last_accessed.cmp(&a.last_accessed));
+        projects.sort_by_key(|a| std::cmp::Reverse(a.last_accessed));
         projects
     }
 

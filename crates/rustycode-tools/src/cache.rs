@@ -154,11 +154,9 @@ impl CacheMetrics {
     }
 
     pub fn avg_entry_size(&self) -> usize {
-        if self.current_entries == 0 {
-            0
-        } else {
-            self.current_memory_bytes / self.current_entries
-        }
+        self.current_memory_bytes
+            .checked_div(self.current_entries)
+            .unwrap_or(0)
     }
 }
 

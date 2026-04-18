@@ -253,14 +253,9 @@ fn fix_single_quotes(input: &str) -> String {
 
     for ch in chars {
         match ch {
-            '\'' => {
-                // Replace single quote with double quote
-                // But don't replace if it's escaped (preceded by backslash)
-                if prev_char != Some('\\') {
-                    result.push('"');
-                } else {
-                    result.push(ch);
-                }
+            '\'' if prev_char != Some('\\') => {
+                // Replace single quote with double quote (unless escaped)
+                result.push('"');
             }
             _ => {
                 result.push(ch);
