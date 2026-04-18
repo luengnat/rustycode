@@ -1,11 +1,11 @@
 //! Enterprise features tests
 
 use rustycode_mcp::enterprise::*;
-use std::collections::HashMap;
 use rustycode_mcp::manager::*;
 use rustycode_mcp::resources::*;
 use rustycode_mcp::tools::*;
 use rustycode_mcp::{McpError, McpResult, McpTransportType};
+use std::collections::HashMap;
 use std::time::Duration;
 
 #[tokio::test]
@@ -181,57 +181,60 @@ async fn test_manager_config() {
 
 #[tokio::test]
 async fn test_server_config() {
-        let config = ServerConfig {
-            server_id: "test-server".to_string(),
-            name: "Test Server".to_string(),
-            command: Some("echo".to_string()),
-            args: vec!["hello".to_string()],
-            transport_type: None,
-            url: None,
-            headers: None,
-            headers_helper: None,
-            description: None,
-            oauth: None,
-            enable_tools: true,
-            enable_resources: false,
-            enable_prompts: false,
-            enabled: true,
-            tools_allowlist: vec![],
-            tools_denylist: vec![],
-            tags: vec![],
-        };
+    let config = ServerConfig {
+        server_id: "test-server".to_string(),
+        name: "Test Server".to_string(),
+        command: Some("echo".to_string()),
+        args: vec!["hello".to_string()],
+        transport_type: None,
+        url: None,
+        headers: None,
+        headers_helper: None,
+        description: None,
+        oauth: None,
+        enable_tools: true,
+        enable_resources: false,
+        enable_prompts: false,
+        enabled: true,
+        tools_allowlist: vec![],
+        tools_denylist: vec![],
+        tags: vec![],
+    };
 
-        assert_eq!(config.server_id, "test-server");
-        assert_eq!(config.args.len(), 1);
-        assert!(config.enable_tools);
-        assert!(!config.enable_resources);
-    }
+    assert_eq!(config.server_id, "test-server");
+    assert_eq!(config.args.len(), 1);
+    assert!(config.enable_tools);
+    assert!(!config.enable_resources);
+}
 
-    #[tokio::test]
-    async fn test_server_config_http() {
-        let config = ServerConfig {
-            server_id: "remote-api".to_string(),
-            name: "Remote API".to_string(),
-            command: None,
-            args: vec![],
-            transport_type: Some(McpTransportType::Http),
-            url: Some("https://api.example.com/mcp".to_string()),
-            headers: Some(HashMap::from([("Authorization".to_string(), "Bearer test".to_string())])),
-            headers_helper: None,
-            description: Some("Remote API server".to_string()),
-            oauth: None,
-            enable_tools: true,
-            enable_resources: false,
-            enable_prompts: false,
-            enabled: true,
-            tools_allowlist: vec![],
-            tools_denylist: vec![],
-            tags: vec![],
-        };
+#[tokio::test]
+async fn test_server_config_http() {
+    let config = ServerConfig {
+        server_id: "remote-api".to_string(),
+        name: "Remote API".to_string(),
+        command: None,
+        args: vec![],
+        transport_type: Some(McpTransportType::Http),
+        url: Some("https://api.example.com/mcp".to_string()),
+        headers: Some(HashMap::from([(
+            "Authorization".to_string(),
+            "Bearer test".to_string(),
+        )])),
+        headers_helper: None,
+        description: Some("Remote API server".to_string()),
+        oauth: None,
+        enable_tools: true,
+        enable_resources: false,
+        enable_prompts: false,
+        enabled: true,
+        tools_allowlist: vec![],
+        tools_denylist: vec![],
+        tags: vec![],
+    };
 
-        assert_eq!(config.transport_type, Some(McpTransportType::Http));
-        assert_eq!(config.url.as_deref(), Some("https://api.example.com/mcp"));
-    }
+    assert_eq!(config.transport_type, Some(McpTransportType::Http));
+    assert_eq!(config.url.as_deref(), Some("https://api.example.com/mcp"));
+}
 
 #[tokio::test]
 async fn test_health_status() {

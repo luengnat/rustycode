@@ -344,7 +344,10 @@ impl ServerEnablementManager {
 impl Default for ServerEnablementManager {
     fn default() -> Self {
         Self::new().unwrap_or_else(|e| {
-            warn!("Failed to create ServerEnablementManager, using fallback: {}", e);
+            warn!(
+                "Failed to create ServerEnablementManager, using fallback: {}",
+                e
+            );
             Self {
                 config_file_path: PathBuf::from(".rustycode/mcp-enablement.json"),
                 session_disabled: HashSet::new(),

@@ -59,7 +59,10 @@ pub async fn resolve_headers(helper_path: &str) -> HashMap<String, String> {
     let stdout = match String::from_utf8(output.stdout) {
         Ok(s) => s,
         Err(e) => {
-            warn!("headersHelper '{}' produced non-UTF-8 output: {}", helper_path, e);
+            warn!(
+                "headersHelper '{}' produced non-UTF-8 output: {}",
+                helper_path, e
+            );
             return HashMap::new();
         }
     };
@@ -167,7 +170,10 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_headers_large_output_rejected() {
         // Generate output exceeding MAX_OUTPUT_BYTES
-        let script = format!("head -c {} < /dev/zero | tr '\\0' 'x'", MAX_OUTPUT_BYTES + 1);
+        let script = format!(
+            "head -c {} < /dev/zero | tr '\\0' 'x'",
+            MAX_OUTPUT_BYTES + 1
+        );
         let result = resolve_headers(&script).await;
         assert!(result.is_empty());
     }

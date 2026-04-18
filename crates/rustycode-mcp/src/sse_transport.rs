@@ -1,10 +1,10 @@
 use crate::protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use crate::{McpError, McpResult};
+use async_trait::async_trait;
+use reqwest::Client;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use async_trait::async_trait;
-use reqwest::Client;
 
 use crate::transport::{IncomingMessage, Transport};
 
@@ -19,7 +19,7 @@ pub struct SseTransport {
     // For simplicity in tests, we reuse a basic inbox channel
     inbox: mpsc::Receiver<IncomingMessage>,
     inbox_sender: Option<mpsc::Sender<IncomingMessage>>,
-    
+
     sse_endpoint: String,
 }
 
@@ -95,7 +95,9 @@ impl Transport for SseTransport {
                 }
             }
         }
-        Err(McpError::TransportError("SSE endpoint did not return JSON".to_string()))
+        Err(McpError::TransportError(
+            "SSE endpoint did not return JSON".to_string(),
+        ))
     }
 
     async fn send_notification(&mut self, notification: JsonRpcNotification) -> McpResult<()> {

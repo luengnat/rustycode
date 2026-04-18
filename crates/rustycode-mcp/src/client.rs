@@ -2,8 +2,8 @@
 
 use crate::protocol::JsonRpcRequest;
 use crate::transport::Transport;
-use crate::StdioTransport;
 use crate::types::*;
+use crate::StdioTransport;
 use crate::{McpError, McpResult};
 use serde_json::json;
 use std::collections::HashMap;
@@ -71,7 +71,8 @@ impl McpClient {
         info!("Connecting to MCP server '{}' via stdio", server_name);
 
         let transport = StdioTransport::spawn(command, args)?;
-        self.connect_with_transport(server_name, Box::new(transport)).await
+        self.connect_with_transport(server_name, Box::new(transport))
+            .await
     }
 
     /// Connect with a pre-constructed transport
@@ -81,7 +82,10 @@ impl McpClient {
         mut transport: Box<dyn Transport>,
     ) -> McpResult<()> {
         let server_name = server_name.into();
-        info!("Connecting to MCP server '{}' via custom transport", server_name);
+        info!(
+            "Connecting to MCP server '{}' via custom transport",
+            server_name
+        );
         // Initialize the connection
         Self::initialize_connection_static(transport.as_mut(), &server_name, &self.config).await?;
 

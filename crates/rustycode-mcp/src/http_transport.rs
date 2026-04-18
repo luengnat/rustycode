@@ -1,10 +1,10 @@
 use crate::protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use crate::{McpError, McpResult};
+use async_trait::async_trait;
+use reqwest::Client;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
-use async_trait::async_trait;
-use reqwest::Client;
 
 use crate::transport::{IncomingMessage, Transport};
 
@@ -16,8 +16,7 @@ pub struct HttpTransport {
     headers: HashMap<String, String>,
     session_id: Option<String>,
     connected: bool,
-    pending_requests:
-        HashMap<String, oneshot::Sender<JsonRpcResponse>>, // map of id -> responder
+    pending_requests: HashMap<String, oneshot::Sender<JsonRpcResponse>>, // map of id -> responder
     inbox: mpsc::Receiver<IncomingMessage>,
     // Optional sender to push into inbox from internal listeners (not required for tests)
     inbox_sender: Option<mpsc::Sender<IncomingMessage>>,
@@ -97,10 +96,9 @@ impl Transport for HttpTransport {
                         .map_err(|e| McpError::ProtocolError(format!("Invalid JSON: {}", e)))?;
                     return Ok(json_resp);
                 } else if ct_str.contains("text/event-stream") {
-                    let text = resp
-                        .text()
-                        .await
-                        .map_err(|e| McpError::TransportError(format!("BOM SSE read error: {}", e)))?;
+                    let text = resp.text().await.map_err(|e| {
+                        McpError::TransportError(format!("BOM SSE read error: {}", e))
+                    })?;
                     // Try to parse as a single JSON-RPC response
                     let json_resp = JsonRpcResponse::from_json(&text)
                         .map_err(|e| McpError::ProtocolError(format!("Invalid JSON: {}", e)))?;
