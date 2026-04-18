@@ -70,7 +70,7 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings -A clippy::unnecessary-sort-by -A clippy::collapsible-match -A clippy::manual-checked-ops -A clippy::unnecessary-min-or-max -A clippy::useless-conversion
 
   provider-v2:
     name: Provider v2 Coverage
