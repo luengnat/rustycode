@@ -126,7 +126,7 @@ impl Seance {
             }
         }
 
-        records.sort_by(|a, b| b.sequence.cmp(&a.sequence));
+        records.sort_by_key(|a| std::cmp::Reverse(a.sequence));
         Ok(records)
     }
 

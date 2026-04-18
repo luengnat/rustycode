@@ -196,7 +196,7 @@ impl CheckpointManager {
     /// List all available checkpoints
     pub fn list(&self) -> Vec<&CheckpointMetadata> {
         let mut checkpoints: Vec<_> = self.index.values().collect();
-        checkpoints.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        checkpoints.sort_by_key(|a| std::cmp::Reverse(a.created_at));
         checkpoints
     }
 

@@ -275,7 +275,7 @@ pub async fn handle_list_command(cwd: &Path) -> Result<String> {
 
     // Sort by creation time (most recent first)
     let mut sorted_memories: Vec<_> = memories.iter().collect();
-    sorted_memories.sort_by(|a, b| b.1.created_at.cmp(&a.1.created_at));
+    sorted_memories.sort_by_key(|a| std::cmp::Reverse(a.1.created_at.clone()));
 
     for (key, memory) in sorted_memories {
         result.push_str(&format!(

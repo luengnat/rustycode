@@ -139,7 +139,7 @@ mod tests {
 
         // Pre-sort by priority (high first)
         let mut sorted = items.clone();
-        sorted.sort_by(|a, b| b.0.cmp(a.0));
+        sorted.sort_by_key(|a| std::cmp::Reverse(a.0));
 
         let budget = 10;
         let selected = enforce_budget_prioritized(&sorted, budget, |item| item.1.len()).unwrap();

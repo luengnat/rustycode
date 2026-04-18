@@ -89,7 +89,7 @@ impl ExtractionStats {
             .iter()
             .map(|(k, v)| (k.clone(), *v))
             .collect();
-        patterns.sort_by(|a, b| b.1.cmp(&a.1));
+        patterns.sort_by_key(|a| std::cmp::Reverse(a.1));
         patterns.into_iter().take(limit).collect()
     }
 

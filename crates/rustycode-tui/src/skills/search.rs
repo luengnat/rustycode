@@ -54,7 +54,7 @@ pub fn fuzzy_match(query: &str, skills: &[Skill]) -> Vec<Skill> {
         .collect();
 
     // Sort by score (highest first)
-    results.sort_by(|a, b| b.score.cmp(&a.score));
+    results.sort_by_key(|a| std::cmp::Reverse(a.score));
 
     // Extract skills in order
     results.into_iter().map(|r| r.skill).collect()

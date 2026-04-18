@@ -2311,7 +2311,7 @@ impl Tool for LspInlineSymbolTool {
             .iter()
             .map(|r| crate::symbol::position_to_byte_index(&text, r.range.start))
             .collect::<Result<Vec<_>>>()?;
-        call_sites.sort_by(|a, b| b.cmp(a)); // Sort in reverse order
+        call_sites.sort_by_key(|a| std::cmp::Reverse(*a)); // Sort in reverse order
 
         let mut inlined_count = 0;
         let mut errors = Vec::new();

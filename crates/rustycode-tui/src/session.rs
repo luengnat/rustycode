@@ -297,7 +297,7 @@ pub fn load_session_history_list(
     }
 
     // Sort by timestamp (newest first)
-    entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    entries.sort_by_key(|a| std::cmp::Reverse(a.timestamp));
     entries
 }
 

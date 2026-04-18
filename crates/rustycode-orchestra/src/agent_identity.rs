@@ -179,7 +179,7 @@ impl AgentIdentityManager {
             }
         }
 
-        identities.sort_by(|a, b| b.last_active.cmp(&a.last_active));
+        identities.sort_by_key(|a| std::cmp::Reverse(a.last_active));
         Ok(identities)
     }
 

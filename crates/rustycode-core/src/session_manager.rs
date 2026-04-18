@@ -185,7 +185,7 @@ impl SessionManager {
         }
 
         // Sort by creation time (newest first)
-        sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        sessions.sort_by_key(|a| std::cmp::Reverse(a.created_at));
 
         info!(
             "Listed {} session(s) from {:?}",

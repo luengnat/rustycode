@@ -382,7 +382,7 @@ impl ServiceDiscovery {
                 // Sort by priority and return highest priority
                 let mut instances: Vec<_> =
                     available_instances.iter().map(|&i| i.clone()).collect();
-                instances.sort_by(|a, b| b.metadata.priority.cmp(&a.metadata.priority));
+                instances.sort_by_key(|a| std::cmp::Reverse(a.metadata.priority));
                 instances.into_iter().next()
             }
         }
