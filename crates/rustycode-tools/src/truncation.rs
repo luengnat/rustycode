@@ -573,10 +573,14 @@ fn detect_build_summary(output: &str) -> Option<String> {
 /// # Returns
 /// A truncated string with "..." appended if truncation occurred
 pub fn safe_truncate(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
         s.to_string()
+    } else if max_chars < 3 {
+        // Not enough room for "..." — just truncate hard
+        s.chars().take(max_chars).collect()
     } else {
-        let truncated: String = s.chars().take(max_chars.saturating_sub(3)).collect();
+        let truncated: String = s.chars().take(max_chars - 3).collect();
         format!("{}...", truncated)
     }
 }
@@ -848,6 +852,22 @@ mod tests {
         assert_eq!(safe_truncate("", 5), "");
     }
 
+    #[test]
+    fn test_safe_truncate_max_chars_less_than_3() {
+        // When max_chars < 3, there's no room for "...", hard-truncate instead
+        assert_eq!(safe_truncate("hello", 0), "");
+        assert_eq!(safe_truncate("hello", 1), "h");
+        assert_eq!(safe_truncate("hello", 2), "he");
+    }
+
+    #[test]
+    fn test_safe_truncate_exact_boundary() {
+        // Exactly max_chars — no truncation
+        assert_eq!(safe_truncate("abc", 3), "abc");
+        // One over — truncate with "..."
+        assert_eq!(safe_truncate("abcd", 3), "...");
+    }
+
     // ── truncate_bytes_critical tests ─────────────
 
     #[test]
@@ -855,7 +875,10 @@ mod tests {
         // Use patterns that match is_critical_content (e.g., "error[E0433]")
         let content = "error[E0433]: failed to resolve\nbuild failed in main.rs";
         let result = truncate_bytes_critical(content, 10, "test.rs");
-        assert!(!result.truncated, "critical content should not be truncated");
+        assert!(
+            !result.truncated,
+            "critical content should not be truncated"
+        );
         assert_eq!(result.output, content);
     }
 

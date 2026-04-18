@@ -492,6 +492,19 @@ fn apply_edit(
     // Replace only the first occurrence — same behavior as edit_file
     let new_content = content.replacen(old_text, new_text, 1);
 
+    // If the replacement didn't change anything, old_text was not found
+    if new_content == content {
+        anyhow::bail!(
+            "old_text not found in {}: '{}'",
+            edit.path.display(),
+            if old_text.len() > 50 {
+                format!("{}...", &old_text[..47])
+            } else {
+                old_text.to_string()
+            }
+        );
+    }
+
     // Write atomically: write to a temp file, then rename over the target.
     // This prevents file corruption if the process crashes mid-write.
     let temp_path = edit.path.with_extension("tmp");
@@ -505,12 +518,13 @@ fn apply_edit(
             .sync_all()
             .with_context(|| format!("failed to sync temp file: {}", temp_path.display()))?;
     }
-    fs::rename(&temp_path, &edit.path)
-        .with_context(|| format!(
+    fs::rename(&temp_path, &edit.path).with_context(|| {
+        format!(
             "failed to rename temp file to {}: {}",
             edit.path.display(),
             temp_path.display()
-        ))?;
+        )
+    })?;
 
     let mut output = format!("Edited: {} (replaced 1 occurrence)", edit.path.display(),);
 
@@ -905,11 +919,7 @@ mod tests {
         let tmp_files: Vec<_> = std::fs::read_dir(workspace.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .is_some_and(|ext| ext == "tmp")
-            })
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "tmp"))
             .collect();
         assert!(tmp_files.is_empty(), "Left temp files: {:?}", tmp_files);
 
