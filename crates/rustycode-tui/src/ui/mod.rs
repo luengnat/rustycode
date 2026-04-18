@@ -28,6 +28,7 @@ pub mod message_thinking;
 pub mod message_types;
 
 // Input handling
+pub mod file_selector;
 pub mod input;
 pub mod input_handler;
 pub mod input_history;

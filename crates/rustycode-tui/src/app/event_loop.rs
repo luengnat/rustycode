@@ -33,6 +33,7 @@ use crate::ui::input::{InputHandler, InputMode, InputState};
 use crate::ui::message::{Message, MessageRenderer, ToolExecution};
 use crate::ui::message_search::SearchState;
 use crate::ui::message_tags::TagFilter;
+use crate::ui::file_selector::FileSelector;
 use crate::ui::model_selector::ModelSelector;
 use crate::ui::session_sidebar::SessionSidebar;
 use crate::ui::skill_palette::SkillPalette;
@@ -246,6 +247,7 @@ pub struct TUI {
 
     // Model/Provider selector screens
     pub(crate) model_selector: ModelSelector,
+    pub(crate) file_selector: FileSelector,
     pub(crate) showing_provider_selector: bool,
     pub(crate) current_model: String,
 
@@ -500,6 +502,7 @@ impl TUI {
             last_esc_press: None,
             stashed_prompt: None,
             model_selector: ModelSelector::with_models(get_all_available_models()),
+            file_selector: FileSelector::new(Vec::new()),
             showing_provider_selector: false,
             current_model: rustycode_llm::load_model_from_config().unwrap_or_default(),
             session_sidebar: SessionSidebar::new(),
@@ -680,6 +683,7 @@ impl TUI {
             status_bar_collapsed: false,
             footer_collapsed: false,
             model_selector: ModelSelector::with_models(get_all_available_models()),
+            file_selector: FileSelector::new(Vec::new()),
             showing_provider_selector: false,
             current_model: rustycode_llm::load_model_from_config().unwrap_or_default(),
             session_sidebar: SessionSidebar::new(),
@@ -2043,6 +2047,11 @@ impl TUI {
             self.model_selector.render(frame, size);
         }
 
+        // Overlay: file selector (@)
+        if self.file_selector.is_visible() {
+            self.file_selector.render(frame, size);
+        }
+
         // Overlay: skill palette
         if self.skill_palette.is_visible() {
             self.skill_palette.render(frame, size);
@@ -2321,6 +2330,11 @@ impl TUI {
         // Overlay: model selector (Alt+P)
         if self.model_selector.is_visible() {
             self.model_selector.render(frame, size);
+        }
+
+        // Overlay: file selector (@)
+        if self.file_selector.is_visible() {
+            self.file_selector.render(frame, size);
         }
 
         // Overlay: skill palette
