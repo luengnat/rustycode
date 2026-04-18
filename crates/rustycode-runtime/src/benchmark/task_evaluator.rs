@@ -678,15 +678,15 @@ impl TaskEvaluator {
             1.0
         };
 
-        let success_rate = if total_evaluations > 0 {
+        let success_rate = {
             let successes = self
                 .historical_results
                 .iter()
                 .filter(|e| e.result.success)
                 .count();
-            (successes * 100 / total_evaluations) as u8
-        } else {
-            0
+            (successes * 100)
+                .checked_div(total_evaluations)
+                .unwrap_or(0) as u8
         };
 
         BenchmarkSummary {

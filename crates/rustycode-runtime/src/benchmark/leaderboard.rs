@@ -157,7 +157,7 @@ impl BenchmarkLeaderboard {
 
         // Sort by timestamp
         let mut sorted_entries = self.entries.clone();
-        sorted_entries.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        sorted_entries.sort_by_key(|a| a.timestamp);
 
         for entry in &sorted_entries {
             timestamps.push(entry.timestamp);

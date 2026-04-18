@@ -862,11 +862,7 @@ impl WorkerPool {
         let completed = self.metrics.tasks_completed.load(Ordering::Relaxed);
         let total_duration = self.metrics.total_task_duration.load(Ordering::Relaxed);
 
-        let avg_duration = if completed > 0 {
-            Duration::from_nanos(total_duration / completed)
-        } else {
-            Duration::ZERO
-        };
+        let avg_duration = Duration::from_nanos(total_duration.checked_div(completed).unwrap_or(0));
 
         let utilization = if active_workers > 0 {
             busy_workers as f32 / active_workers as f32
