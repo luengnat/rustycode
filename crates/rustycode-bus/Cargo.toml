@@ -21,6 +21,3 @@ rustycode-protocol = { path = "../rustycode-protocol" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "test-util", "rt-multi-thread"] }
-
-[lints]
-workspace = true

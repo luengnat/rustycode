@@ -43,6 +43,3 @@ path = "examples/mcp_client_example.rs"
 [[example]]
 name = "mcp_server_example"
 path = "examples/mcp_server_example.rs"
-
-[lints]
-workspace = true

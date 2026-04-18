@@ -17,6 +17,3 @@ fastembed = "5"
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
-
-[lints]
-workspace = true

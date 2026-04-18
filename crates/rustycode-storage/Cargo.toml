@@ -25,6 +25,3 @@ features = ["sync", "rt", "macros"]
 [dev-dependencies]
 uuid.workspace = true
 tempfile.workspace = true
-
-[lints]
-workspace = true

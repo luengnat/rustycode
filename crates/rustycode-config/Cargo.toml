@@ -29,6 +29,3 @@ tempfile.workspace = true
 [[bench]]
 name = "config_performance"
 harness = false
-
-[lints]
-workspace = true

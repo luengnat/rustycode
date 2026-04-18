@@ -5,6 +5,3 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-
-[lints]
-workspace = true

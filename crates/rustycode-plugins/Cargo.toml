@@ -24,6 +24,3 @@ serial_test = "3"
 [features]
 default = ["toml"]
 toml = ["dep:toml"]
-
-[lints]
-workspace = true

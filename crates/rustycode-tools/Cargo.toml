@@ -92,6 +92,3 @@ name = "optimization_benchmarks"
 harness = false
 
 # Note: sandbox_benchmarks and sandbox_performance will be added when implemented
-
-[lints]
-workspace = true

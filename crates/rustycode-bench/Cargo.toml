@@ -18,6 +18,3 @@ chrono.workspace = true
 async-trait.workspace = true
 rustycode-llm = { path = "../rustycode-llm" }
 secrecy.workspace = true
-
-[lints]
-workspace = true

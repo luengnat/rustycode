@@ -35,6 +35,3 @@ harness = false
 [[bench]]
 name = "compaction_performance"
 harness = false
-
-[lints]
-workspace = true

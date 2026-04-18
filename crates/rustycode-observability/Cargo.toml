@@ -19,6 +19,3 @@ parking_lot.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
-
-[lints]
-workspace = true
