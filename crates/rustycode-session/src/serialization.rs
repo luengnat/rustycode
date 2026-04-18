@@ -209,8 +209,9 @@ impl FormatSizes {
             self.compressed_binary_size,
         ]
         .iter()
+        .filter(|&&x| x > 0)
         .min()
-        .unwrap();
+        .unwrap_or(&self.json_size);
 
         if min_size == self.compressed_binary_size {
             SerializationFormat::CompressedBinary

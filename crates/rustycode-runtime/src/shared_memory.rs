@@ -386,7 +386,7 @@ impl SharedWorkingMemory {
         // Update entry
         entry.data = data;
         entry.modified_at = Utc::now();
-        entry.version += 1;
+        entry.version = entry.version.saturating_add(1);
 
         // Update stats
         self.stats.total_writes += 1;

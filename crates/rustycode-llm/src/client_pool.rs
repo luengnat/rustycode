@@ -148,8 +148,17 @@ static GLOBAL_POOL: OnceLock<Arc<ClientPool>> = OnceLock::new();
 
 /// Get the global HTTP client pool
 pub fn global_pool() -> &'static Arc<ClientPool> {
-    GLOBAL_POOL
-        .get_or_init(|| Arc::new(ClientPool::new().expect("Failed to create global client pool")))
+    GLOBAL_POOL.get_or_init(|| {
+        Arc::new(ClientPool::new().unwrap_or_else(|e| {
+            tracing::error!("Failed to create global client pool, using fallback: {}", e);
+            // Fallback: use minimal config that is less likely to fail
+            ClientPool::with_config(ClientPoolConfig {
+                http2: false,
+                ..ClientPoolConfig::default()
+            })
+            .expect("Fallback client pool creation failed")
+        }))
+    })
 }
 
 /// Get a client from the global pool

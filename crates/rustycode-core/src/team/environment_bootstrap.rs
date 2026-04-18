@@ -360,8 +360,8 @@ impl ProjectProfiler {
 
         let mut hint: u32 = 20; // baseline
 
-        // Scale with file count.
-        hint += (file_count / 20) as u32;
+        // Scale with file count (use saturating to prevent overflow).
+        hint = hint.saturating_add((file_count / 20) as u32);
 
         // Monorepo bump.
         if is_monorepo {
@@ -453,7 +453,9 @@ impl ProjectProfiler {
                 return entries
                     .flatten()
                     .filter(|e| e.path().join("Cargo.toml").exists())
-                    .count() as u32;
+                    .count()
+                    .try_into()
+                    .unwrap_or(u32::MAX);
             }
         }
 
@@ -462,7 +464,9 @@ impl ProjectProfiler {
             return entries
                 .flatten()
                 .filter(|e| e.path().join("Cargo.toml").exists())
-                .count() as u32;
+                .count()
+                .try_into()
+                .unwrap_or(u32::MAX);
         }
 
         1

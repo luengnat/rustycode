@@ -81,7 +81,9 @@ impl TUI {
     pub(crate) fn handle_input(&mut self) -> Result<()> {
         match event::read() {
             // Trigger File Selector on '@'
-            Ok(CrosstermEvent::Key(key)) if key.code == KeyCode::Char('@') && self.input_mode != InputMode::None => {
+            Ok(CrosstermEvent::Key(key))
+                if key.code == KeyCode::Char('@') && self.input_mode != InputMode::None =>
+            {
                 let files = crate::app::workspace_scanner::scan_workspace(&self.project_root);
                 self.file_selector = FileSelector::new(files);
                 self.file_selector.show();

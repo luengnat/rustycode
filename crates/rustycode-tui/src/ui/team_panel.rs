@@ -201,9 +201,7 @@ impl TeamPanel {
             | TeamEvent::StructuralDeclarationSet { .. }
             | TeamEvent::PlanAdapted { .. }
             | TeamEvent::SpecialistCreated { .. }
-            | TeamEvent::ParallelExecutionRequested { .. } => {
-                // These events are handled by the event engine, not the panel display
-            }
+            | TeamEvent::ParallelExecutionRequested { .. } => {}
             #[allow(unreachable_patterns)]
             _ => {}
         }

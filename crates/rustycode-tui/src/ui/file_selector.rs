@@ -40,7 +40,9 @@ impl FileSelector {
 
     pub fn take_selected(&mut self) -> Option<String> {
         let selected = self.state.selected()?;
-        let filtered: Vec<String> = self.files.iter()
+        let filtered: Vec<String> = self
+            .files
+            .iter()
             .filter(|f| f.contains(&self.filter))
             .cloned()
             .collect();
@@ -49,7 +51,9 @@ impl FileSelector {
 
     pub fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::KeyCode;
-        let filtered: Vec<String> = self.files.iter()
+        let filtered: Vec<String> = self
+            .files
+            .iter()
             .filter(|f| f.contains(&self.filter))
             .cloned()
             .collect();
@@ -71,7 +75,8 @@ impl FileSelector {
             }
             KeyCode::PageDown => {
                 let i = self.state.selected().unwrap_or(0);
-                self.state.select(Some((i + 10).min(filtered.len().saturating_sub(1))));
+                self.state
+                    .select(Some((i + 10).min(filtered.len().saturating_sub(1))));
             }
             KeyCode::Char(c) => {
                 self.filter.push(c);
@@ -86,18 +91,29 @@ impl FileSelector {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        if !self.visible { return; }
+        if !self.visible {
+            return;
+        }
 
         let area = centered_rect(50, 60, area);
-        let items: Vec<ListItem> = self.files
+        let items: Vec<ListItem> = self
+            .files
             .iter()
             .filter(|f| f.contains(&self.filter))
             .map(|f| ListItem::new(f.as_str()))
             .collect();
 
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(" Select File (@) "))
-            .highlight_style(Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Select File (@) "),
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            );
 
         frame.render_stateful_widget(list, area, &mut self.state);
     }
