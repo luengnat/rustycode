@@ -177,7 +177,7 @@ impl RecoveryEngine {
                     let entry = RecoveryLogEntry::new(
                         attempt + 1,
                         RecoveryStrategy::Retry,
-                        Some(last_error.as_ref().unwrap().to_string()),
+                        last_error.as_ref().map(|e| e.to_string()),
                         format!("Retry attempt {} failed", attempt + 1),
                         duration,
                         false,
@@ -185,12 +185,14 @@ impl RecoveryEngine {
                     log.push(entry);
 
                     if self.config.log_recovery {
-                        warn!(
-                            "Retry failed: {} - Attempt {} - Error: {}",
-                            operation,
-                            attempt + 1,
-                            last_error.as_ref().unwrap()
-                        );
+                        if let Some(ref err) = last_error {
+                            warn!(
+                                "Retry failed: {} - Attempt {} - Error: {}",
+                                operation,
+                                attempt + 1,
+                                err
+                            );
+                        }
                     }
 
                     // Don't sleep after the last attempt

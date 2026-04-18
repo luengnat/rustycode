@@ -275,7 +275,8 @@ fn compress_hybrid(window: &mut ContextWindow, target_reduction: usize) -> Compr
 
         if let Ok(ref r) = result {
             if r.tokens_saved >= target_reduction {
-                return result.unwrap();
+                // Safe: we verified it's Ok above
+                return result;
             }
         }
     }

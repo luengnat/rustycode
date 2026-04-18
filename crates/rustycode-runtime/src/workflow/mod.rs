@@ -155,7 +155,7 @@ impl WorkflowToolExecutor for MockToolExecutor {
         if self.record {
             self.calls
                 .lock()
-                .unwrap()
+                .unwrap_or_else(|e| e.into_inner())
                 .push((tool_name.to_string(), parameters.clone()));
         }
         let tool = tool_name.to_string();
