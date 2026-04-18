@@ -95,40 +95,29 @@ impl LLMToolExecutor {
             }
         }
 
-        // Try to extract from ```tool code blocks
-        for line in content.lines() {
-            if let Some(json_str) = line
-                .strip_prefix("```tool")
-                .or_else(|| line.strip_prefix("tool:"))
-            {
-                let json_str = json_str.trim_start_matches("```").trim();
-                if let Ok(json_value) = serde_json::from_str::<Value>(json_str) {
-                    if let Some(array) = json_value.as_array() {
-                        for item in array {
-                            if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
-                                let arguments = item
-                                    .get("arguments")
-                                    .cloned()
-                                    .unwrap_or_else(|| Value::Object(Default::default()));
-
-                                tool_calls.push(ParsedToolCall {
-                                    name: name.to_string(),
-                                    arguments,
-                                    id: None,
-                                });
-                            }
+        // Extract from ```tool ... ``` code blocks (multi-line)
+        // Handles format from openai.rs: ```tool\n[{...}]\n```
+        if let Some(extracted) = extract_tool_code_block(content) {
+            if let Ok(json_value) = serde_json::from_str::<Value>(&extracted) {
+                if let Some(array) = json_value.as_array() {
+                    for item in array {
+                        if let Some(parsed) = parse_tool_call_item(item) {
+                            tool_calls.push(parsed);
                         }
-                    } else if let Some(name) = json_value.get("name").and_then(|n| n.as_str()) {
-                        let arguments = json_value
-                            .get("arguments")
-                            .cloned()
-                            .unwrap_or_else(|| Value::Object(Default::default()));
+                    }
+                } else if let Some(parsed) = parse_tool_call_item(&json_value) {
+                    tool_calls.push(parsed);
+                }
+            }
+        }
 
-                        tool_calls.push(ParsedToolCall {
-                            name: name.to_string(),
-                            arguments,
-                            id: None,
-                        });
+        // Fallback: single-line tool: prefix
+        for line in content.lines() {
+            if let Some(json_str) = line.strip_prefix("tool:") {
+                let json_str = json_str.trim();
+                if let Ok(json_value) = serde_json::from_str::<Value>(json_str) {
+                    if let Some(parsed) = parse_tool_call_item(&json_value) {
+                        tool_calls.push(parsed);
                     }
                 }
             }
@@ -338,6 +327,69 @@ impl LLMToolExecutor {
     }
 }
 
+/// Extract the JSON content from a ```tool ... ``` fenced code block.
+fn extract_tool_code_block(content: &str) -> Option<String> {
+    let start_marker = "```tool";
+    let end_marker = "```";
+
+    let start_idx = content.find(start_marker)?;
+    let after_start = start_idx + start_marker.len();
+
+    let json_start = if content[after_start..].starts_with('\n') {
+        after_start + 1
+    } else if content[after_start..].starts_with(' ') {
+        after_start + 1
+    } else {
+        after_start
+    };
+
+    let remaining = &content[json_start..];
+    let end_idx = remaining.find(end_marker)?;
+    let json_str = remaining[..end_idx].trim();
+
+    if json_str.is_empty() {
+        return None;
+    }
+
+    Some(json_str.to_string())
+}
+
+/// Parse a single tool call item that may be in OpenAI format or Anthropic format.
+///
+/// OpenAI: {"id": "...", "type": "function", "function": {"name": "...", "arguments": "{...}"}}
+/// Anthropic/flat: {"name": "...", "arguments": {...}}
+fn parse_tool_call_item(item: &Value) -> Option<ParsedToolCall> {
+    // OpenAI format: nested under "function"
+    if let Some(func) = item.get("function") {
+        let name = func.get("name")?.as_str()?.to_string();
+        let arguments_str = func.get("arguments").and_then(|a| a.as_str()).unwrap_or("{}");
+        let arguments = serde_json::from_str::<Value>(arguments_str)
+            .unwrap_or_else(|_| Value::Object(Default::default()));
+        let id = item.get("id").and_then(|i| i.as_str()).map(|s| s.to_string());
+        return Some(ParsedToolCall {
+            name,
+            arguments,
+            id,
+        });
+    }
+
+    // Anthropic/flat format: {"name": "...", "arguments": {...}}
+    if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+        let arguments = item
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Default::default()));
+        let id = item.get("id").and_then(|i| i.as_str()).map(|s| s.to_string());
+        return Some(ParsedToolCall {
+            name: name.to_string(),
+            arguments,
+            id,
+        });
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,5 +457,62 @@ mod tests {
         let tool = &tools[0];
         assert_eq!(tool.get("type").unwrap().as_str().unwrap(), "function");
         assert!(tool.get("function").is_some());
+    }
+
+    // Regression: openai.rs produces ```tool\n[{...}]\n``` format
+    #[test]
+    fn test_parse_openai_format_in_tool_code_block() {
+        let executor = create_executor();
+
+        let content = "```tool\n[\n  {\n    \"id\": \"call_-7703117166425406227\",\n    \"type\": \"function\",\n    \"function\": {\n      \"name\": \"bash\",\n      \"arguments\": \"{\\\"command\\\": \\\"ls\\\"}\"\n    }\n  }\n]\n```";
+
+        let tool_calls = executor.parse_anthropic_tool_calls(content).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "bash");
+        assert_eq!(
+            tool_calls[0].id.as_ref().unwrap(),
+            "call_-7703117166425406227"
+        );
+        assert_eq!(tool_calls[0].arguments["command"], "ls");
+    }
+
+    #[test]
+    fn test_extract_tool_code_block_multiline() {
+        let content = "some text\n```tool\n[{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"bash\", \"arguments\": \"{}\"}}]\n```\nmore text";
+        let extracted = extract_tool_code_block(content).unwrap();
+        assert!(extracted.contains("\"bash\""));
+    }
+
+    #[test]
+    fn test_extract_tool_code_block_none() {
+        let content = "just regular text, no tool blocks here";
+        assert!(extract_tool_code_block(content).is_none());
+    }
+
+    #[test]
+    fn test_parse_tool_call_item_openai_format() {
+        let item = serde_json::json!({
+            "id": "call_xyz",
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "arguments": "{\"path\": \"main.rs\"}"
+            }
+        });
+        let parsed = parse_tool_call_item(&item).unwrap();
+        assert_eq!(parsed.name, "read_file");
+        assert_eq!(parsed.id.as_ref().unwrap(), "call_xyz");
+        assert_eq!(parsed.arguments["path"], "main.rs");
+    }
+
+    #[test]
+    fn test_parse_tool_call_item_flat_format() {
+        let item = serde_json::json!({
+            "name": "bash",
+            "arguments": {"command": "ls"}
+        });
+        let parsed = parse_tool_call_item(&item).unwrap();
+        assert_eq!(parsed.name, "bash");
+        assert_eq!(parsed.arguments["command"], "ls");
     }
 }

@@ -1652,12 +1652,28 @@ impl TeamOrchestrator {
                 })?;
             let content = response.content.clone();
 
+            debug!(
+                "Tool loop {} iter {} response ({} bytes): {:.200}",
+                role_name,
+                iteration,
+                content.len(),
+                content
+            );
+
             let tool_calls_openai = self.tool_executor.parse_openai_tool_calls(&content)?;
+            let used_openai = !tool_calls_openai.is_empty();
             let tool_calls = if tool_calls_openai.is_empty() {
                 self.tool_executor.parse_anthropic_tool_calls(&content)?
             } else {
                 tool_calls_openai
             };
+            debug!(
+                "Parsed {} tool calls for {} (openai={}, anthropic fallback={})",
+                tool_calls.len(),
+                role_name,
+                used_openai,
+                !used_openai
+            );
             if tool_calls.is_empty() {
                 debug!(
                     "No tool calls in response, returning final content for {}",
