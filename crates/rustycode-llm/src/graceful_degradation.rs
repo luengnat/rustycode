@@ -389,9 +389,9 @@ pub struct RetryConfig {
 impl Default for RetryConfig {
     fn default() -> Self {
         Self {
-            max_attempts: 5,
+            max_attempts: 3,
             base_delay_ms: 2_000,
-            max_delay_ms: 60_000,
+            max_delay_ms: 16_000,
         }
     }
 }
@@ -674,7 +674,7 @@ mod tests {
     #[test]
     fn test_retry_config_default() {
         let config = RetryConfig::default();
-        assert_eq!(config.max_attempts, 5);
+        assert_eq!(config.max_attempts, 3);
         assert_eq!(config.base_delay_ms, 2_000);
     }
 
@@ -694,7 +694,7 @@ mod tests {
     fn test_retry_backoff_capped() {
         let config = RetryConfig::default();
         let d10 = config.delay_for_attempt(10);
-        assert!(d10 <= Duration::from_millis(60_000));
+        assert!(d10 <= Duration::from_millis(16_000));
     }
 
     // Degradation Handler Tests

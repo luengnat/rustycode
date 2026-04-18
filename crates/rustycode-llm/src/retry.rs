@@ -79,11 +79,11 @@ pub struct RetryConfig {
 impl Default for RetryConfig {
     fn default() -> Self {
         Self {
-            max_attempts: 5,
-            base_delay: Duration::from_millis(1000),
-            max_delay: Duration::from_secs(60),
+            max_attempts: 3,
+            base_delay: Duration::from_millis(100),
+            max_delay: Duration::from_secs(10),
             multiplier: 2.0,
-            jitter_factor: 0.2,
+            jitter_factor: 0.1,
             retry_after_ms: None,
         }
     }
@@ -376,11 +376,11 @@ mod tests {
     #[test]
     fn test_retry_config_default() {
         let config = RetryConfig::default();
-        assert_eq!(config.max_attempts, 5);
-        assert_eq!(config.base_delay, Duration::from_millis(1000));
-        assert_eq!(config.max_delay, Duration::from_secs(60));
+        assert_eq!(config.max_attempts, 3);
+        assert_eq!(config.base_delay, Duration::from_millis(100));
+        assert_eq!(config.max_delay, Duration::from_secs(10));
         assert_eq!(config.multiplier, 2.0);
-        assert_eq!(config.jitter_factor, 0.2);
+        assert_eq!(config.jitter_factor, 0.1);
     }
 
     #[test]
