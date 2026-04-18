@@ -158,6 +158,13 @@ impl ConversationHistory {
     /// # }
     /// ```
     pub fn save(&self, conversation: &Conversation) -> anyhow::Result<()> {
+        // Validate ID to prevent path traversal
+        if conversation.id.contains('/')
+            || conversation.id.contains('\\')
+            || conversation.id == ".."
+        {
+            anyhow::bail!("invalid conversation ID: {}", conversation.id);
+        }
         let filename = format!("{}.json", conversation.id);
         let path = self.storage_dir.join(&filename);
         let json = serde_json::to_string_pretty(conversation)
@@ -1090,5 +1097,21 @@ mod tests {
         let loaded = history.load(&id).unwrap();
         assert_eq!(loaded.messages.len(), 0);
         assert_eq!(loaded.total_tokens, 0);
+    }
+
+    #[test]
+    fn test_save_rejects_path_traversal() {
+        let dir = TempDir::new().unwrap();
+        let history = ConversationHistory::new(dir.path()).unwrap();
+
+        let mut conv = test_conversation();
+        conv.id = "../etc/passwd".to_string();
+        assert!(history.save(&conv).is_err());
+
+        conv.id = "foo\\bar".to_string();
+        assert!(history.save(&conv).is_err());
+
+        conv.id = "..".to_string();
+        assert!(history.save(&conv).is_err());
     }
 }

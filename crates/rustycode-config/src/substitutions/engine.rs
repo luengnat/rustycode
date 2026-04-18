@@ -203,12 +203,7 @@ impl SubstitutionEngine {
         // Check cache
         if let Some(cached) = self.cache.get(path) {
             if let Some(ttl) = cached.ttl {
-                if cached
-                    .timestamp
-                    .elapsed()
-                    .unwrap_or_default()
-                    < ttl
-                {
+                if cached.timestamp.elapsed().unwrap_or_default() < ttl {
                     return Ok(cached.value.clone());
                 }
             } else {

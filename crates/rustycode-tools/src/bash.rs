@@ -646,9 +646,12 @@ impl BashSessionRegistry {
 
         let sessions_guard = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
 
-        // Touch access time
-        if let Some(ref mut times) = *self.last_access.lock().unwrap_or_else(|e| e.into_inner()) {
-            times.insert(cwd.clone(), Instant::now());
+        // Touch access time (scope the lock to avoid holding two locks simultaneously)
+        {
+            if let Some(ref mut times) = *self.last_access.lock().unwrap_or_else(|e| e.into_inner())
+            {
+                times.insert(cwd.clone(), Instant::now());
+            }
         }
 
         // Check if session exists (while holding the lock)
@@ -678,14 +681,19 @@ impl BashSessionRegistry {
     /// Remove and return the session for `cwd`, if any.
     fn remove(&self, cwd: &Path) -> Option<Arc<Mutex<BashSession>>> {
         self.ensure_init();
+        // Lock in consistent order: sessions first, then last_access
+        let removed = {
+            let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+            match sessions.as_mut() {
+                Some(s) => s.remove(cwd),
+                None => None,
+            }
+        };
+        // Clean up access time regardless
         if let Some(ref mut times) = *self.last_access.lock().unwrap_or_else(|e| e.into_inner()) {
             times.remove(cwd);
         }
-        self.sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_mut()?
-            .remove(cwd)
+        removed
     }
 
     /// Evict sessions that have been idle longer than `IDLE_TIMEOUT_SECS`.
