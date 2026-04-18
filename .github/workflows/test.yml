@@ -71,8 +71,8 @@ jobs:
 
       - name: Run clippy
         env:
-          RUSTFLAGS: "-A clippy::unnecessary_sort_by -A clippy::collapsible_match -A clippy::manual_checked_ops -A clippy::unnecessary_min_or_max -A clippy::useless_conversion -D warnings"
-        run: cargo clippy --workspace --all-targets
+          RUSTFLAGS: "-A clippy::unnecessary_sort_by -A clippy::collapsible_match -A clippy::manual_checked_ops -A clippy::unnecessary_min_or_max -A clippy::useless_conversion"
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   provider-v2:
     name: Provider v2 Coverage
