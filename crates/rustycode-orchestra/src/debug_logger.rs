@@ -327,28 +327,19 @@ pub fn write_debug_summary() -> Option<PathBuf> {
     let get_counter = |key: DebugCounter| -> u64 { *counters.get(&key).unwrap_or(&0) };
 
     let derive_state_calls = get_counter(DebugCounter::DeriveStateCalls);
-    let avg_derive_state_ms = if derive_state_calls > 0 {
-        let total = get_counter(DebugCounter::DeriveStateTotalMs);
-        (total / derive_state_calls) * 100 / 100
-    } else {
-        0
-    };
+    let avg_derive_state_ms = get_counter(DebugCounter::DeriveStateTotalMs)
+        .checked_div(derive_state_calls)
+        .unwrap_or(0);
 
     let ttsr_checks = get_counter(DebugCounter::TtsrChecks);
-    let avg_ttsr_check_ms = if ttsr_checks > 0 {
-        let total = get_counter(DebugCounter::TtsrTotalMs);
-        (total / ttsr_checks) * 100 / 100
-    } else {
-        0
-    };
+    let avg_ttsr_check_ms = get_counter(DebugCounter::TtsrTotalMs)
+        .checked_div(ttsr_checks)
+        .unwrap_or(0);
 
     let parse_roadmap_calls = get_counter(DebugCounter::ParseRoadmapCalls);
-    let avg_parse_roadmap_ms = if parse_roadmap_calls > 0 {
-        let total = get_counter(DebugCounter::ParseRoadmapTotalMs);
-        (total / parse_roadmap_calls) * 100 / 100
-    } else {
-        0
-    };
+    let avg_parse_roadmap_ms = get_counter(DebugCounter::ParseRoadmapTotalMs)
+        .checked_div(parse_roadmap_calls)
+        .unwrap_or(0);
 
     // Build summary entry
     let mut summary = HashMap::new();

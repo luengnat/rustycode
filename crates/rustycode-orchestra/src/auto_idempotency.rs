@@ -430,20 +430,16 @@ fn verify_expected_artifact(unit_type: &str, unit_id: &str, base_path: &str) -> 
                 .join(format!("{}-PLAN.md", slice_id));
             plan_path.exists()
         }
-        "execute-task" => {
+        "execute-task" if parts.len() >= 3 => {
             // Check for SUMMARY.md (task completion)
-            if parts.len() >= 3 {
-                let task_id = parts[2];
-                let summary_path = Path::new(base_path)
-                    .join(".orchestra")
-                    .join("milestones")
-                    .join(milestone_id)
-                    .join(slice_id)
-                    .join(format!("{}-SUMMARY.md", task_id));
-                summary_path.exists()
-            } else {
-                false
-            }
+            let task_id = parts[2];
+            let summary_path = Path::new(base_path)
+                .join(".orchestra")
+                .join("milestones")
+                .join(milestone_id)
+                .join(slice_id)
+                .join(format!("{}-SUMMARY.md", task_id));
+            summary_path.exists()
         }
         "complete-slice" => {
             // Check for SLICE-SUMMARY.md

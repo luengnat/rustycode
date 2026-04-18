@@ -180,17 +180,13 @@ pub fn generate_preview(project: &OrchestraProject) -> MigrationPreview {
     }
 
     // Calculate percentages
-    let slice_completion_pct = if total_slices > 0 {
-        ((done_slices * 100) / total_slices) as u8
-    } else {
-        0
-    };
+    let slice_completion_pct = (done_slices * 100_usize)
+        .checked_div(total_slices)
+        .unwrap_or(0) as u8;
 
-    let task_completion_pct = if total_tasks > 0 {
-        ((done_tasks * 100) / total_tasks) as u8
-    } else {
-        0
-    };
+    let task_completion_pct = (done_tasks * 100_usize)
+        .checked_div(total_tasks)
+        .unwrap_or(0) as u8;
 
     MigrationPreview {
         milestone_count: project.milestones.len(),

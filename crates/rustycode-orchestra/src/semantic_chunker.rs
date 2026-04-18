@@ -496,7 +496,7 @@ pub fn chunk_by_relevance(
     let mut selected: Vec<Chunk> = qualifying.into_iter().take(max_chunks).collect();
 
     // Return in original document order (by start_line)
-    selected.sort_by(|a, b| a.start_line.cmp(&b.start_line));
+    selected.sort_by_key(|a| a.start_line);
 
     let total_chars = content.len();
     let selected_chars: usize = selected.iter().map(|c| c.content.len()).sum();
@@ -509,7 +509,7 @@ pub fn chunk_by_relevance(
     ChunkResult {
         total_chunks: raw_chunks.len(),
         omitted_chunks: raw_chunks.len() - selected.len(),
-        savings_percent: savings_percent.max(0),
+        savings_percent,
         chunks: selected,
     }
 }

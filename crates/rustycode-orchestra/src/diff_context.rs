@@ -125,8 +125,8 @@ pub fn get_recently_changed_files(cwd: &Path, options: Option<&RecentFilesOption
 
     for file in status_files
         .into_iter()
-        .chain(staged_files.into_iter())
-        .chain(committed_files.into_iter())
+        .chain(staged_files)
+        .chain(committed_files)
     {
         if !seen.contains(&file) {
             seen.insert(file.clone());
