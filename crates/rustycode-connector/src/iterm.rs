@@ -127,6 +127,7 @@ impl ITermConnector {
 /// AppleScript uses `"..."` for strings. Backslash and double-quote must be
 /// escaped to prevent breaking out of the string and injecting arbitrary
 /// AppleScript commands.
+#[cfg(target_os = "macos")]
 fn escape_applescript_string(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -633,11 +634,13 @@ mod tests {
 
     // --- AppleScript escaping tests ---
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_escape_applescript_plain_text() {
         assert_eq!(escape_applescript_string("hello world"), "hello world");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_escape_applescript_double_quote() {
         assert_eq!(
@@ -646,6 +649,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_escape_applescript_backslash() {
         assert_eq!(
@@ -654,6 +658,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_escape_applescript_injection_attempt() {
         // Simulate an injection attempt that tries to break out of the string
@@ -674,6 +679,7 @@ mod tests {
         assert!(safe, "Unescaped quote found in: {}", escaped);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_escape_applescript_mixed_special_chars() {
         let input = r#"set "x" to "y\"#;
@@ -681,11 +687,13 @@ mod tests {
         assert_eq!(escaped, r#"set \"x\" to \"y\\"#);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_escape_applescript_empty_string() {
         assert_eq!(escape_applescript_string(""), "");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn test_escape_applescript_no_special_chars() {
         assert_eq!(escape_applescript_string("ls -la /tmp"), "ls -la /tmp");
