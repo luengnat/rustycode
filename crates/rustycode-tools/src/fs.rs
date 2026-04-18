@@ -1961,7 +1961,10 @@ mod tests {
         let result = get_last_modified(&file);
         assert_ne!(result, "unknown");
         // Should be a numeric timestamp
-        assert!(result.parse::<u64>().is_ok(), "expected timestamp, got: {result}");
+        assert!(
+            result.parse::<u64>().is_ok(),
+            "expected timestamp, got: {result}"
+        );
     }
 
     #[test]

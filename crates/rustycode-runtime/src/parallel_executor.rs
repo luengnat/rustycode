@@ -609,8 +609,9 @@ impl ParallelWorktreeExecutor {
                     .current_dir(&self.repo_path)
                     .output()
                     .map_err(|e| format!("git rev-parse failed: {}", e))?;
-                let current_branch =
-                    String::from_utf8_lossy(&current_branch_output.stdout).trim().to_string();
+                let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
+                    .trim()
+                    .to_string();
 
                 // 2. Create a temporary branch from the worktree branch
                 let temp_branch = format!("{}-rebase-temp", branch_name);
@@ -1169,7 +1170,10 @@ mod tests {
 
         // Verify HEAD advanced after the rebase + ff merge
         let head_after = ParallelWorktreeExecutor::get_head_commit(&repo).unwrap();
-        assert_ne!(head_before, head_after, "HEAD should have advanced after rebase merge");
+        assert_ne!(
+            head_before, head_after,
+            "HEAD should have advanced after rebase merge"
+        );
     }
 
     #[tokio::test]
@@ -1190,7 +1194,9 @@ mod tests {
             .current_dir(&repo)
             .output()
             .unwrap();
-        let branch_name = String::from_utf8_lossy(&branch_before.stdout).trim().to_string();
+        let branch_name = String::from_utf8_lossy(&branch_before.stdout)
+            .trim()
+            .to_string();
 
         let tasks = vec![make_task("rb-branch-1", &["src/br.rs"])];
         let results = executor.execute_tasks(tasks).await.unwrap();
@@ -1202,7 +1208,9 @@ mod tests {
             .current_dir(&repo)
             .output()
             .unwrap();
-        let branch_after_str = String::from_utf8_lossy(&branch_after.stdout).trim().to_string();
+        let branch_after_str = String::from_utf8_lossy(&branch_after.stdout)
+            .trim()
+            .to_string();
         assert_eq!(
             branch_name, branch_after_str,
             "Should be back on original branch after rebase merge, got '{}'",

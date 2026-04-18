@@ -252,7 +252,9 @@ impl SessionState {
     pub fn update_token_usage(&mut self, input_tokens: usize, output_tokens: usize) {
         self.total_input_tokens = self.total_input_tokens.saturating_add(input_tokens);
         self.total_output_tokens = self.total_output_tokens.saturating_add(output_tokens);
-        self.tokens_used = self.total_input_tokens.saturating_add(self.total_output_tokens);
+        self.tokens_used = self
+            .total_input_tokens
+            .saturating_add(self.total_output_tokens);
         self.current_request_input_tokens = input_tokens;
         self.last_response_tokens = output_tokens;
     }

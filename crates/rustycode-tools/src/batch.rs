@@ -516,10 +516,7 @@ mod tests {
         let tool = create_batch_tool();
         let ctx = ToolContext::new("/tmp");
 
-        let result = tool.execute(
-            json!({"calls": "not an array"}),
-            &ctx,
-        );
+        let result = tool.execute(json!({"calls": "not an array"}), &ctx);
 
         assert!(result.is_err());
     }

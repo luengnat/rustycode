@@ -367,9 +367,7 @@ impl SessionCapture {
         self.is_finalized = true;
 
         let ended_at = Utc::now();
-        let duration_ms = (ended_at - self.started_at)
-            .num_milliseconds()
-            .max(0) as u64;
+        let duration_ms = (ended_at - self.started_at).num_milliseconds().max(0) as u64;
         self.metrics.session_duration_ms = duration_ms;
 
         // Extract key points from events

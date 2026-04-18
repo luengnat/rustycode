@@ -798,7 +798,10 @@ mod tests {
     #[test]
     fn try_normalized_match_no_match_returns_none() {
         let content = "line1\r\nline2\r\n";
-        assert_eq!(try_normalized_match(content, "missing", "replacement"), None);
+        assert_eq!(
+            try_normalized_match(content, "missing", "replacement"),
+            None
+        );
     }
 
     #[test]

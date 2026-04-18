@@ -874,7 +874,12 @@ mod tests {
         assert_eq!(config.transport_type, Some(McpTransportType::Http));
         assert_eq!(config.url.as_deref(), Some("https://mcp.vercel.com"));
         assert_eq!(
-            config.headers.as_ref().unwrap().get("Authorization").unwrap(),
+            config
+                .headers
+                .as_ref()
+                .unwrap()
+                .get("Authorization")
+                .unwrap(),
             "Bearer token123"
         );
         assert!(config.command.is_none());

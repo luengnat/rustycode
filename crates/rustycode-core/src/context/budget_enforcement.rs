@@ -194,8 +194,7 @@ mod tests {
             ("low", "xy"),
         ];
         let budget = 10;
-        let selected =
-            enforce_budget_prioritized(&items, budget, |item| item.1.len()).unwrap();
+        let selected = enforce_budget_prioritized(&items, budget, |item| item.1.len()).unwrap();
         // "critical" is too large (40 chars) so it's skipped.
         // "high" (5 chars) fits, "low" (2 chars) fits.
         assert_eq!(selected.len(), 2);
@@ -207,8 +206,7 @@ mod tests {
     fn test_enforce_budget_prioritized_all_fit() {
         let items = vec![("a", "x"), ("b", "y"), ("c", "z")];
         let budget = 100;
-        let selected =
-            enforce_budget_prioritized(&items, budget, |item| item.1.len()).unwrap();
+        let selected = enforce_budget_prioritized(&items, budget, |item| item.1.len()).unwrap();
         assert_eq!(selected.len(), 3);
     }
 

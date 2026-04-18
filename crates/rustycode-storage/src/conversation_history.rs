@@ -169,9 +169,8 @@ impl ConversationHistory {
             .with_context(|| format!("failed to write temp file to {}", tmp_path.display()))?;
         if let Err(e) = std::fs::rename(&tmp_path, &path) {
             let _ = std::fs::remove_file(&tmp_path);
-            return Err(e).with_context(|| {
-                format!("failed to rename temp file to {}", path.display())
-            });
+            return Err(e)
+                .with_context(|| format!("failed to rename temp file to {}", path.display()));
         }
         Ok(())
     }

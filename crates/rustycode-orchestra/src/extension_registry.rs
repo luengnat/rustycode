@@ -214,7 +214,12 @@ pub fn save_registry(registry: &ExtensionRegistry) {
             return;
         }
         if let Err(e) = fs::rename(&tmp_path, &file_path) {
-            tracing::warn!("Failed to rename registry {:?} -> {:?}: {}", tmp_path, file_path, e);
+            tracing::warn!(
+                "Failed to rename registry {:?} -> {:?}: {}",
+                tmp_path,
+                file_path,
+                e
+            );
             let _ = fs::remove_file(&tmp_path);
         }
     }

@@ -134,60 +134,61 @@ impl McpIntegration {
                     if let Some(ref cmd) = server_config.command {
                         let args_str: Vec<&str> =
                             server_config.args.iter().map(|s| s.as_str()).collect();
-                        match client
-                            .connect_stdio(name.clone(), cmd, &args_str)
-                            .await
-                    {
-                        Ok(_) => {
-                            info!("Connected to MCP server '{}'", name);
+                        match client.connect_stdio(name.clone(), cmd, &args_str).await {
+                            Ok(_) => {
+                                info!("Connected to MCP server '{}'", name);
 
-                            // Discover tools from this server
-                            match client.list_tools(name).await {
-                                Ok(tools) => {
-                                    info!(
-                                        "Discovered {} tools from MCP server '{}'",
-                                        tools.len(),
-                                        name
-                                    );
-
-                                    // Store tool information
-                                    for tool in tools {
-                                        let tool_name = format!("mcp_{}_{}", name, tool.name);
-
-                                        let tool_info = McpToolInfo {
-                                            name: tool_name.clone(),
-                                            server_name: name.clone(),
-                                            tool_name: tool.name.clone(),
-                                            description: tool.description.clone(),
-                                            input_schema: tool.input_schema.clone(),
-                                        };
-
-                                        // Store mapping of tool to server
-                                        self.tool_servers.insert(tool_name.clone(), name.clone());
-
-                                        // Store tool info
-                                        self.mcp_tools.insert(tool_name.clone(), tool_info);
-
+                                // Discover tools from this server
+                                match client.list_tools(name).await {
+                                    Ok(tools) => {
                                         info!(
-                                            "Registered MCP tool: {} from server '{}'",
-                                            tool_name, name
+                                            "Discovered {} tools from MCP server '{}'",
+                                            tools.len(),
+                                            name
+                                        );
+
+                                        // Store tool information
+                                        for tool in tools {
+                                            let tool_name = format!("mcp_{}_{}", name, tool.name);
+
+                                            let tool_info = McpToolInfo {
+                                                name: tool_name.clone(),
+                                                server_name: name.clone(),
+                                                tool_name: tool.name.clone(),
+                                                description: tool.description.clone(),
+                                                input_schema: tool.input_schema.clone(),
+                                            };
+
+                                            // Store mapping of tool to server
+                                            self.tool_servers
+                                                .insert(tool_name.clone(), name.clone());
+
+                                            // Store tool info
+                                            self.mcp_tools.insert(tool_name.clone(), tool_info);
+
+                                            info!(
+                                                "Registered MCP tool: {} from server '{}'",
+                                                tool_name, name
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            "Failed to discover tools from MCP server '{}': {}",
+                                            name, e
                                         );
                                     }
                                 }
-                                Err(e) => {
-                                    warn!(
-                                        "Failed to discover tools from MCP server '{}': {}",
-                                        name, e
-                                    );
-                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to connect to MCP server '{}': {}", name, e);
                             }
                         }
-                        Err(e) => {
-                            error!("Failed to connect to MCP server '{}': {}", name, e);
-                        }
-                    }
                     } else {
-                        info!("MCP server '{}' is remote (no stdio command), skipping stdio connect", name);
+                        info!(
+                            "MCP server '{}' is remote (no stdio command), skipping stdio connect",
+                            name
+                        );
                     }
                 }
                 Err(e) => {

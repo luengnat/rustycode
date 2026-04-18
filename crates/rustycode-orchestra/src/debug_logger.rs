@@ -458,7 +458,9 @@ fn format_timestamp() -> String {
 /// Format timestamp for JSON log entry
 fn format_iso_timestamp() -> String {
     let now = SystemTime::now();
-    let duration = now.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
+    let duration = now
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
     let secs = duration.as_secs();
     let nsecs = duration.subsec_nanos();
 

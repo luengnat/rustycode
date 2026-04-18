@@ -378,8 +378,12 @@ pub fn load(memory_dir: &Path) -> Result<Vec<MemoryEntry>> {
         }
     } else if legacy_path.exists() {
         // Convert legacy format to new format
-        let legacy_content = fs::read_to_string(&legacy_path)
-            .with_context(|| format!("Failed to read legacy memory file {}", legacy_path.display()))?;
+        let legacy_content = fs::read_to_string(&legacy_path).with_context(|| {
+            format!(
+                "Failed to read legacy memory file {}",
+                legacy_path.display()
+            )
+        })?;
 
         // Each line is a memory fact
         for (i, line) in legacy_content.lines().enumerate() {
@@ -426,9 +430,10 @@ pub fn save_entries(path: &Path, entries: &[MemoryEntry]) -> Result<()> {
 
     for entry in entries {
         yaml_content.push_str("---\n");
-        yaml_content.push_str(&serde_yaml::to_string(entry).with_context(|| {
-            format!("Failed to serialize memory entry {}", entry.id)
-        })?);
+        yaml_content.push_str(
+            &serde_yaml::to_string(entry)
+                .with_context(|| format!("Failed to serialize memory entry {}", entry.id))?,
+        );
         yaml_content.push('\n');
     }
 

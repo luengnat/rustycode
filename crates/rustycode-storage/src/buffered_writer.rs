@@ -135,14 +135,20 @@ impl BufferedWriter {
     /// Write content to the buffer.
     pub fn write(&self, content: impl Into<String>) {
         if let Err(e) = self.sender.send(WriterMessage::Write(content.into())) {
-            warn!("BufferedWriter: failed to send write (writer thread shut down?): {}", e);
+            warn!(
+                "BufferedWriter: failed to send write (writer thread shut down?): {}",
+                e
+            );
         }
     }
 
     /// Flush the buffer, writing all buffered content immediately.
     pub fn flush(&self) {
         if let Err(e) = self.sender.send(WriterMessage::Flush) {
-            warn!("BufferedWriter: failed to send flush (writer thread shut down?): {}", e);
+            warn!(
+                "BufferedWriter: failed to send flush (writer thread shut down?): {}",
+                e
+            );
         }
     }
 

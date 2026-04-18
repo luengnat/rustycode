@@ -509,7 +509,9 @@ mod tests {
 
         // Rewind to first
         let first_id = state.get(0).unwrap().id.clone();
-        state.jump_to(&first_id, RewindMode::ConversationOnly).unwrap();
+        state
+            .jump_to(&first_id, RewindMode::ConversationOnly)
+            .unwrap();
         assert_eq!(state.cursor_position(), 0);
 
         // Now fast_forward should work

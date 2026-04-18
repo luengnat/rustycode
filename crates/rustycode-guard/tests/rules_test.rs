@@ -177,7 +177,11 @@ fn test_r08_blocks_binary_extensions() {
             Some("/workspace/project"),
         );
         let res = pre_tool::evaluate(&input);
-        assert_eq!(res.permission_decision.as_deref(), Some("deny"), "blocked .{ext}");
+        assert_eq!(
+            res.permission_decision.as_deref(),
+            Some("deny"),
+            "blocked .{ext}"
+        );
     }
 }
 
@@ -330,7 +334,10 @@ fn test_hook_result_deny_has_correct_fields() {
     use rustycode_guard::codec::HookResult;
     let res = HookResult::deny("test reason");
     assert_eq!(res.permission_decision.as_deref(), Some("deny"));
-    assert_eq!(res.permission_decision_reason.as_deref(), Some("test reason"));
+    assert_eq!(
+        res.permission_decision_reason.as_deref(),
+        Some("test reason")
+    );
     assert!(res.updated_input.is_none());
 }
 
@@ -348,7 +355,10 @@ fn test_hook_result_ask_has_ask_decision() {
     use rustycode_guard::codec::HookResult;
     let res = HookResult::ask("confirm this");
     assert_eq!(res.permission_decision.as_deref(), Some("ask"));
-    assert_eq!(res.permission_decision_reason.as_deref(), Some("confirm this"));
+    assert_eq!(
+        res.permission_decision_reason.as_deref(),
+        Some("confirm this")
+    );
 }
 
 #[test]
@@ -362,7 +372,8 @@ fn test_hook_result_warn_has_context() {
 #[test]
 fn test_hook_input_parse_valid_json() {
     use rustycode_guard::codec::{parse_input, HookInput};
-    let json = r#"{"session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp"}"#;
+    let json =
+        r#"{"session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp"}"#;
     let input: HookInput = parse_input(json).unwrap();
     assert_eq!(input.tool_name, "Bash");
     assert_eq!(input.cwd.as_deref(), Some("/tmp"));

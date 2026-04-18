@@ -698,10 +698,18 @@ impl<'a> StreamingCallbacks for HeadlessStreamCallbacks<'a> {
     ) {
         *self.stop_reason = stop_reason.map(String::from);
         if let Some(u) = usage {
-            *self.total_input_tokens = self.total_input_tokens.saturating_add(u.input_tokens as u64);
-            *self.total_output_tokens = self.total_output_tokens.saturating_add(u.output_tokens as u64);
-            *self.total_cache_read_tokens = self.total_cache_read_tokens.saturating_add(u.cache_read_input_tokens as u64);
-            *self.total_cache_creation_tokens = self.total_cache_creation_tokens.saturating_add(u.cache_creation_input_tokens as u64);
+            *self.total_input_tokens = self
+                .total_input_tokens
+                .saturating_add(u.input_tokens as u64);
+            *self.total_output_tokens = self
+                .total_output_tokens
+                .saturating_add(u.output_tokens as u64);
+            *self.total_cache_read_tokens = self
+                .total_cache_read_tokens
+                .saturating_add(u.cache_read_input_tokens as u64);
+            *self.total_cache_creation_tokens = self
+                .total_cache_creation_tokens
+                .saturating_add(u.cache_creation_input_tokens as u64);
         }
     }
 
@@ -3984,7 +3992,11 @@ mod tests {
 
         // Should not panic on overflow — saturating_add caps at u64::MAX
         total_input.set(total_input.get().saturating_add(usage.input_tokens as u64));
-        total_output.set(total_output.get().saturating_add(usage.output_tokens as u64));
+        total_output.set(
+            total_output
+                .get()
+                .saturating_add(usage.output_tokens as u64),
+        );
 
         assert_eq!(total_input.get(), u64::MAX); // Saturated, not wrapped
         assert_eq!(total_output.get(), 50);
