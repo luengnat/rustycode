@@ -99,6 +99,16 @@ impl InputState {
         }
     }
 
+    /// Insert a string at the current cursor position
+    pub fn insert_string(&mut self, s: &str) {
+        if let Some(line) = self.lines.get_mut(self.cursor_row) {
+            if self.cursor_col <= line.len() {
+                line.insert_str(self.cursor_col, s);
+                self.cursor_col += s.len();
+            }
+        }
+    }
+
     /// Delete character before cursor (backspace)
     ///
     /// This now properly deletes entire grapheme clusters, not just bytes.

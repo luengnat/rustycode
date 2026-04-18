@@ -168,6 +168,18 @@ impl WorkspaceScanner {
         }
     }
 
+    /// Static utility to scan workspace for FileSelector
+    pub fn scan_workspace(root: &Path) -> Vec<String> {
+        let scanner = Self::new(root.to_path_buf());
+        if let Ok(result) = scanner.full_scan() {
+            result.files.iter()
+                .map(|f| f.path.to_string_lossy().into_owned())
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Perform a full workspace scan
     fn full_scan(&self) -> Result<ScanResult> {
         let start = Instant::now();

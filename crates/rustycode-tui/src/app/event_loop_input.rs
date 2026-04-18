@@ -80,39 +80,6 @@ impl TUI {
     /// Handle keyboard input - main entry point
     pub(crate) fn handle_input(&mut self) -> Result<()> {
         match event::read() {
-            // Trigger File Selector on '@'
-            Ok(CrosstermEvent::Key(key))
-                if key.code == KeyCode::Char('@') && self.input_mode != InputMode::None =>
-            {
-                let files = crate::app::workspace_scanner::scan_workspace(&self.project_root);
-                self.file_selector = FileSelector::new(files);
-                self.file_selector.show();
-                self.dirty = true;
-                return Ok(());
-            }
-
-            // Handle selection when FileSelector is visible
-            Ok(CrosstermEvent::Key(key)) if self.file_selector.is_visible() => {
-                match key.code {
-                    KeyCode::Enter => {
-                        if let Some(selected) = self.file_selector.take_selected() {
-                            let tag = format!("@{}/", selected);
-                            self.input_handler.state.insert_string(&tag);
-                            self.file_selector.hide();
-                            self.dirty = true;
-                        }
-                    }
-                    KeyCode::Esc => {
-                        self.file_selector.hide();
-                        self.dirty = true;
-                    }
-                    _ => {
-                        self.file_selector.handle_key(key);
-                    }
-                }
-                return Ok(());
-            }
-
             Ok(CrosstermEvent::Key(key)) => {
                 // Centralized handling for Ctrl+K to open command palette before
                 // other input processing drops into the command palette handler.
