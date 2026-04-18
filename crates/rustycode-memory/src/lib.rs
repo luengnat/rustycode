@@ -1138,4 +1138,54 @@ use_count: 0
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].id, "add-test");
     }
+
+    #[test]
+    fn detect_project_context_in_git_repo() {
+        // This test runs from the rustycode repo itself, so it should detect a context
+        let cwd = Path::new(".");
+        let ctx = detect_project_context(cwd);
+        assert!(ctx.is_some());
+        let ctx = ctx.unwrap();
+        assert!(!ctx.id.is_empty());
+        assert!(!ctx.name.is_empty());
+    }
+
+    #[test]
+    fn detect_project_context_nonexistent_dir() {
+        // Non-existent directory should return None (no git context)
+        let cwd = Path::new("/nonexistent/path/that/does/not/exist");
+        let ctx = detect_project_context(cwd);
+        assert!(ctx.is_none());
+    }
+
+    #[test]
+    fn load_nonexistent_dir_returns_empty() {
+        let entries = load(Path::new("/nonexistent/dir/memory")).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn save_entries_creates_deeply_nested_parent_dirs() {
+        let dir = temp_dir();
+        let nested = dir.join("a").join("b").join("c");
+        let path = nested.join("memory.yaml");
+
+        let entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "nested-test".to_string(),
+            trigger: "nested".to_string(),
+            confidence: 0.6,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "nested save".to_string(),
+        });
+
+        save_entries(&path, &[entry]).unwrap();
+        assert!(path.exists());
+
+        let loaded = load(&nested).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "nested-test");
+    }
 }
