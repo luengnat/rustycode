@@ -497,4 +497,95 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(state.cursor_position(), 0);
     }
+
+    #[test]
+    fn rewind_state_fast_forward() {
+        let mut state = RewindState::new(10);
+
+        for i in 0..3 {
+            let snapshot = create_snapshot(Some(format!("Message {}", i)), None, vec![], None);
+            state.record(snapshot);
+        }
+
+        // Rewind to first
+        let first_id = state.get(0).unwrap().id.clone();
+        state.jump_to(&first_id, RewindMode::ConversationOnly).unwrap();
+        assert_eq!(state.cursor_position(), 0);
+
+        // Now fast_forward should work
+        assert!(state.can_fast_forward());
+        let result = state.fast_forward(RewindMode::ConversationOnly);
+        assert!(result.is_ok());
+        assert_eq!(state.cursor_position(), 1);
+    }
+
+    #[test]
+    fn rewind_state_no_fast_forward_at_end() {
+        let mut state = RewindState::new(10);
+
+        let snapshot = create_snapshot(Some("Single".to_string()), None, vec![], None);
+        state.record(snapshot);
+
+        assert!(!state.can_fast_forward());
+        let result = state.fast_forward(RewindMode::ConversationOnly);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rewind_state_get_and_current() {
+        let mut state = RewindState::new(10);
+
+        for i in 0..3 {
+            let snapshot = create_snapshot(Some(format!("Msg {}", i)), None, vec![], None);
+            state.record(snapshot);
+        }
+
+        // get() returns by index
+        assert!(state.get(0).is_some());
+        assert!(state.get(2).is_some());
+        assert!(state.get(5).is_none());
+
+        // current() returns the last recorded
+        let current = state.current().unwrap();
+        assert_eq!(current.summary, "Msg 2");
+
+        // After rewind, current changes
+        state.rewind(RewindMode::ConversationOnly).unwrap();
+        let current = state.current().unwrap();
+        assert_eq!(current.summary, "Msg 1");
+    }
+
+    #[test]
+    fn rewind_state_history() {
+        let mut state = RewindState::new(10);
+
+        for i in 0..3 {
+            let snapshot = create_snapshot(Some(format!("Msg {}", i)), None, vec![], None);
+            state.record(snapshot);
+        }
+
+        let history = state.history();
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[0].summary, "Msg 0");
+        assert_eq!(history[2].summary, "Msg 2");
+    }
+
+    #[test]
+    fn rewind_state_cursor_position() {
+        let mut state = RewindState::new(10);
+
+        assert_eq!(state.cursor_position(), 0);
+
+        for i in 0..3 {
+            let snapshot = create_snapshot(Some(format!("Msg {}", i)), None, vec![], None);
+            state.record(snapshot);
+        }
+        assert_eq!(state.cursor_position(), 2);
+
+        state.rewind(RewindMode::ConversationOnly).unwrap();
+        assert_eq!(state.cursor_position(), 1);
+
+        state.fast_forward(RewindMode::ConversationOnly).unwrap();
+        assert_eq!(state.cursor_position(), 2);
+    }
 }

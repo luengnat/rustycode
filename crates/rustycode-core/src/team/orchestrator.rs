@@ -551,7 +551,9 @@ impl TeamOrchestrator {
                     created_timestamp: None,
                     ttl_hours: None, // Long-term: permanent
                 };
-                let _ = memory.add(pattern_content, MemoryType::CodePatterns, pattern_meta);
+                if let Err(e) = memory.add(pattern_content, MemoryType::CodePatterns, pattern_meta) {
+                    warn!("Failed to store code pattern in memory: {}", e);
+                }
             }
         }
     }
