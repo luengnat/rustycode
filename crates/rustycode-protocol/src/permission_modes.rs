@@ -338,7 +338,7 @@ impl PermissionRuleSet {
     /// Get rules sorted by source precedence (highest first).
     pub fn sorted_by_precedence(&self) -> Vec<&PermissionRule> {
         let mut refs: Vec<_> = self.rules.iter().collect();
-        refs.sort_by(|a, b| b.source.precedence().cmp(&a.source.precedence()));
+        refs.sort_by_key(|r| std::cmp::Reverse(r.source.precedence()));
         refs
     }
 

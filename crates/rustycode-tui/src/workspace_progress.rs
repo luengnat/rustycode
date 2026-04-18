@@ -620,7 +620,7 @@ mod tests {
         .expect("harness file");
         std::fs::write(
             cwd.join("mcp.json"),
-            r#"{"servers":{"filesystem":{"enabled":true,"command":"npx","args":[]}}}"#,
+            r#"{"servers":{"filesystem":{"server_id":"fs","name":"filesystem","enabled":true,"command":"npx","args":[]}}}"#,
         )
         .expect("mcp file");
 

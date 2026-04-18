@@ -193,9 +193,7 @@ impl MessageSelector {
         }
 
         // Sort selected messages by original order (preserve conversation flow)
-        result
-            .messages
-            .sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        result.messages.sort_by_key(|m| m.timestamp);
 
         result
     }
