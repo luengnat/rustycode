@@ -405,7 +405,7 @@ fn parse_declaration_lenient(
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|m| parse_module_declaration(m))
+                .filter_map(parse_module_declaration)
                 .collect()
         })
         .unwrap_or_default();

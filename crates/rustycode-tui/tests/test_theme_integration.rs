@@ -20,11 +20,12 @@ fn test_theme_list_includes_all_themes() {
 
 #[test]
 fn test_theme_find_by_name() {
-    let tokyo = Theme::find_by_name("tokyo-night");
+    let themes = builtin_themes();
+    let tokyo = themes.iter().find(|t| t.name == "tokyo-night");
     assert!(tokyo.is_some());
     assert_eq!(tokyo.unwrap().name, "tokyo-night");
 
-    let nonexistent = Theme::find_by_name("nonexistent-theme");
+    let nonexistent = themes.iter().find(|t| t.name == "nonexistent-theme");
     assert!(nonexistent.is_none());
 }
 

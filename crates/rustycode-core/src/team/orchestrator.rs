@@ -1699,13 +1699,11 @@ impl TeamOrchestrator {
     fn validate_tool_call(&self, tc: &ParsedToolCall) -> Option<String> {
         match tc.name.as_str() {
             "bash" => {
-                let cmd = tc.arguments.get("command").and_then(|v| v.as_str());
-                match cmd {
+                let raw = tc.arguments.get("command");
+                match raw.and_then(|v| v.as_str()) {
                     None => Some(format!(
                         "bash requires a non-null 'command' string. Got: {}",
-                        tc.arguments
-                            .get("command")
-                            .map(|v| v.to_string())
+                        raw.map(|v| v.to_string())
                             .unwrap_or_else(|| "null".to_string())
                     )),
                     Some(s) if s.trim().is_empty() => {
@@ -1736,6 +1734,23 @@ impl TeamOrchestrator {
                 let pattern = tc.arguments.get("pattern").and_then(|v| v.as_str());
                 if pattern.is_none_or(|s| s.trim().is_empty()) {
                     return Some("grep requires a non-null 'pattern' string.".to_string());
+                }
+                None
+            }
+            "glob" => {
+                let pattern = tc.arguments.get("pattern").and_then(|v| v.as_str());
+                if pattern.is_none_or(|s| s.trim().is_empty()) {
+                    return Some("glob requires a non-null 'pattern' string.".to_string());
+                }
+                None
+            }
+            "lsp_references" | "lsp_hover" => {
+                let path = tc.arguments.get("path").and_then(|v| v.as_str());
+                if path.is_none_or(|s| s.trim().is_empty()) {
+                    return Some(format!(
+                        "{} requires a non-null 'path' string.",
+                        tc.name
+                    ));
                 }
                 None
             }
@@ -2036,5 +2051,171 @@ mod tests {
         };
         assert!(outcome.success);
         assert_eq!(outcome.turns, 3);
+    }
+
+    // --- validate_tool_call tests ---
+
+    /// Helper to build a TeamOrchestrator with a no-op provider for unit tests.
+    fn make_orchestrator() -> TeamOrchestrator {
+        use rustycode_llm::tool_executor::LLMToolExecutor;
+
+        // Create a minimal orchestrator by constructing fields directly.
+        // We use the real constructor with a mock-ish provider isn't feasible here,
+        // so test validate_tool_call as a standalone method.
+        let config = OrchestratorConfig::default();
+        let (event_tx, _) = tokio::sync::broadcast::channel(64);
+        let mut event_engine = EventEngine::new();
+        event_engine.register_standard_team();
+        let root = PathBuf::from("/tmp/rustycode-test");
+        let tool_executor = LLMToolExecutor::new(root.clone());
+
+        TeamOrchestrator {
+            project_root: root,
+            client: Arc::new(MockLLMClient::new(vec![])),
+            config,
+            event_tx,
+            agent_registry: std::sync::Mutex::new(AgentRegistry::new()),
+            event_engine: std::sync::Mutex::new(event_engine),
+            cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            pattern_miner: std::sync::Mutex::new(PatternMiner::new(0.5, 1)),
+            prompt_optimizations: std::sync::Mutex::new(Vec::new()),
+            tool_executor,
+            tool_loop_config: ToolLoopConfig::default(),
+        }
+    }
+
+    fn tool_call(name: &str, args: serde_json::Value) -> ParsedToolCall {
+        ParsedToolCall {
+            name: name.to_string(),
+            arguments: args,
+            id: Some("tc_1".to_string()),
+        }
+    }
+
+    #[test]
+    fn validate_bash_valid() {
+        let orch = make_orchestrator();
+        let tc = tool_call("bash", serde_json::json!({"command": "cargo test"}));
+        assert!(orch.validate_tool_call(&tc).is_none());
+    }
+
+    #[test]
+    fn validate_bash_null_command() {
+        let orch = make_orchestrator();
+        let tc = tool_call("bash", serde_json::json!({"command": null}));
+        let err = orch.validate_tool_call(&tc).unwrap();
+        assert!(err.contains("non-null"), "Expected non-null error, got: {err}");
+    }
+
+    #[test]
+    fn validate_bash_missing_command() {
+        let orch = make_orchestrator();
+        let tc = tool_call("bash", serde_json::json!({}));
+        let err = orch.validate_tool_call(&tc).unwrap();
+        assert!(err.contains("non-null"), "Expected non-null error, got: {err}");
+    }
+
+    #[test]
+    fn validate_bash_empty_command() {
+        let orch = make_orchestrator();
+        let tc = tool_call("bash", serde_json::json!({"command": "   "}));
+        let err = orch.validate_tool_call(&tc).unwrap();
+        assert!(err.contains("non-empty"), "Expected non-empty error, got: {err}");
+    }
+
+    #[test]
+    fn validate_write_file_valid() {
+        let orch = make_orchestrator();
+        let tc = tool_call("write_file", serde_json::json!({"path": "src/main.rs", "content": "fn main() {}"}));
+        assert!(orch.validate_tool_call(&tc).is_none());
+    }
+
+    #[test]
+    fn validate_write_file_missing_path() {
+        let orch = make_orchestrator();
+        let tc = tool_call("write_file", serde_json::json!({"content": "hello"}));
+        let err = orch.validate_tool_call(&tc).unwrap();
+        assert!(err.contains("path"), "Expected path error, got: {err}");
+    }
+
+    #[test]
+    fn validate_write_file_missing_content() {
+        let orch = make_orchestrator();
+        let tc = tool_call("write_file", serde_json::json!({"path": "src/main.rs"}));
+        let err = orch.validate_tool_call(&tc).unwrap();
+        assert!(err.contains("content"), "Expected content error, got: {err}");
+    }
+
+    #[test]
+    fn validate_read_file_valid() {
+        let orch = make_orchestrator();
+        let tc = tool_call("read_file", serde_json::json!({"path": "src/main.rs"}));
+        assert!(orch.validate_tool_call(&tc).is_none());
+    }
+
+    #[test]
+    fn validate_read_file_empty_path() {
+        let orch = make_orchestrator();
+        let tc = tool_call("read_file", serde_json::json!({"path": ""}));
+        assert!(orch.validate_tool_call(&tc).is_some());
+    }
+
+    #[test]
+    fn validate_grep_valid() {
+        let orch = make_orchestrator();
+        let tc = tool_call("grep", serde_json::json!({"pattern": "fn main", "path": "src/"}));
+        assert!(orch.validate_tool_call(&tc).is_none());
+    }
+
+    #[test]
+    fn validate_grep_missing_pattern() {
+        let orch = make_orchestrator();
+        let tc = tool_call("grep", serde_json::json!({"path": "src/"}));
+        assert!(orch.validate_tool_call(&tc).is_some());
+    }
+
+    #[test]
+    fn validate_glob_valid() {
+        let orch = make_orchestrator();
+        let tc = tool_call("glob", serde_json::json!({"pattern": "**/*.rs"}));
+        assert!(orch.validate_tool_call(&tc).is_none());
+    }
+
+    #[test]
+    fn validate_glob_empty_pattern() {
+        let orch = make_orchestrator();
+        let tc = tool_call("glob", serde_json::json!({"pattern": ""}));
+        assert!(orch.validate_tool_call(&tc).is_some());
+    }
+
+    #[test]
+    fn validate_lsp_references_valid() {
+        let orch = make_orchestrator();
+        let tc = tool_call("lsp_references", serde_json::json!({"path": "src/main.rs", "line": 10, "character": 5}));
+        assert!(orch.validate_tool_call(&tc).is_none());
+    }
+
+    #[test]
+    fn validate_lsp_hover_missing_path() {
+        let orch = make_orchestrator();
+        let tc = tool_call("lsp_hover", serde_json::json!({"line": 10, "character": 5}));
+        assert!(orch.validate_tool_call(&tc).is_some());
+    }
+
+    #[test]
+    fn validate_unknown_tool_passes() {
+        let orch = make_orchestrator();
+        // Unknown tools should pass through without validation
+        let tc = tool_call("custom_tool", serde_json::json!({}));
+        assert!(orch.validate_tool_call(&tc).is_none());
+    }
+
+    #[test]
+    fn validate_bash_command_integer_arg() {
+        let orch = make_orchestrator();
+        // Some LLMs might send non-string args
+        let tc = tool_call("bash", serde_json::json!({"command": 42}));
+        let err = orch.validate_tool_call(&tc).unwrap();
+        assert!(err.contains("non-null"), "Integer should be treated as non-string: {err}");
     }
 }
