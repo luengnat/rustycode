@@ -79,7 +79,6 @@ pub fn builtin_themes() -> Vec<Theme> {
                 muted: "#5c6370".into(),      // Grey
             },
         },
-
         Theme {
             name: "tokyo-night".into(),
             colors: ThemeDefinitionColors {

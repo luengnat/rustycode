@@ -27,6 +27,7 @@ pub mod message_management;
 pub mod message_ops;
 pub mod rate_limit;
 pub mod rate_limit_handler;
+pub mod renderer;
 pub mod scrolling_ops;
 pub mod service_polling;
 pub mod session_recovery_integration;

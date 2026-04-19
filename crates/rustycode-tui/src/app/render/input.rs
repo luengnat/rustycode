@@ -2,7 +2,7 @@ impl TUI {
     /// Render input area with label and keyboard hints
     pub fn render_input(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         // Branch to brutalist renderer if enabled
-        if self.brutalist_mode {
+        if self.renderer_mode.is_brutalist() {
             self.render_input_brutalist(frame, area);
             return;
         }

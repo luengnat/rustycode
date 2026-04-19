@@ -143,11 +143,7 @@ impl DockerEnvironment {
             verifier_dir.display(),
             container_paths::VERIFIER_DIR
         );
-        let agent_mount = format!(
-            "{}:{}",
-            agent_dir.display(),
-            container_paths::AGENT_DIR
-        );
+        let agent_mount = format!("{}:{}", agent_dir.display(), container_paths::AGENT_DIR);
         let artifacts_mount = format!(
             "{}:{}",
             artifacts_dir.display(),

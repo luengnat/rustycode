@@ -1,7 +1,7 @@
 impl TUI {
     pub fn render_status(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         // Branch to brutalist renderer if enabled
-        if self.brutalist_mode {
+        if self.renderer_mode.is_brutalist() {
             self.render_status_brutalist(frame, area);
             return;
         }

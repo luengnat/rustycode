@@ -403,11 +403,7 @@ fn parse_declaration_lenient(
     let modules = decl_value
         .get("modules")
         .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(parse_module_declaration)
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(parse_module_declaration).collect())
         .unwrap_or_default();
 
     let interfaces = decl_value

@@ -377,12 +377,8 @@ impl TUI {
 
     /// Handle brutalist mode toggle (Alt+B)
     pub(crate) fn handle_brutalist_toggle(&mut self) {
-        self.brutalist_mode = !self.brutalist_mode;
-        let mode_name = if self.brutalist_mode {
-            "brutalist"
-        } else {
-            "classic"
-        };
+        self.renderer_mode = self.renderer_mode.toggled();
+        let mode_name = self.renderer_mode.label();
         self.add_system_message(format!("✓ Switched to {} mode", mode_name));
         self.dirty = true;
     }

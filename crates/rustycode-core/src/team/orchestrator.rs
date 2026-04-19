@@ -206,8 +206,15 @@ pub enum TeamEvent {
 pub enum StreamEvent {
     Text(String),
     Thinking(String),
-    ToolCallStart { index: usize, id: String, name: String },
-    ToolCallDelta { index: usize, arguments: String },
+    ToolCallStart {
+        index: usize,
+        id: String,
+        name: String,
+    },
+    ToolCallDelta {
+        index: usize,
+        arguments: String,
+    },
     Done,
     Error(String),
 }
@@ -320,8 +327,8 @@ impl TeamLLMClient for RealLLMClient {
         let (tx, rx) = futures::channel::mpsc::channel(64);
 
         tokio::spawn(async move {
-            use futures::StreamExt;
             use futures::SinkExt;
+            use futures::StreamExt;
             let mut tx = tx;
             match provider.complete_stream(request).await {
                 Ok(mut stream) => {
@@ -1747,10 +1754,7 @@ impl TeamOrchestrator {
             "lsp_references" | "lsp_hover" => {
                 let path = tc.arguments.get("path").and_then(|v| v.as_str());
                 if path.is_none_or(|s| s.trim().is_empty()) {
-                    return Some(format!(
-                        "{} requires a non-null 'path' string.",
-                        tc.name
-                    ));
+                    return Some(format!("{} requires a non-null 'path' string.", tc.name));
                 }
                 None
             }
@@ -1869,10 +1873,7 @@ impl TeamOrchestrator {
             for tc in &tool_calls {
                 // Validate tool call arguments before execution
                 if let Some(rejection) = self.validate_tool_call(tc) {
-                    warn!(
-                        "Tool {} rejected (invalid args): {}",
-                        tc.name, rejection
-                    );
+                    warn!("Tool {} rejected (invalid args): {}", tc.name, rejection);
                     let error_msg = ChatMessage {
                         role: MessageRole::Tool(tc.name.clone()),
                         content: rustycode_protocol::MessageContent::simple(
@@ -2104,7 +2105,10 @@ mod tests {
         let orch = make_orchestrator();
         let tc = tool_call("bash", serde_json::json!({"command": null}));
         let err = orch.validate_tool_call(&tc).unwrap();
-        assert!(err.contains("non-null"), "Expected non-null error, got: {err}");
+        assert!(
+            err.contains("non-null"),
+            "Expected non-null error, got: {err}"
+        );
     }
 
     #[test]
@@ -2112,7 +2116,10 @@ mod tests {
         let orch = make_orchestrator();
         let tc = tool_call("bash", serde_json::json!({}));
         let err = orch.validate_tool_call(&tc).unwrap();
-        assert!(err.contains("non-null"), "Expected non-null error, got: {err}");
+        assert!(
+            err.contains("non-null"),
+            "Expected non-null error, got: {err}"
+        );
     }
 
     #[test]
@@ -2120,13 +2127,19 @@ mod tests {
         let orch = make_orchestrator();
         let tc = tool_call("bash", serde_json::json!({"command": "   "}));
         let err = orch.validate_tool_call(&tc).unwrap();
-        assert!(err.contains("non-empty"), "Expected non-empty error, got: {err}");
+        assert!(
+            err.contains("non-empty"),
+            "Expected non-empty error, got: {err}"
+        );
     }
 
     #[test]
     fn validate_write_file_valid() {
         let orch = make_orchestrator();
-        let tc = tool_call("write_file", serde_json::json!({"path": "src/main.rs", "content": "fn main() {}"}));
+        let tc = tool_call(
+            "write_file",
+            serde_json::json!({"path": "src/main.rs", "content": "fn main() {}"}),
+        );
         assert!(orch.validate_tool_call(&tc).is_none());
     }
 
@@ -2143,7 +2156,10 @@ mod tests {
         let orch = make_orchestrator();
         let tc = tool_call("write_file", serde_json::json!({"path": "src/main.rs"}));
         let err = orch.validate_tool_call(&tc).unwrap();
-        assert!(err.contains("content"), "Expected content error, got: {err}");
+        assert!(
+            err.contains("content"),
+            "Expected content error, got: {err}"
+        );
     }
 
     #[test]
@@ -2163,7 +2179,10 @@ mod tests {
     #[test]
     fn validate_grep_valid() {
         let orch = make_orchestrator();
-        let tc = tool_call("grep", serde_json::json!({"pattern": "fn main", "path": "src/"}));
+        let tc = tool_call(
+            "grep",
+            serde_json::json!({"pattern": "fn main", "path": "src/"}),
+        );
         assert!(orch.validate_tool_call(&tc).is_none());
     }
 
@@ -2191,7 +2210,10 @@ mod tests {
     #[test]
     fn validate_lsp_references_valid() {
         let orch = make_orchestrator();
-        let tc = tool_call("lsp_references", serde_json::json!({"path": "src/main.rs", "line": 10, "character": 5}));
+        let tc = tool_call(
+            "lsp_references",
+            serde_json::json!({"path": "src/main.rs", "line": 10, "character": 5}),
+        );
         assert!(orch.validate_tool_call(&tc).is_none());
     }
 
@@ -2216,6 +2238,9 @@ mod tests {
         // Some LLMs might send non-string args
         let tc = tool_call("bash", serde_json::json!({"command": 42}));
         let err = orch.validate_tool_call(&tc).unwrap();
-        assert!(err.contains("non-null"), "Integer should be treated as non-string: {err}");
+        assert!(
+            err.contains("non-null"),
+            "Integer should be treated as non-string: {err}"
+        );
     }
 }

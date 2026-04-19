@@ -1599,13 +1599,13 @@ impl<'a> BrutalistRenderer<'a> {
         if !is_chained_mid {
             // Just a colored vertical bar — no text label, saves vertical space
             lines.push(Line::from(vec![Span::styled(
-                "▐ ",
+                "▌ ",
                 Style::default().fg(role_color).add_modifier(Modifier::BOLD),
             )]));
         } else {
             // Minimal continuation marker for chained tool-only messages
             lines.push(Line::from(vec![Span::styled(
-                "│ ",
+                "▎ ",
                 Style::default().fg(Color::Rgb(60, 60, 70)),
             )]));
         }

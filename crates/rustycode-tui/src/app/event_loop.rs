@@ -10,6 +10,7 @@ use crate::app::event_loop_commands::{
 };
 use crate::app::keyboard_shortcuts::KeyboardShortcutHandler;
 use crate::app::rate_limit_handler::RateLimitHandler;
+use crate::app::renderer::RendererMode;
 use crate::app::team_mode_handler::TeamModeHandler;
 use crate::app::wizard_handler::WizardHandler;
 use crate::app::{service_integration::*, FRAME_BUDGET_60FPS};
@@ -291,8 +292,8 @@ pub struct TUI {
     // Message tag filter state
     pub(crate) tag_filter: TagFilter,
 
-    // Brutalist renderer mode
-    pub(crate) brutalist_mode: bool,
+    // Active frame renderer backend
+    pub(crate) renderer_mode: RendererMode,
 
     /// MCP server manager - shared across the session for server lifecycle management
     pub(crate) mcp_manager:
@@ -363,7 +364,7 @@ impl TUI {
 
         // Load TUI configuration
         let tui_config = load_config();
-        let brutalist_mode = tui_config.ui.brutalist_mode; // Extract before move
+        let renderer_mode = RendererMode::from_brutalist(tui_config.ui.brutalist_mode);
         let reduced_motion = tui_config.behavior.reduced_motion; // Extract before move
 
         let compaction_config = CompactionConfig::default();
@@ -530,7 +531,7 @@ impl TUI {
             // TUI configuration
             tui_config,
             // Brutalist mode from config (new distinctive look)
-            brutalist_mode,
+            renderer_mode,
             // MCP server manager (initialized in init_services)
             mcp_manager: None,
             // Shared todo state for LLM todo tools
@@ -608,7 +609,7 @@ impl TUI {
         let input_handler = InputHandler::new();
 
         // Brutalist mode for tests (use default config value)
-        let brutalist_mode = TUIConfig::default().ui.brutalist_mode;
+        let renderer_mode = RendererMode::from_brutalist(TUIConfig::default().ui.brutalist_mode);
 
         Self {
             message_renderer: MessageRenderer::new(),
@@ -703,7 +704,7 @@ impl TUI {
             file_finder: crate::ui::file_finder::FileFinder::new(PathBuf::from(".")),
             search_state: SearchState::new(),
             tag_filter: TagFilter::new(),
-            brutalist_mode,
+            renderer_mode,
             mcp_manager: None,
             todo_state: rustycode_tools::new_todo_state(),
             team_panel: crate::ui::team_panel::TeamPanel::new(),
@@ -1846,8 +1847,19 @@ impl TUI {
         false
     }
 
-    /// Render the full TUI frame by delegating to sub-render methods
+    /// Render the active frame backend.
     pub(crate) fn render(&mut self, frame: &mut ratatui::Frame) {
+        let renderer = self.renderer_mode;
+        crate::app::renderer::FrameRenderer::render(renderer, self, frame);
+    }
+
+    /// Render the polished layout.
+    #[allow(unreachable_code)]
+    pub(crate) fn render_polished(&mut self, frame: &mut ratatui::Frame) {
+        let polished = crate::app::renderer::PolishedRenderer::from_tui(self, frame.area());
+        polished.render(self, frame);
+        return;
+
         use crate::ui::footer::Footer;
         use crate::ui::header::Header;
         use ratatui::layout::{Constraint, Direction, Layout};
@@ -1862,12 +1874,6 @@ impl TUI {
             let msg = ratatui::widgets::Paragraph::new("Terminal too small (min 40×8)")
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(msg, size);
-            return;
-        }
-
-        // Brutalist mode uses its own complete renderer
-        if self.brutalist_mode {
-            self.render_brutalist(frame);
             return;
         }
 
@@ -2114,7 +2120,11 @@ impl TUI {
     }
 
     /// Render messages with panic recovery
-    fn render_messages_safe(&mut self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
+    pub(crate) fn render_messages_safe(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+    ) {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.render_messages(frame, area);
         }));
@@ -2125,7 +2135,11 @@ impl TUI {
     }
 
     /// Render input with panic recovery
-    fn render_input_safe(&mut self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
+    pub(crate) fn render_input_safe(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+    ) {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.render_input(frame, area);
         }));
@@ -2136,7 +2150,11 @@ impl TUI {
     }
 
     /// Render status bar with panic recovery
-    fn render_status_safe(&mut self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
+    pub(crate) fn render_status_safe(
+        &mut self,
+        frame: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+    ) {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.render_status(frame, area);
         }));
@@ -2163,7 +2181,7 @@ impl TUI {
     }
 
     /// Render using brutalist renderer (complete UI)
-    fn render_brutalist(&mut self, frame: &mut ratatui::Frame) {
+    pub(crate) fn render_brutalist(&mut self, frame: &mut ratatui::Frame) {
         let input_text = self.input_handler.state.all_text();
 
         // Compute dynamic input area height based on content lines
@@ -2397,7 +2415,11 @@ impl TUI {
     }
 
     /// Render compaction preview overlay
-    fn render_compaction_preview(&self, frame: &mut ratatui::Frame, size: ratatui::layout::Rect) {
+    pub(crate) fn render_compaction_preview(
+        &self,
+        frame: &mut ratatui::Frame,
+        size: ratatui::layout::Rect,
+    ) {
         use ratatui::style::{Color, Modifier, Style};
         use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 

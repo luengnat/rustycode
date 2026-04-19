@@ -21,22 +21,24 @@ pub async fn execute(cmd: BenchCommand) -> Result<()> {
             max_turns,
             max_tokens,
             timeout,
-        } => run_bench(
-            dataset,
-            path,
-            agent,
-            model,
-            provider,
-            n_concurrent,
-            force_build,
-            cleanup,
-            job_name,
-            jobs_dir,
-            max_turns,
-            max_tokens,
-            timeout,
-        )
-        .await,
+        } => {
+            run_bench(
+                dataset,
+                path,
+                agent,
+                model,
+                provider,
+                n_concurrent,
+                force_build,
+                cleanup,
+                job_name,
+                jobs_dir,
+                max_turns,
+                max_tokens,
+                timeout,
+            )
+            .await
+        }
         BenchCommand::Results { job_dir } => show_results(job_dir),
         BenchCommand::ListDatasets => list_datasets(),
     }
