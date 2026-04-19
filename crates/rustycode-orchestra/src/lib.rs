@@ -73,6 +73,7 @@ pub mod observability_validator;
 pub mod orchestra_tools;
 pub mod paths;
 pub mod plan_mode;
+pub mod tool_access_matrix;
 pub mod prompt_compressor;
 pub mod routing_history;
 pub mod safe_fs;
