@@ -13,10 +13,12 @@ pub enum PlanModeBanner {
     /// Planning is active and the assistant should keep analyzing.
     Planning { action_hint: String },
     /// Planning has stalled on a blocker and needs user action.
-    Stalled { reason: String, action_hint: String },
+    Stalled { action_hint: String },
     /// The assistant believes the plan is complete and is waiting for the
     /// user to switch to implementation mode.
     ReadyToSwitch { summary: String, action_hint: String },
+    /// Approval is required for the current plan.
+    ApprovalRequired { reason: String, action_hint: String },
 }
 
 impl PlanModeBanner {
@@ -26,6 +28,7 @@ impl PlanModeBanner {
             Self::Planning { .. } => "Planning",
             Self::Stalled { .. } => "Plan stalled",
             Self::ReadyToSwitch { .. } => "Ready to switch",
+            Self::ApprovalRequired { .. } => "Approval required",
         }
     }
 
@@ -35,11 +38,14 @@ impl PlanModeBanner {
             Self::Planning { action_hint } => {
                 format!("Planning is active. {}", action_hint)
             }
-            Self::Stalled { reason, action_hint } => {
-                format!("{} {}", reason, action_hint)
+            Self::Stalled { action_hint } => {
+                format!("Planning is blocked. {}", action_hint)
             }
             Self::ReadyToSwitch { summary, action_hint } => {
                 format!("{} {}", summary, action_hint)
+            }
+            Self::ApprovalRequired { reason, action_hint } => {
+                format!("{} {}", reason, action_hint)
             }
         }
     }
@@ -50,11 +56,14 @@ impl PlanModeBanner {
             Self::Planning { action_hint } => {
                 format!("Plan mode is active. {}", action_hint)
             }
-            Self::Stalled { reason, action_hint } => {
-                format!("Plan mode stalled: {} {}", reason, action_hint)
+            Self::Stalled { action_hint } => {
+                format!("Plan mode is blocked. {}", action_hint)
             }
             Self::ReadyToSwitch { summary, action_hint } => {
                 format!("{} {}", summary, action_hint)
+            }
+            Self::ApprovalRequired { reason, action_hint } => {
+                format!("{} {}", reason, action_hint)
             }
         }
     }
@@ -65,6 +74,7 @@ impl PlanModeBanner {
             Self::Planning { .. } => ratatui::style::Color::Cyan,
             Self::Stalled { .. } => ratatui::style::Color::Red,
             Self::ReadyToSwitch { .. } => ratatui::style::Color::Yellow,
+            Self::ApprovalRequired { .. } => ratatui::style::Color::Magenta,
         }
     }
 
@@ -72,7 +82,7 @@ impl PlanModeBanner {
     pub(crate) fn header_status(&self) -> HeaderStatus {
         match self {
             Self::Planning { .. } | Self::ReadyToSwitch { .. } => HeaderStatus::Planning,
-            Self::Stalled { .. } => HeaderStatus::Stalled,
+            Self::Stalled { .. } | Self::ApprovalRequired { .. } => HeaderStatus::Stalled,
         }
     }
 }
@@ -111,17 +121,12 @@ impl TUI {
     /// Show that planning is stalled and should stop until the user acts.
     pub(crate) fn report_plan_mode_stall(&mut self, reason: impl Into<String>) {
         let reason = reason.into();
+        tracing::warn!("Plan mode stalled: {}", reason);
         let banner = PlanModeBanner::Stalled {
-            reason: reason.clone(),
             action_hint: "Use /plan to switch to implementation mode and continue.".to_string(),
         };
-
-        if self.plan_mode_banner.as_ref() == Some(&banner) {
-            return;
-        }
-
+        self.set_plan_mode_banner(Some(banner.clone()));
         let message = banner.message();
-        self.set_plan_mode_banner(Some(banner));
         self.add_system_message(message.clone());
         self.toast_manager.warning(message);
     }

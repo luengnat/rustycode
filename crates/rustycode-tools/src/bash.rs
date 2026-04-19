@@ -930,6 +930,11 @@ impl Tool for BashTool {
         // Check permissions
         crate::check_permission(self.permission(), ctx)?;
 
+        // Role-based gating
+        if let Some(gate) = &ctx.plan_gate {
+            gate.check_access(ctx.role, self.name())?;
+        }
+
         let command = params
             .get("command")
             .and_then(Value::as_str)

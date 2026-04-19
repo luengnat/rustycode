@@ -136,7 +136,7 @@ enum Command {
         #[command(subcommand)]
         command: SkillsCommand,
     },
-    /// Team learnings management (view, add, remove project memory).
+    /// Team learnings management (show, add, remove project memory).
     Learnings {
         #[command(subcommand)]
         command: LearningsCommand,
@@ -384,25 +384,70 @@ async fn async_main() -> Result<()> {
         Command::Config {
             command: ConfigCommand::Show,
         } => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&runtime.config().redacted_for_display())?
-            );
+            let display = runtime.config().redacted_for_display();
+            if cli.format == "json" {
+                println!("{}", serde_json::to_string_pretty(&display)?);
+            } else {
+                println!("RustyCode Config");
+                println!("================");
+                if let Some(model) = display.get("model").and_then(|v| v.as_str()) {
+                    println!("  Model:        {}", model);
+                }
+                if let Some(temp) = display.get("temperature").and_then(|v| v.as_f64()) {
+                    println!("  Temperature:  {:.1}", temp);
+                }
+                if let Some(max_tokens) = display.get("max_tokens").and_then(|v| v.as_u64()) {
+                    println!("  Max Tokens:   {}", max_tokens);
+                }
+                if let Some(data_dir) = display.get("data_dir").and_then(|v| v.as_str()) {
+                    println!("  Data Dir:     {}", data_dir);
+                }
+                if let Some(mem_dir) = display.get("memory_dir").and_then(|v| v.as_str()) {
+                    println!("  Memory Dir:   {}", mem_dir);
+                }
+                if let Some(skills_dir) = display.get("skills_dir").and_then(|v| v.as_str()) {
+                    println!("  Skills Dir:   {}", skills_dir);
+                }
+                if let Some(providers) = display.get("providers").and_then(|v| v.as_object()) {
+                    let active: Vec<_> = providers.iter().filter(|(_, v)| !v.is_null()).collect();
+                    println!("  Providers:    {}", active.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", "));
+                }
+                if let Some(routing) = display.get("model_routing") {
+                    if routing.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        println!("  Model Routing: enabled");
+                    }
+                }
+                if let Some(features) = display.get("features") {
+                    let fw = features.get("file_watcher").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let gi = features.get("git_integration").and_then(|v| v.as_bool()).unwrap_or(false);
+                    println!("  File Watcher: {}", if fw { "on" } else { "off" });
+                    println!("  Git Integration: {}", if gi { "on" } else { "off" });
+                }
+            }
         }
         Command::Config {
             command: ConfigCommand::Get { key },
         } => {
             let config = runtime.config();
             let value = match key.as_str() {
-                "model" => serde_json::json!(config.model).to_string(),
+                "model" => config.model.clone(),
                 "provider" => {
-                    serde_json::json!(config.redacted_for_display().get("providers")).to_string()
+                    let display = config.redacted_for_display();
+                    if let Some(providers) = display.get("providers") {
+                        let active: Vec<_> = providers.as_object()
+                            .map(|obj| obj.iter()
+                                .filter(|(_, v)| !v.is_null())
+                                .map(|(k, _)| k.as_str())
+                                .collect())
+                            .unwrap_or_default();
+                        active.join(", ")
+                    } else {
+                        "none".to_string()
+                    }
                 }
-                "log_level" => serde_json::json!(config.advanced.log_level).to_string(),
-                "telemetry_enabled" => {
-                    serde_json::json!(config.advanced.telemetry_enabled).to_string()
-                }
-                "cache_enabled" => serde_json::json!(config.advanced.cache_enabled).to_string(),
+                "log_level" => config.advanced.log_level.clone(),
+                "telemetry_enabled" => config.advanced.telemetry_enabled.to_string(),
+                "cache_enabled" => config.advanced.cache_enabled.to_string(),
                 _ => {
                     eprintln!(
                         "Unknown config key: {}. Run 'rustycode config show' to see all keys.",
@@ -411,7 +456,11 @@ async fn async_main() -> Result<()> {
                     std::process::exit(1);
                 }
             };
-            println!("{}", value);
+            if cli.format == "json" {
+                println!("{}", serde_json::json!(value));
+            } else {
+                println!("{}", value);
+            }
         }
         Command::Config {
             command: ConfigCommand::Set { key, value },

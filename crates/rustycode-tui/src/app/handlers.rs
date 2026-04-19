@@ -368,8 +368,7 @@ pub fn handle_stream_chunk(tui: &mut TUI, chunk: StreamChunk) {
             }
 
             if !was_cancelled && !tui.auto_continue_enabled {
-                use rustycode_orchestra::plan_mode::ExecutionPhase;
-                if tui.plan_mode.current_phase() == ExecutionPhase::Planning
+                if tui.plan_mode.current_phase() == "planning"
                     && !tui.is_plan_mode_stalled()
                 {
                     tui.show_plan_mode_ready_to_switch(

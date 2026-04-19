@@ -20,14 +20,15 @@
 - `crates/rustycode-orchestra/src/tool_access_matrix.rs` — Role-based tool access
 
 ### Modifying
-- `crates/rustycode-orchestra/src/plan_mode.rs` — Complete refactor (remove ExecutionPhase, add role matrix)
-- `crates/rustycode-orchestra/src/convoy.rs` — Add ConvoyPlan struct and status variants
-- `crates/rustycode-core/src/team/coordinator.rs` — Add plan field and methods
-- `crates/rustycode-tui/src/app/plan_mode_ops.rs` — Per-convoy planning display
-- `crates/rustycode-orchestra/src/auto.rs` — Remove Arc<Mutex>, integrate role-based access
-- `crates/rustycode-tools/src/bash.rs` — Add agent_role parameter and gating
-- `crates/rustycode-tools/src/write.rs` — Add agent_role parameter and gating
-- `crates/rustycode-tools/src/edit.rs` — Add agent_role parameter and gating
+- [MODIFY] [plan_mode.rs](file:///Users/nat/dev/rustycode/crates/rustycode-orchestra/src/plan_mode.rs) — Complete refactor (remove ExecutionPhase, add role matrix)
+- [MODIFY] [convoy.rs](file:///Users/nat/dev/rustycode/crates/rustycode-orchestra/src/convoy.rs) — Add ConvoyPlan struct and status variants
+- [MODIFY] [coordinator.rs](file:///Users/nat/dev/rustycode/crates/rustycode-core/src/team/coordinator.rs) — Add plan field and methods
+- [MODIFY] [plan_mode_ops.rs](file:///Users/nat/dev/rustycode/crates/rustycode-tui/src/app/plan_mode_ops.rs) — Per-convoy planning display
+- [MODIFY] [auto.rs](file:///Users/nat/dev/rustycode/crates/rustycode-orchestra/src/auto.rs) — Remove Arc<Mutex>, integrate role-based access
+- [MODIFY] [lib.rs](file:///Users/nat/dev/rustycode/crates/rustycode-tools/src/lib.rs) — Update ToolContext with role and plan mode
+- [MODIFY] [bash.rs](file:///Users/nat/dev/rustycode/crates/rustycode-tools/src/bash.rs) — Add role gating
+- [MODIFY] [fs.rs](file:///Users/nat/dev/rustycode/crates/rustycode-tools/src/fs.rs) — Add role gating for WriteFileTool
+- [MODIFY] [edit.rs](file:///Users/nat/dev/rustycode/crates/rustycode-tools/src/edit.rs) — Add role gating for EditFile
 
 ### Testing
 - `crates/rustycode-orchestra/tests/plan_mode_roles.rs` — Role-based access tests
@@ -501,56 +502,123 @@ git commit -m "feat: add plan support to Coordinator"
 
 ---
 
-## Phase 4: Tool Executor Gating
+## Phase 4: Tool System & Executor Gating
 
-### Task 5: Add role-based gating to tool executors
+### Task 5: Update Tool System Core Types
 
 **Files:**
-- Modify: `crates/rustycode-tools/src/bash.rs`
-- Modify: `crates/rustycode-tools/src/write.rs`
-- Modify: `crates/rustycode-tools/src/edit.rs`
+- [MODIFY] [lib.rs](file:///Users/nat/dev/rustycode/crates/rustycode-tools/src/lib.rs)
 
-- [ ] **Step 1: Update bash executor**
+- [ ] **Step 1: Update ToolContext**
+
+Add `agent_role` and `plan_mode` to `ToolContext`.
 
 ```rust
-use rustycode_core::team::AgentRole;
-use rustycode_orchestra::plan_mode::PlanMode;
+// crates/rustycode-tools/src/lib.rs
 
-pub async fn execute_bash(
-    cmd: &str,
-    agent_role: AgentRole,
-    plan_mode: &PlanMode,
-) -> Result<Output> {
-    plan_mode.can_use_tool(agent_role, "bash")?;
-    
-    // ... execute command
-    tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
-        .output()
-        .await
-        .context("bash execution failed")
+pub struct ToolContext {
+    pub cwd: PathBuf,
+    pub sandbox: SandboxConfig,
+    pub max_permission: ToolPermission,
+    pub cancellation_token: Option<CancellationToken>,
+    pub interactive_permissions: bool,
+    pub agent_role: rustycode_orchestra::agent_identity::AgentRole, // NEW
+    pub plan_mode: Option<std::sync::Arc<std::sync::Mutex<rustycode_orchestra::plan_mode::PlanMode>>>, // NEW
 }
 ```
 
-- [ ] **Step 2: Update write executor similarly**
+- [ ] **Step 2: Update ToolContext constructors**
 
-- [ ] **Step 3: Update edit executor similarly**
+Update `new()`, `with_sandbox()`, etc., to initialize these fields.
+
+---
+
+### Task 6: Add role-based gating to tool executors
+
+**Files:**
+- [MODIFY] [bash.rs](file:///Users/nat/dev/rustycode/crates/rustycode-tools/src/bash.rs)
+- [MODIFY] [fs.rs](file:///Users/nat/dev/rustycode/crates/rustycode-tools/src/fs.rs) (WriteFileTool)
+- [MODIFY] [edit.rs](file:///Users/nat/dev/rustycode/crates/rustycode-tools/src/edit.rs) (EditFile)
+
+- [ ] **Step 1: Update BashTool execute**
+
+```rust
+// crates/rustycode-tools/src/bash.rs
+
+impl Tool for BashTool {
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+         // Check plan mode gating
+         if let Some(ref pm_lock) = ctx.plan_mode {
+             let pm = pm_lock.lock().unwrap_or_else(|e| e.into_inner());
+             pm.can_use_tool(ctx.agent_role, "bash")?;
+         }
+         
+         // ... existing execution logic
+    }
+}
+```
+
+- [ ] **Step 2: Update WriteFileTool execute**
+
+```rust
+// crates/rustycode-tools/src/fs.rs
+
+impl Tool for WriteFileTool {
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+         // Check plan mode gating
+         if let Some(ref pm_lock) = ctx.plan_mode {
+             let pm = pm_lock.lock().unwrap_or_else(|e| e.into_inner());
+             pm.can_use_tool(ctx.agent_role, "write_file")?;
+         }
+
+         crate::check_permission(self.permission(), ctx)?;
+         // ...
+    }
+}
+```
+
+- [ ] **Step 3: Update EditFile execute**
+
+```rust
+// crates/rustycode-tools/src/edit.rs
+
+impl Tool for EditFile {
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+         // Check plan mode gating
+         if let Some(ref pm_lock) = ctx.plan_mode {
+             let pm = pm_lock.lock().unwrap_or_else(|e| e.into_inner());
+             pm.can_use_tool(ctx.agent_role, "edit_file")?;
+         }
+
+         // ... existing execution logic
+    }
+}
+```
 
 - [ ] **Step 4: Write tests for role blocking**
 
 ```rust
 #[tokio::test]
 async fn planner_can_bash() {
-    let pm = PlanMode::new(PlanModeConfig::default());
-    let result = execute_bash("echo test", AgentRole::Planner, &pm).await;
+    let pm = Arc::new(Mutex::new(PlanMode::new(PlanModeConfig::default())));
+    let mut ctx = ToolContext::new(".");
+    ctx.agent_role = AgentRole::Planner;
+    ctx.plan_mode = Some(pm);
+    
+    let tool = BashTool::new();
+    let result = tool.execute(json!({"command": "echo test"}), &ctx);
     assert!(result.is_ok());
 }
 
 #[tokio::test]
 async fn reviewer_cannot_bash() {
-    let pm = PlanMode::new(PlanModeConfig::default());
-    let result = execute_bash("echo test", AgentRole::Reviewer, &pm).await;
+    let pm = Arc::new(Mutex::new(PlanMode::new(PlanModeConfig::default())));
+    let mut ctx = ToolContext::new(".");
+    ctx.agent_role = AgentRole::Reviewer;
+    ctx.plan_mode = Some(pm);
+    
+    let tool = BashTool::new();
+    let result = tool.execute(json!({"command": "echo test"}), &ctx);
     assert!(result.is_err());
 }
 ```
@@ -567,9 +635,11 @@ git commit -m "feat: add role-based gating to tool executors"
 
 ---
 
+---
+
 ## Phase 5: TUI Updates
 
-### Task 6: Update plan_mode_ops.rs for per-convoy tracking
+### Task 7: Update plan_mode_ops.rs for per-convoy tracking
 
 **Files:**
 - Modify: `crates/rustycode-tui/src/app/plan_mode_ops.rs`
@@ -636,12 +706,14 @@ git commit -m "feat: update TUI plan mode display for per-convoy tracking"
 
 ---
 
+---
+
 ## Phase 6: Auto Mode Integration
 
-### Task 7: Refactor AutoMode
+### Task 8: Refactor AutoMode
 
 **Files:**
-- Modify: `crates/rustycode-orchestra/src/auto.rs`
+- [MODIFY] [auto.rs](file:///Users/nat/dev/rustycode/crates/rustycode-orchestra/src/auto.rs)
 
 - [ ] **Step 1: Remove Arc<Mutex<PlanMode>>**
 
@@ -665,9 +737,16 @@ impl AutoMode {
 }
 ```
 
-- [ ] **Step 2: Remove mock plan generation**
+- [ ] **Step 2: Remove legacy methods**
 
-Comment out or remove `generate_plan()`, `approve_plan()`, `execute_task()` methods.
+Remove the following mock/backward-compatibility methods that are no longer needed with the new architecture:
+- `generate_plan()`
+- `approve_plan()`
+- `reject_plan()`
+- `execute_task()`
+- `execute_plan()`
+
+These logic blocks will move into the `Coordinator` and `Convoy` management systems.
 
 - [ ] **Step 3: Run tests and commit**
 
@@ -679,9 +758,11 @@ git commit -m "refactor: remove Arc<Mutex> from AutoMode"
 
 ---
 
-## Integration & Verification
+---
 
-### Task 8: End-to-end integration test
+## Phase 7: Integration & Verification
+
+### Task 9: End-to-end integration test
 
 **Files:**
 - Create: `crates/rustycode-orchestra/tests/convoy_plan_e2e.rs`

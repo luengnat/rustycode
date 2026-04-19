@@ -34,6 +34,7 @@ pub use permission::{
     ConfirmationDecision, PermissionManager, PermissionRequest, PermissionScope, RiskLevel,
     ToolConfirmation, ToolConfirmationRouter,
 };
+pub use rustycode_protocol::{AgentRole, ConvoyPlan, PermissionRole, PlanApproval};
 pub use permission_store::{PermissionRecord, PermissionStore};
 pub mod cache;
 pub mod claude_text_editor;
@@ -98,6 +99,7 @@ pub mod yaml_format;
 pub mod osv_check;
 
 pub mod diagnostics;
+pub mod convoy_dispatcher;
 pub mod observation_layer;
 pub mod project_tracker;
 pub mod shutdown;
@@ -109,6 +111,9 @@ pub use api::{
     DeleteTool as HttpDeleteTool, GetTool as HttpGetTool, PostTool as HttpPostTool,
     PutTool as HttpPutTool,
 };
+pub mod gate;
+pub use gate::ToolGate;
+pub use convoy_dispatcher::ConvoyDispatcher;
 pub use apply_patch::ApplyPatchTool;
 pub use bash::{validate_command_safety, BashTool};
 pub use batch::BatchTool;
@@ -367,6 +372,12 @@ pub struct ToolContext {
     pub cancellation_token: Option<CancellationToken>,
     /// Whether to use interactive permission prompts
     pub interactive_permissions: bool,
+    /// Agent role for tool access gating
+    pub role: AgentRole,
+    /// Optional plan mode gate for enforcing higher-level restrictions
+    pub plan_gate: Option<std::sync::Arc<dyn ToolGate>>,
+    /// Optional convoy plan for multi-agent coordination
+    pub convoy_plan: Option<ConvoyPlan>,
 }
 
 impl ToolContext {
@@ -377,6 +388,9 @@ impl ToolContext {
             max_permission: ToolPermission::Network,
             cancellation_token: None,
             interactive_permissions: false,
+            role: AgentRole::Worker,
+            plan_gate: None,
+            convoy_plan: None,
         }
     }
 
@@ -405,6 +419,16 @@ impl ToolContext {
         self.interactive_permissions = interactive;
         self
     }
+
+    pub fn with_role(mut self, role: AgentRole) -> Self {
+        self.role = role;
+        self
+    }
+
+    pub fn with_plan_gate(mut self, gate: std::sync::Arc<dyn ToolGate>) -> Self {
+        self.plan_gate = Some(gate);
+        self
+    }
 }
 
 impl Clone for ToolContext {
@@ -415,6 +439,9 @@ impl Clone for ToolContext {
             max_permission: self.max_permission,
             cancellation_token: self.cancellation_token.as_ref().map(|t| t.child_token()),
             interactive_permissions: self.interactive_permissions,
+            role: self.role,
+            plan_gate: self.plan_gate.clone(),
+            convoy_plan: self.convoy_plan.clone(),
         }
     }
 }
@@ -902,12 +929,13 @@ fn is_cacheable_tool(tool_name: &str) -> bool {
     )
 }
 
+#[derive(Clone)]
 pub struct ToolExecutor {
     registry: Arc<ToolRegistry>,
     context: ToolContext,
     bus: Option<Arc<EventBus>>,
     cache: Arc<ToolCache>,
-    inspector: Option<tool_inspector::ToolInspectionManager>,
+    inspector: Option<Arc<tool_inspector::ToolInspectionManager>>,
     call_history: Arc<std::sync::Mutex<Vec<tool_inspector::ToolCallInfo>>>,
     /// Optional execution middleware for plan mode gating, cost limits, etc.
     middleware: Option<Arc<execution_middleware::ExecutionMiddleware>>,
@@ -974,6 +1002,18 @@ impl ToolExecutor {
             call_history: Arc::new(std::sync::Mutex::new(Vec::new())),
             middleware: None,
         }
+    }
+
+    /// Create a new ToolExecutor with todo state management
+    pub fn with_role(mut self, role: AgentRole) -> Self {
+        self.context = self.context.with_role(role);
+        self
+    }
+
+    /// Set a plan mode gate for this executor
+    pub fn with_plan_gate(mut self, gate: std::sync::Arc<dyn ToolGate>) -> Self {
+        self.context = self.context.with_plan_gate(gate);
+        self
     }
 
     /// Create a new ToolExecutor with todo state management
@@ -1079,9 +1119,9 @@ impl ToolExecutor {
             context: ToolContext::new(cwd),
             bus: None,
             cache: Arc::new(ToolCache::new_with_defaults()),
-            inspector: Some(tool_inspector::ToolInspectionManager::with_security(
+            inspector: Some(Arc::new(tool_inspector::ToolInspectionManager::with_security(
                 max_repetitions,
-            )),
+            ))),
             call_history: Arc::new(std::sync::Mutex::new(Vec::new())),
             middleware: None,
         }
@@ -1096,9 +1136,9 @@ impl ToolExecutor {
             context: ToolContext::new(cwd),
             bus: Some(bus),
             cache: Arc::new(ToolCache::new_with_defaults()),
-            inspector: Some(tool_inspector::ToolInspectionManager::with_security(
+            inspector: Some(Arc::new(tool_inspector::ToolInspectionManager::with_security(
                 max_repetitions,
-            )),
+            ))),
             call_history: Arc::new(std::sync::Mutex::new(Vec::new())),
             middleware: None,
         }
@@ -1124,7 +1164,7 @@ impl ToolExecutor {
     /// ```
     /// use rustycode_tools::{ToolExecutor, ToolContext};
     /// use rustycode_bus::EventBus;
-    /// use rustycode_protocol::ToolCall;
+    /// use rustycode_protocol::{ToolCall, PermissionRole};
     /// use std::sync::Arc;
     /// use std::path::PathBuf;
     /// use serde_json::json;
@@ -1152,35 +1192,11 @@ impl ToolExecutor {
         call: &ToolCall,
         session_id: Option<rustycode_protocol::SessionId>,
     ) -> ToolResult {
-        // Run execution middleware checks (plan mode, cost limits)
+        // Run execution middleware checks (cost limits)
         if let Some(ref mw) = self.middleware {
             let mw_state = mw.state();
             let state = mw_state.read();
-            // Check plan mode — block non-read-only tools during planning
-            if state.plan_mode == execution_middleware::PlanModeState::Planning {
-                let allowed = [
-                    "glob",
-                    "grep",
-                    "search",
-                    "read",
-                    "lsp",
-                    "web_fetch",
-                    "list_dir",
-                ];
-                if !allowed.contains(&call.name.as_str()) {
-                    return ToolResult {
-                        call_id: call.call_id.clone(),
-                        output: String::new(),
-                        error: Some(format!(
-                            "plan mode: tool '{}' not allowed during planning phase",
-                            call.name
-                        )),
-                        success: false,
-                        exit_code: None,
-                        data: None,
-                    };
-                }
-            }
+            
             // Check cost limits
             if let Some(max_cost) = mw.session_cost_checked_limit() {
                 if state.session_cost >= max_cost {

@@ -182,7 +182,7 @@ pub use model_router::{
     BudgetStatus, BudgetTracker, CostTable, ModelRouter, ModelSelection, RoutingHistory,
 };
 pub use progress::{ProgressReport, ProgressTracker};
-pub use rustycode_protocol::ToolCall;
+pub use rustycode_protocol::{PermissionRole, ToolCall};
 pub use state::{DebugState, ExecutionState, OrchestraState, ProjectState, StateManager};
 pub use tools::{create_tool_executor, ToolExecutionResult, ToolExecutor};
 pub use workflow::{
@@ -195,7 +195,7 @@ pub use worktree::{Worktree, WorktreeLock, WorktreeManager};
 pub use activity_log::{
     clear_activity_log_state, prune_activity_logs, save_activity_log, SessionEntry,
 };
-pub use agent_identity::{AgentId, AgentIdentity, AgentIdentityManager, AgentRole};
+pub use agent_identity::{AgentId, AgentIdentity, AgentIdentityManager};
 pub use atomic_write::{atomic_write, atomic_write_async, atomic_write_bytes};
 pub use auto_budget::{
     format_alert_level, format_enforcement_action, get_budget_alert_level,
@@ -294,6 +294,7 @@ pub use convoy::{
     Convoy, ConvoyId, ConvoyManager, ConvoyStatus, ConvoyTask, TaskCounts, TaskId as ConvoyTaskId,
     TaskStatus as ConvoyTaskStatus,
 };
+pub use rustycode_protocol::ConvoyPlan;
 pub use debug_logger::{
     debug_count, debug_log, debug_peak, debug_time, disable_debug, enable_debug,
     get_debug_log_path, is_enabled, write_debug_summary, DebugCounter,

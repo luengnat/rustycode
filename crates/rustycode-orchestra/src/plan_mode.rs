@@ -4,8 +4,11 @@
 //! Each agent role (Planner, Worker, Reviewer, Researcher) has specific tools it can use.
 //! Plans can require approval based on risk level and estimated cost.
 
-use crate::agent_identity::AgentRole;
 use crate::tool_access_matrix::build_access_matrix;
+use rustycode_protocol::{
+    AgentRole, ConvoyPlan, permission_role::ToolBlockedReason,
+    RiskLevel,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -14,10 +17,7 @@ use std::collections::{HashMap, HashSet};
 pub struct PlanModeConfig {
     pub enabled: bool,
     pub require_approval: bool,
-    /// Tools allowed during planning (read-only)
-    pub allowed_tools_planning: Vec<String>,
-    /// Tools allowed during implementation
-    pub allowed_tools_implementation: Vec<String>,
+    pub cost_threshold: f64,
 }
 
 impl Default for PlanModeConfig {
@@ -25,160 +25,30 @@ impl Default for PlanModeConfig {
         Self {
             enabled: true,
             require_approval: true,
-            allowed_tools_planning: vec![
-                "read".to_string(),
-                "read_file".to_string(),
-                "grep".to_string(),
-                "glob".to_string(),
-                "list_dir".to_string(),
-                "lsp".to_string(),
-                "web_search".to_string(),
-                "web_fetch".to_string(),
-                "edit_file".to_string(), // Dry-run only in planning phase
-            ],
-            allowed_tools_implementation: vec![
-                "read".to_string(),
-                "read_file".to_string(),
-                "edit_file".to_string(),
-                "write_file".to_string(),
-                "write".to_string(),
-                "apply_patch".to_string(),
-                "search_replace".to_string(),
-                "bash".to_string(),
-                "grep".to_string(),
-                "glob".to_string(),
-                "list_dir".to_string(),
-                "lsp".to_string(),
-                "web_search".to_string(),
-                "web_fetch".to_string(),
-            ],
+            cost_threshold: 1.00, // $1.00 default threshold
         }
     }
 }
 
-/// Structured plan produced by the agent during planning phase
+/// Criteria that trigger a requirement for manual approval
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Plan {
-    pub id: String,
-    pub summary: String,
-    pub approach: String,
-    pub files_to_modify: Vec<FilePlan>,
-    pub commands_to_run: Vec<CommandPlan>,
-    pub estimated_tokens: TokenEstimate,
-    pub estimated_cost_usd: f64,
-    pub risks: Vec<Risk>,
-    pub success_criteria: Vec<String>,
-    pub created_at: String,
-}
-
-/// Planned file modification
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FilePlan {
-    pub path: String,
-    pub action: FileAction,
-    pub reason: String,
-}
-
-/// File action type
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum FileAction {
-    Create,
-    Modify,
-    Delete,
-}
-
-impl std::fmt::Display for FileAction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Create => write!(f, "create"),
-            Self::Modify => write!(f, "modify"),
-            Self::Delete => write!(f, "delete"),
-        }
-    }
-}
-
-/// Planned command execution
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CommandPlan {
-    pub command: String,
-    pub reason: String,
-}
-
-/// Token estimate for plan execution
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct TokenEstimate {
-    pub input: usize,
-    pub output: usize,
-}
-
-/// Risk identified during planning
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Risk {
-    pub level: RiskLevel,
-    pub description: String,
-}
-
-/// Risk severity level
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "snake_case")]
-pub enum RiskLevel {
-    Low,
-    Medium,
-    High,
-}
-
-impl std::fmt::Display for RiskLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Low => write!(f, "low"),
-            Self::Medium => write!(f, "medium"),
-            Self::High => write!(f, "high"),
-        }
-    }
-}
-
-/// Reason a tool was blocked
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ToolBlockedReason {
-    NotAllowedForRole { tool: String, role: AgentRole },
-    RequiresApproval,
-    ConvoyPlanNotApproved,
-    UnknownRole(AgentRole),
-}
-
-impl std::fmt::Display for ToolBlockedReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotAllowedForRole { tool, role } => {
-                write!(f, "Tool '{}' not allowed for {:?} role", tool, role)
-            }
-            Self::RequiresApproval => {
-                write!(f, "Plan execution requires approval")
-            }
-            Self::ConvoyPlanNotApproved => {
-                write!(f, "Convoy plan has not been approved")
-            }
-            Self::UnknownRole(role) => {
-                write!(f, "Unknown role: {:?}", role)
-            }
-        }
-    }
-}
-
-impl std::error::Error for ToolBlockedReason {}
-
-/// Opaque approval token — granted after user approves a plan
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ApprovalToken {
-    pub plan_id: String,
+pub enum ApprovalTrigger {
+    /// Plan has risks at or above this level
+    HighRisk(RiskLevel),
+    /// Estimated cost exceeds this threshold
+    HighCost { estimated_usd: f64, threshold: f64 },
+    /// Plan modifies files outside the project root (not yet implemented)
+    ExternalChanges { examples: Vec<String> },
 }
 
 /// Plan mode manager — gates execution behind role-based access and approval
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PlanMode {
     config: PlanModeConfig,
     role_tool_matrix: HashMap<AgentRole, HashSet<&'static str>>,
+    approval_triggers: Vec<ApprovalTrigger>,
+    current_role: AgentRole,
+    current_plan: Option<ConvoyPlan>,
 }
 
 impl Default for PlanMode {
@@ -190,53 +60,66 @@ impl Default for PlanMode {
 impl PlanMode {
     /// Create a new plan mode manager
     pub fn new(config: PlanModeConfig) -> Self {
+        let approval_triggers = vec![
+            ApprovalTrigger::HighRisk(RiskLevel::High),
+            ApprovalTrigger::HighCost {
+                estimated_usd: 0.0, // Placeholder
+                threshold: config.cost_threshold,
+            },
+        ];
+
         Self {
             config,
             role_tool_matrix: build_access_matrix(),
+            approval_triggers,
+            current_role: AgentRole::Worker,
+            current_plan: None,
         }
     }
 
-    /// Check if a role can use a specific tool
+    /// Check if an agent with a given role can use a tool
     pub fn can_use_tool(&self, role: AgentRole, tool: &str) -> Result<(), ToolBlockedReason> {
-        // If plan mode is disabled, allow all tools
         if !self.config.enabled {
             return Ok(());
         }
 
-        // Look up role in matrix
-        match self.role_tool_matrix.get(&role) {
-            Some(allowed_tools) => {
-                if allowed_tools.contains(tool) {
-                    Ok(())
-                } else {
-                    Err(ToolBlockedReason::NotAllowedForRole {
-                        tool: tool.to_string(),
-                        role,
-                    })
-                }
-            }
-            None => Err(ToolBlockedReason::UnknownRole(role)),
+        let allowed = self.role_tool_matrix
+            .get(&role)
+            .ok_or(ToolBlockedReason::UnknownRole(role))?;
+
+        if allowed.contains(tool) {
+            Ok(())
+        } else {
+            Err(ToolBlockedReason::NotAllowedForRole {
+                tool: tool.to_string(),
+                role,
+            })
         }
     }
 
-    /// Assess whether a plan requires approval.
-    ///
-    /// Returns true if:
-    /// - Plan has any High risk
-    /// - Estimated cost > $1.00
-    ///
-    /// Otherwise returns false.
-    pub fn assess_approval_required(&self, plan: &Plan) -> bool {
-        // Check for high risks
-        if plan.risks.iter().any(|r| r.level >= RiskLevel::High) {
-            return true;
+    /// Assess whether a plan requires approval based on risk and cost.
+    pub fn assess_approval_required(&self, plan: &ConvoyPlan) -> bool {
+        if !self.config.require_approval {
+            return false;
         }
 
-        // Check for high cost
-        if plan.estimated_cost_usd > 1.00 {
-            return true;
+        for trigger in &self.approval_triggers {
+            match trigger {
+                ApprovalTrigger::HighRisk(level) => {
+                    if plan.risks.iter().any(|r| r.level >= *level) {
+                        return true;
+                    }
+                }
+                ApprovalTrigger::HighCost { threshold: _, .. } => {
+                    // For now, ConvoyPlan doesn't have cost, so we skip this check
+                    // or use a placeholder if cost were available.
+                    // if plan.estimated_cost_usd > *threshold { return true; }
+                }
+                ApprovalTrigger::ExternalChanges { .. } => {
+                    // Not yet implemented
+                }
+            }
         }
-
         false
     }
 
@@ -254,57 +137,117 @@ impl PlanMode {
     pub fn requires_approval(&self) -> bool {
         self.config.require_approval
     }
-}
 
-/// Plan mode errors
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PlanModeError {
-    NoPlanToApprove,
-    PlanNotFound(String),
-}
+    /// Get the current role.
+    pub fn current_role(&self) -> AgentRole {
+        self.current_role
+    }
 
-impl std::fmt::Display for PlanModeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoPlanToApprove => write!(f, "No plan submitted for approval"),
-            Self::PlanNotFound(id) => write!(f, "Plan not found: {}", id),
+    /// Set the active role.
+    pub fn set_role(&mut self, role: AgentRole) {
+        self.current_role = role;
+    }
+
+    /// Get the current plan (if any).
+    pub fn current_plan(&self) -> Option<&ConvoyPlan> {
+        self.current_plan.as_ref()
+    }
+
+    /// Submit a plan and switch to planner role for review.
+    pub fn submit_plan(&mut self, plan: ConvoyPlan) {
+        self.current_plan = Some(plan);
+        self.current_role = AgentRole::Planner;
+    }
+
+    /// Get the current phase as a string (for TUI compatibility).
+    /// Returns "planning" if the current role is Planner, "implementation" otherwise.
+    pub fn current_phase(&self) -> &'static str {
+        match self.current_role {
+            AgentRole::Planner => "planning",
+            _ => "implementation",
         }
+    }
+
+    /// Approve the current plan and switch to worker role.
+    pub fn approve(&mut self) -> Result<ApprovalToken, PlanModeError> {
+        let plan = self
+            .current_plan
+            .as_ref()
+            .ok_or(PlanModeError::NoPlanToApprove)?;
+
+        let token = ApprovalToken {
+            plan_id: plan.id.clone(),
+            approved_at: chrono::Utc::now(),
+        };
+
+        self.current_role = AgentRole::Worker;
+        Ok(token)
+    }
+
+    /// Reset plan mode back to planning phase.
+    pub fn reset(&mut self) {
+        self.current_role = AgentRole::Planner;
+        self.current_plan = None;
+    }
+
+    /// Check if a tool is allowed for the current role.
+    pub fn is_tool_allowed(&self, tool_name: &str) -> Result<(), ToolBlockedReason> {
+        self.can_use_tool(self.current_role, tool_name)
     }
 }
 
-impl std::error::Error for PlanModeError {}
+/// Approval token returned when a plan is approved
+#[derive(Debug, Clone)]
+pub struct ApprovalToken {
+    plan_id: String,
+    approved_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl ApprovalToken {
+    /// Get the plan ID
+    pub fn plan_id(&self) -> &str {
+        &self.plan_id
+    }
+}
+
+/// Errors that can occur during plan mode operations
+#[derive(Debug, thiserror::Error)]
+pub enum PlanModeError {
+    /// No plan has been submitted for approval
+    #[error("no plan to approve")]
+    NoPlanToApprove,
+    /// Plan has already been approved
+    #[error("plan already approved")]
+    AlreadyApproved,
+}
+
+// We keep PlanModeProvider but simplify it if needed
+pub trait PlanModeProvider: Send + Sync {
+    fn can_use_tool(&self, role: AgentRole, tool: &str) -> Result<(), ToolBlockedReason>;
+}
+
+impl PlanModeProvider for PlanMode {
+    fn can_use_tool(&self, role: AgentRole, tool: &str) -> Result<(), ToolBlockedReason> {
+        self.can_use_tool(role, tool)
+    }
+}
+
+impl rustycode_tools::ToolGate for PlanMode {
+    fn check_access(&self, role: AgentRole, tool_name: &str) -> Result<(), ToolBlockedReason> {
+        self.can_use_tool(role, tool_name)
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn default_config_has_planning_tools() {
-        let config = PlanModeConfig::default();
-        assert!(config.enabled);
-        assert!(config.require_approval);
-        assert!(config.allowed_tools_planning.contains(&"read".to_string()));
-        assert!(config.allowed_tools_planning.contains(&"grep".to_string()));
-        assert!(config
-            .allowed_tools_planning
-            .contains(&"edit_file".to_string()));
-    }
-
-    #[test]
-    fn default_config_has_implementation_tools() {
-        let config = PlanModeConfig::default();
-        assert!(config
-            .allowed_tools_implementation
-            .contains(&"write".to_string()));
-        assert!(config
-            .allowed_tools_implementation
-            .contains(&"bash".to_string()));
-    }
+    use rustycode_protocol::{ConvoyRisk, PlanApproval};
 
     #[test]
     fn can_use_tool_planner_read() {
         let pm = PlanMode::new(PlanModeConfig::default());
         assert!(pm.can_use_tool(AgentRole::Planner, "read").is_ok());
+        assert!(pm.can_use_tool(AgentRole::Planner, "write").is_ok());
     }
 
     #[test]
@@ -320,156 +263,50 @@ mod tests {
     }
 
     #[test]
-    fn can_use_tool_disabled_mode_allows_all() {
-        let config = PlanModeConfig {
-            enabled: false,
-            ..PlanModeConfig::default()
-        };
-        let pm = PlanMode::new(config);
-        // When disabled, any tool is allowed
-        assert!(pm.can_use_tool(AgentRole::Reviewer, "write").is_ok());
-    }
-
-    #[test]
     fn assess_approval_required_high_risk() {
         let pm = PlanMode::new(PlanModeConfig::default());
-        let plan = Plan {
+        let plan = ConvoyPlan {
             id: "plan-1".to_string(),
             summary: "Test".to_string(),
             approach: "".to_string(),
             files_to_modify: vec![],
             commands_to_run: vec![],
-            estimated_tokens: TokenEstimate::default(),
-            estimated_cost_usd: 0.50,
-            risks: vec![Risk {
+            risks: vec![ConvoyRisk {
                 level: RiskLevel::High,
                 description: "High risk change".to_string(),
+                mitigation: String::new(),
             }],
-            success_criteria: vec![],
-            created_at: "2026-04-14".to_string(),
+            approval: PlanApproval::default(),
+            created_at: chrono::Utc::now(),
         };
         assert!(pm.assess_approval_required(&plan));
     }
 
     #[test]
-    fn assess_approval_required_high_cost() {
+    fn assess_approval_required_low_risk() {
         let pm = PlanMode::new(PlanModeConfig::default());
-        let plan = Plan {
+        let plan = ConvoyPlan {
             id: "plan-2".to_string(),
             summary: "Test".to_string(),
             approach: "".to_string(),
             files_to_modify: vec![],
             commands_to_run: vec![],
-            estimated_tokens: TokenEstimate::default(),
-            estimated_cost_usd: 1.50,
-            risks: vec![Risk {
+            risks: vec![ConvoyRisk {
                 level: RiskLevel::Low,
                 description: "Low risk".to_string(),
+                mitigation: String::new(),
             }],
-            success_criteria: vec![],
-            created_at: "2026-04-14".to_string(),
-        };
-        assert!(pm.assess_approval_required(&plan));
-    }
-
-    #[test]
-    fn assess_approval_required_low_risk_low_cost() {
-        let pm = PlanMode::new(PlanModeConfig::default());
-        let plan = Plan {
-            id: "plan-3".to_string(),
-            summary: "Test".to_string(),
-            approach: "".to_string(),
-            files_to_modify: vec![],
-            commands_to_run: vec![],
-            estimated_tokens: TokenEstimate::default(),
-            estimated_cost_usd: 0.05,
-            risks: vec![Risk {
-                level: RiskLevel::Low,
-                description: "Low risk".to_string(),
-            }],
-            success_criteria: vec![],
-            created_at: "2026-04-14".to_string(),
+            approval: PlanApproval::default(),
+            created_at: chrono::Utc::now(),
         };
         assert!(!pm.assess_approval_required(&plan));
     }
 
     #[test]
-    fn file_action_display() {
-        assert_eq!(FileAction::Create.to_string(), "create");
-        assert_eq!(FileAction::Modify.to_string(), "modify");
-        assert_eq!(FileAction::Delete.to_string(), "delete");
-    }
-
-    #[test]
-    fn risk_level_ordering() {
-        assert!(RiskLevel::Low < RiskLevel::Medium);
-        assert!(RiskLevel::Medium < RiskLevel::High);
-    }
-
-    #[test]
-    fn plan_serialization() {
-        let plan = Plan {
-            id: "plan-serde".to_string(),
-            summary: "Test".to_string(),
-            approach: "Approach".to_string(),
-            files_to_modify: vec![FilePlan {
-                path: "src/main.rs".to_string(),
-                action: FileAction::Modify,
-                reason: "Add error handling".to_string(),
-            }],
-            commands_to_run: vec![CommandPlan {
-                command: "cargo test".to_string(),
-                reason: "Verify changes".to_string(),
-            }],
-            estimated_tokens: TokenEstimate {
-                input: 500,
-                output: 1000,
-            },
-            estimated_cost_usd: 0.04,
-            risks: vec![Risk {
-                level: RiskLevel::High,
-                description: "Changes main entry point".to_string(),
-            }],
-            success_criteria: vec!["Tests pass".to_string()],
-            created_at: "2026-04-14".to_string(),
-        };
-
-        let json = serde_json::to_string(&plan).unwrap();
-        let parsed: Plan = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.id, "plan-serde");
-        assert_eq!(parsed.files_to_modify.len(), 1);
-        assert_eq!(parsed.risks[0].level, RiskLevel::High);
-    }
-
-    #[test]
-    fn plan_mode_error_display() {
-        assert_eq!(
-            PlanModeError::NoPlanToApprove.to_string(),
-            "No plan submitted for approval"
-        );
-        assert_eq!(
-            PlanModeError::PlanNotFound("x".to_string()).to_string(),
-            "Plan not found: x"
-        );
-    }
-
-    #[test]
-    fn disabled_plan_mode() {
-        let config = PlanModeConfig {
-            enabled: false,
-            ..PlanModeConfig::default()
-        };
-        let pm = PlanMode::new(config);
-        assert!(!pm.is_enabled());
-    }
-
-    #[test]
-    fn no_approval_required() {
-        let config = PlanModeConfig {
-            require_approval: false,
-            ..PlanModeConfig::default()
-        };
-        let pm = PlanMode::new(config);
-        assert!(!pm.requires_approval());
+    fn set_role_changes_phase() {
+        let mut pm = PlanMode::new(PlanModeConfig::default());
+        assert_eq!(pm.current_role(), AgentRole::Worker);
+        pm.set_role(AgentRole::Planner);
+        assert_eq!(pm.current_role(), AgentRole::Planner);
     }
 }

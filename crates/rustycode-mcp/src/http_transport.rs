@@ -73,10 +73,16 @@ impl Transport for HttpTransport {
         }
         req = req.body(json);
 
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| McpError::TransportError(format!("HTTP request failed: {}", e)))?;
+        let resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                self.connected = false;
+                return Err(McpError::TransportError(format!(
+                    "HTTP request failed: {}",
+                    e
+                )));
+            }
+        };
 
         if let Some(val) = resp.headers().get("Mcp-Session-Id") {
             if let Ok(s) = val.to_str() {
@@ -129,10 +135,16 @@ impl Transport for HttpTransport {
         }
         req = req.body(json);
 
-        let _resp = req
-            .send()
-            .await
-            .map_err(|e| McpError::TransportError(format!("HTTP notify failed: {}", e)))?;
+        let _resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                self.connected = false;
+                return Err(McpError::TransportError(format!(
+                    "HTTP notify failed: {}",
+                    e
+                )));
+            }
+        };
         Ok(())
     }
 

@@ -112,6 +112,14 @@ pub enum AgentRole {
     Scalpel,
     /// Orchestrates the overall flow (coordinator role).
     Coordinator,
+    /// Analyzes code, writes plans, researches solutions.
+    Planner,
+    /// Executes approved plans, makes code changes.
+    Worker,
+    /// Reviews changes, tests, verifies correctness.
+    Reviewer,
+    /// Explores codebase, gathers context.
+    Researcher,
 }
 
 impl fmt::Display for AgentRole {
@@ -123,6 +131,10 @@ impl fmt::Display for AgentRole {
             Self::Judge => write!(f, "Judge"),
             Self::Scalpel => write!(f, "Scalpel"),
             Self::Coordinator => write!(f, "Coordinator"),
+            Self::Planner => write!(f, "Planner"),
+            Self::Worker => write!(f, "Worker"),
+            Self::Reviewer => write!(f, "Reviewer"),
+            Self::Researcher => write!(f, "Researcher"),
         }
     }
 }

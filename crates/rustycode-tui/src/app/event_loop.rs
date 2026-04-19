@@ -555,10 +555,11 @@ impl TUI {
                 String::new(),
             ),
             plan_mode: {
-                use rustycode_orchestra::plan_mode::{ExecutionPhase, PlanMode, PlanModeConfig};
+                use rustycode_orchestra::plan_mode::{PlanMode, PlanModeConfig};
+                use rustycode_protocol::AgentRole;
 
                 let mut plan_mode = PlanMode::new(PlanModeConfig::default());
-                plan_mode.set_phase(ExecutionPhase::Implementation);
+                plan_mode.set_role(AgentRole::Worker);
                 plan_mode
             },
             // Cached API key warning (computed once)
@@ -729,10 +730,11 @@ impl TUI {
                 String::new(),
             ),
             plan_mode: {
-                use rustycode_orchestra::plan_mode::{ExecutionPhase, PlanMode, PlanModeConfig};
+                use rustycode_orchestra::plan_mode::{PlanMode, PlanModeConfig};
+                use rustycode_protocol::AgentRole;
 
                 let mut plan_mode = PlanMode::new(PlanModeConfig::default());
-                plan_mode.set_phase(ExecutionPhase::Implementation);
+                plan_mode.set_role(AgentRole::Worker);
                 plan_mode
             },
             // Cached API key warning
@@ -1400,17 +1402,16 @@ impl TUI {
         }
 
         if parts[0] == "/plan" {
-            use rustycode_orchestra::plan_mode::ExecutionPhase;
             let current = self.plan_mode.current_phase();
             match current {
-                ExecutionPhase::Planning => {
+                "planning" => {
                     self.plan_mode.approve().ok();
                     self.clear_plan_mode_banner();
                     self.add_system_message(
                         "Plan mode: switched to implementation phase".to_string(),
                     );
                 }
-                ExecutionPhase::Implementation => {
+                _ => {
                     self.plan_mode.reset();
                     self.show_plan_mode_planning();
                     self.add_system_message("Plan mode: switched to planning phase".to_string());

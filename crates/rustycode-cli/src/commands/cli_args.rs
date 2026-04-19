@@ -685,7 +685,7 @@ pub enum SkillsCommand {
     Validate { path: String },
 }
 
-/// Team learnings management (view, add, remove project memory)
+/// Team learnings management (show, add, remove project memory)
 #[derive(Debug, Subcommand)]
 #[non_exhaustive]
 pub enum LearningsCommand {

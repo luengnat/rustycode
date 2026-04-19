@@ -75,6 +75,11 @@ impl Tool for GrepTool {
     }
 
     fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        // Role-based gating
+        if let Some(gate) = &ctx.plan_gate {
+            gate.check_access(ctx.role, self.name())?;
+        }
+
         let pattern = required_string(&params, "pattern")?;
 
         // Validate regex pattern for ReDoS
@@ -270,6 +275,11 @@ impl Tool for GlobTool {
     }
 
     fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        // Role-based gating
+        if let Some(gate) = &ctx.plan_gate {
+            gate.check_access(ctx.role, self.name())?;
+        }
+
         let pattern = required_string(&params, "pattern")?
             .replace('*', "")
             .to_lowercase();

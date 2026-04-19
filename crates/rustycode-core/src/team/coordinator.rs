@@ -11,6 +11,7 @@
 //! - Escalates to the user when needed
 
 use rustycode_protocol::team::*;
+use rustycode_protocol::ConvoyPlan; // Added
 use std::path::PathBuf;
 use tracing::warn;
 
@@ -26,6 +27,8 @@ pub struct Coordinator {
     insights: Vec<String>,
     /// Architectural contract from Architect phase. None until Architect has run.
     structural_declaration: Option<StructuralDeclaration>,
+    /// Associated execution plan (from Convoy)
+    plan: Option<ConvoyPlan>,
 }
 
 /// Outcome of a single coordination turn.
@@ -107,6 +110,7 @@ impl Coordinator {
             attempt_log: Vec::new(),
             insights: Vec::new(),
             structural_declaration: None,
+            plan: None,
         }
     }
 
@@ -119,7 +123,14 @@ impl Coordinator {
             attempt_log: Vec::new(),
             insights: Vec::new(),
             structural_declaration: None,
+            plan: None,
         }
+    }
+
+    /// Set an execution plan for the coordinator.
+    pub fn with_plan(mut self, plan: ConvoyPlan) -> Self {
+        self.plan = Some(plan);
+        self
     }
 
     /// Process one turn of the coordination loop.

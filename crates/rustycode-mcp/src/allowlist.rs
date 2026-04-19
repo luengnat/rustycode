@@ -359,10 +359,12 @@ mod tests {
     use super::*;
     use std::io;
 
+    fn unique_test_path(prefix: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("{prefix}-{}.json", uuid::Uuid::new_v4()))
+    }
+
     fn create_test_manager() -> AllowlistManager {
-        let id = std::thread::current().id();
-        let file_path = std::env::temp_dir().join(format!("mcp-allowlist-test-{id:?}.json"));
-        let _ = std::fs::remove_file(&file_path);
+        let file_path = unique_test_path("mcp-allowlist-test");
         AllowlistManager::with_file_path(file_path).unwrap()
     }
 
@@ -411,11 +413,7 @@ mod tests {
 
     #[test]
     fn test_persistent_allowlist() -> io::Result<()> {
-        let temp_dir = std::env::temp_dir();
-        let file_path = temp_dir.join(format!(
-            "mcp-allowlist-persistent-test-{:?}.json",
-            std::thread::current().id()
-        ));
+        let file_path = unique_test_path("mcp-allowlist-persistent-test");
 
         // Create and add entries
         let mut allowlist = PersistentAllowlist::new(Some(file_path.clone()))?;
@@ -575,11 +573,7 @@ mod tests {
 
     #[test]
     fn test_persistent_allowlist_file_path() -> io::Result<()> {
-        let temp_dir = std::env::temp_dir();
-        let file_path = temp_dir.join(format!(
-            "mcp-allowlist-path-test-{:?}.json",
-            std::thread::current().id()
-        ));
+        let file_path = unique_test_path("mcp-allowlist-path-test");
         let allowlist = PersistentAllowlist::new(Some(file_path.clone()))?;
         assert_eq!(allowlist.file_path(), &file_path);
 
@@ -590,11 +584,7 @@ mod tests {
 
     #[test]
     fn test_persistent_allowlist_entries_for_server() -> io::Result<()> {
-        let temp_dir = std::env::temp_dir();
-        let file_path = temp_dir.join(format!(
-            "mcp-allowlist-srv-entries-test-{:?}.json",
-            std::thread::current().id()
-        ));
+        let file_path = unique_test_path("mcp-allowlist-srv-entries-test");
         let mut allowlist = PersistentAllowlist::new(Some(file_path.clone()))?;
         allowlist.add(AllowlistEntry::Tool {
             server: "srv".to_string(),
@@ -615,11 +605,7 @@ mod tests {
 
     #[test]
     fn test_persistent_allowlist_clear_server() -> io::Result<()> {
-        let temp_dir = std::env::temp_dir();
-        let file_path = temp_dir.join(format!(
-            "mcp-allowlist-clear-test-{:?}.json",
-            std::thread::current().id()
-        ));
+        let file_path = unique_test_path("mcp-allowlist-clear-test");
         let mut allowlist = PersistentAllowlist::new(Some(file_path.clone()))?;
         allowlist.add(AllowlistEntry::Server("srv".to_string()))?;
         assert!(allowlist.is_allowed("srv", "any"));

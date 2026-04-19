@@ -26,6 +26,7 @@ impl crate::app::renderer::PolishedRenderer {
                     RenderStatus::Planning { banner }
                 }
                 PlanModeBanner::Stalled { .. } => RenderStatus::Stalled { banner },
+                PlanModeBanner::ApprovalRequired { .. } => RenderStatus::Stalled { banner },
             }
         } else if tui.is_streaming {
             RenderStatus::Thinking {

@@ -23,6 +23,22 @@ impl ToolExecutor {
         Self { inner, cwd }
     }
 
+    /// Set the role for this executor
+    pub fn with_role(mut self, role: rustycode_protocol::AgentRole) -> Self {
+        // Since inner is Arc, we need to create a new inner with the role
+        // if we want to follow the builder pattern for the wrapper.
+        let inner = (*self.inner).clone().with_role(role);
+        self.inner = Arc::new(inner);
+        self
+    }
+
+    /// Set the plan gate for this executor
+    pub fn with_plan_gate(mut self, gate: Arc<dyn rustycode_tools::gate::ToolGate>) -> Self {
+        let inner = (*self.inner).clone().with_plan_gate(gate);
+        self.inner = Arc::new(inner);
+        self
+    }
+
     /// Execute a tool call
     pub fn execute_tool(&self, tool_call: &ToolCall) -> Result<ToolExecutionResult> {
         // Execute the tool using the rustycode-tools executor

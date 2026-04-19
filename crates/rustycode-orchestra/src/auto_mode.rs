@@ -14,6 +14,7 @@ use crate::{
     state::{OrchestraState, StateManager},
     tools::ToolExecutor,
 };
+use rustycode_protocol::AgentRole;
 use chrono::{DateTime, Utc};
 use rustycode_llm::ChatMessage;
 use serde::{Deserialize, Serialize};
@@ -397,7 +398,12 @@ Run tests or verify the feature works as expected.
         let llm_client = LlmClient::new(llm_config);
 
         // Create tool executor
-        let tool_executor = ToolExecutor::new(self.project_root.clone());
+        let tool_executor = ToolExecutor::new(self.project_root.clone())
+            .with_role(AgentRole::Worker);
+
+        // Optionally attach a PlanMode gate if desired (placeholder for now)
+        // let plan_gate = Arc::new(PlanMode::new(PermissionRole::Worker));
+        // let tool_executor = tool_executor.with_plan_gate(plan_gate);
 
         // Build initial messages
         let mut messages = vec![

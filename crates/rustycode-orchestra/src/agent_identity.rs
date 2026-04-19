@@ -12,35 +12,11 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use rustycode_protocol::PermissionRole;
 
 /// Unique agent identifier (e.g., "worker-a7f3")
 pub type AgentId = String;
 
-/// What role this agent is performing
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum AgentRole {
-    /// Autonomous task executor (default for Autonomous Mode)
-    Worker,
-    /// Plan-only agent (analysis, no code changes)
-    Planner,
-    /// Verification-only agent
-    Reviewer,
-    /// Research agent (read-only exploration)
-    Researcher,
-}
-
-impl std::fmt::Display for AgentRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AgentRole::Worker => write!(f, "worker"),
-            AgentRole::Planner => write!(f, "planner"),
-            AgentRole::Reviewer => write!(f, "reviewer"),
-            AgentRole::Researcher => write!(f, "researcher"),
-        }
-    }
-}
 
 /// Persistent identity for a Autonomous Mode agent session
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,7 +26,7 @@ pub struct AgentIdentity {
     /// Human-readable label (e.g., "worker-a7f3")
     pub label: String,
     /// Current role
-    pub role: AgentRole,
+    pub role: PermissionRole,
     /// When this identity was created
     pub created_at: DateTime<Utc>,
     /// Session this identity belongs to
@@ -65,7 +41,7 @@ pub struct AgentIdentity {
 
 impl AgentIdentity {
     /// Create a new agent identity for a session
-    pub fn new(session_id: &str, role: AgentRole) -> Self {
+    pub fn new(session_id: &str, role: PermissionRole) -> Self {
         let id = generate_agent_id(role);
         let label = id.clone();
         let now = Utc::now();
@@ -109,10 +85,11 @@ impl AgentIdentity {
     /// Format a one-line summary
     pub fn format_summary(&self) -> String {
         let role_icon = match self.role {
-            AgentRole::Worker => "🔧",
-            AgentRole::Planner => "📋",
-            AgentRole::Reviewer => "🔍",
-            AgentRole::Researcher => "🔬",
+            PermissionRole::Worker => "🔧",
+            PermissionRole::Planner => "📋",
+            PermissionRole::Reviewer => "🔍",
+            PermissionRole::Researcher => "🔬",
+            _ => "❓",
         };
         format!(
             "{} {} — {} done, {} failed ({:.0}% success)",
@@ -199,12 +176,13 @@ impl AgentIdentityManager {
     }
 }
 
-fn generate_agent_id(role: AgentRole) -> AgentId {
+fn generate_agent_id(role: PermissionRole) -> AgentId {
     let prefix = match role {
-        AgentRole::Worker => "wkr",
-        AgentRole::Planner => "pln",
-        AgentRole::Reviewer => "rev",
-        AgentRole::Researcher => "res",
+        PermissionRole::Worker => "wkr",
+        PermissionRole::Planner => "pln",
+        PermissionRole::Reviewer => "rev",
+        PermissionRole::Researcher => "res",
+        _ => "agn",
     };
     let now = Utc::now();
     let ts = encode_base62(now.timestamp_millis() as u64);
@@ -238,23 +216,23 @@ mod tests {
 
     #[test]
     fn test_agent_identity_new() {
-        let agent = AgentIdentity::new("sess_abc123", AgentRole::Worker);
+        let agent = AgentIdentity::new("sess_abc123", PermissionRole::Worker);
         assert!(agent.id.starts_with("wkr-"));
-        assert_eq!(agent.role, AgentRole::Worker);
+        assert_eq!(agent.role, PermissionRole::Worker);
         assert_eq!(agent.tasks_completed, 0);
     }
 
     #[test]
     fn test_agent_role_display() {
-        assert_eq!(AgentRole::Worker.to_string(), "worker");
-        assert_eq!(AgentRole::Planner.to_string(), "planner");
-        assert_eq!(AgentRole::Reviewer.to_string(), "reviewer");
-        assert_eq!(AgentRole::Researcher.to_string(), "researcher");
+        assert_eq!(PermissionRole::Worker.to_string(), "worker");
+        assert_eq!(PermissionRole::Planner.to_string(), "planner");
+        assert_eq!(PermissionRole::Reviewer.to_string(), "reviewer");
+        assert_eq!(PermissionRole::Researcher.to_string(), "researcher");
     }
 
     #[test]
     fn test_agent_success_tracking() {
-        let mut agent = AgentIdentity::new("sess_test", AgentRole::Worker);
+        let mut agent = AgentIdentity::new("sess_test", PermissionRole::Worker);
         assert_eq!(agent.success_rate(), 1.0);
 
         agent.record_success();
@@ -269,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_agent_format_summary() {
-        let mut agent = AgentIdentity::new("sess_test", AgentRole::Worker);
+        let mut agent = AgentIdentity::new("sess_test", PermissionRole::Worker);
         agent.record_success();
         let summary = agent.format_summary();
         assert!(summary.contains("wkr-"));
@@ -278,8 +256,8 @@ mod tests {
 
     #[test]
     fn test_agent_id_uniqueness() {
-        let id1 = generate_agent_id(AgentRole::Worker);
-        let id2 = generate_agent_id(AgentRole::Worker);
+        let id1 = generate_agent_id(PermissionRole::Worker);
+        let id2 = generate_agent_id(PermissionRole::Worker);
         assert_ne!(id1, id2);
     }
 
@@ -288,12 +266,12 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let manager = AgentIdentityManager::new(temp.path()).unwrap();
 
-        let identity = AgentIdentity::new("sess_test123", AgentRole::Planner);
+        let identity = AgentIdentity::new("sess_test123", PermissionRole::Planner);
         manager.register(&identity).unwrap();
 
         let loaded = manager.load(&identity.id).unwrap();
         assert_eq!(loaded.session_id, "sess_test123");
-        assert_eq!(loaded.role, AgentRole::Planner);
+        assert_eq!(loaded.role, PermissionRole::Planner);
 
         let all = manager.list().unwrap();
         assert_eq!(all.len(), 1);
@@ -313,7 +291,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let manager = AgentIdentityManager::new(temp.path()).unwrap();
 
-        let mut identity = AgentIdentity::new("sess_update", AgentRole::Worker);
+        let mut identity = AgentIdentity::new("sess_update", PermissionRole::Worker);
         manager.register(&identity).unwrap();
 
         identity.record_success();

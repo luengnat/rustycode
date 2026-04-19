@@ -24,6 +24,7 @@ pub mod team_status;
 pub mod tmux_viz;
 pub mod tool_generator;
 
+pub use rustycode_protocol::agent_protocol::AgentRole;
 pub use agent_timeline::{
     AgentState, AgentSummary, AgentTimeline, AgentTimelineSummary, AgentTrack, TaskStatus,
     TimelineEvent,

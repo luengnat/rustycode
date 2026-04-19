@@ -134,6 +134,12 @@ pub mod agent_registry;
 // Worker registry for sub-agent lifecycle tracking
 pub mod worker_registry;
 
+// Permission roles for tool gating
+pub mod permission_role;
+
+// Convoy planning types
+pub mod convoy_plan;
+
 // Cron registry for scheduled autonomous tasks
 pub mod cron_registry;
 
@@ -230,6 +236,12 @@ pub use worker_registry::{
     global_worker_registry, Worker, WorkerEvent, WorkerFailure, WorkerFailureKind, WorkerRegistry,
     WorkerStatus,
 };
+
+// Permission roles
+pub use permission_role::{PermissionRole, ToolBlockedReason};
+
+// Convoy plan types
+pub use convoy_plan::{CommandPlan, ConvoyPlan, ConvoyRisk, FilePlan, PlanApproval};
 
 // Cron registry types
 pub use cron_registry::{global_cron_registry, CronEntry, CronRegistry};

@@ -235,6 +235,11 @@ impl Tool for ReadFileTool {
     }
 
     fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        // Role-based gating
+        if let Some(gate) = &ctx.plan_gate {
+            gate.check_access(ctx.role, self.name())?;
+        }
+
         // Check permissions
         crate::check_permission(self.permission(), ctx)?;
 
@@ -612,6 +617,11 @@ impl Tool for WriteFileTool {
     }
 
     fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        // Role-based gating
+        if let Some(gate) = &ctx.plan_gate {
+            gate.check_access(ctx.role, self.name())?;
+        }
+
         crate::check_permission(self.permission(), ctx)?;
 
         let path_str = required_string(&params, "path")?;
@@ -821,6 +831,10 @@ impl Tool for ListDirTool {
     }
 
     fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        // Role-based gating
+        if let Some(gate) = &ctx.plan_gate {
+            gate.check_access(ctx.role, self.name())?;
+        }
         let path_str = optional_string(&params, "path").unwrap_or(".");
 
         // Validate path using security module
@@ -1019,7 +1033,11 @@ impl Tool for WebFetchTool {
         })
     }
 
-    fn execute(&self, params: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
+    fn execute(&self, params: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        // Role-based gating
+        if let Some(gate) = &ctx.plan_gate {
+            gate.check_access(ctx.role, self.name())?;
+        }
         let url = required_string(&params, "url")?;
 
         // Validate URL for security

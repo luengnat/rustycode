@@ -126,6 +126,10 @@ impl Tool for EditFile {
     }
 
     fn execute(&self, params: serde_json::Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        // Role-based gating
+        if let Some(gate) = &ctx.plan_gate {
+            gate.check_access(ctx.role, self.name())?;
+        }
         let input: EditFileInput = serde_json::from_value(params)
             .map_err(|e| anyhow::anyhow!("Invalid parameters: {}", e))?;
 

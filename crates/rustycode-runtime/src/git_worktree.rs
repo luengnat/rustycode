@@ -525,12 +525,13 @@ impl WorktreeManager {
         Ok(commit.trim().to_string())
     }
 
-    /// Calculate directory size
+    /// Calculate directory size with depth cap to avoid walking huge trees.
     fn get_directory_size(&self, path: &Path) -> Result<u64, String> {
         let mut total_size = 0u64;
 
         if path.is_dir() {
             for entry in walkdir::WalkDir::new(path)
+                .max_depth(5)
                 .into_iter()
                 .filter_map(|e| e.ok())
             {

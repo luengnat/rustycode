@@ -15,6 +15,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use rustycode_protocol::ConvoyPlan;
 
 /// Unique convoy identifier (human-readable)
 pub type ConvoyId = String;
@@ -29,6 +30,12 @@ pub type TaskId = String;
 pub enum ConvoyStatus {
     /// All tasks pending, none started
     Pending,
+    /// Currently analyzing and writing the execution plan
+    Planning,
+    /// Plan has been generated and is awaiting approval
+    PlanReady,
+    /// Plan has been approved, ready for execution
+    PlanApproved,
     /// At least one task in progress
     InProgress,
     /// All tasks completed successfully
@@ -43,6 +50,9 @@ impl std::fmt::Display for ConvoyStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConvoyStatus::Pending => write!(f, "pending"),
+            ConvoyStatus::Planning => write!(f, "planning"),
+            ConvoyStatus::PlanReady => write!(f, "plan_ready"),
+            ConvoyStatus::PlanApproved => write!(f, "plan_approved"),
             ConvoyStatus::InProgress => write!(f, "in_progress"),
             ConvoyStatus::Completed => write!(f, "completed"),
             ConvoyStatus::Failed => write!(f, "failed"),
@@ -110,6 +120,8 @@ pub struct Convoy {
     pub description: Option<String>,
     /// Current overall status
     pub status: ConvoyStatus,
+    /// Associated execution plan
+    pub plan: Option<ConvoyPlan>,
     /// Tasks in this convoy
     pub tasks: Vec<ConvoyTask>,
     /// Creation timestamp
@@ -146,6 +158,7 @@ impl Convoy {
             name,
             description: None,
             status: ConvoyStatus::Pending,
+            plan: None,
             tasks,
             created_at: now,
             updated_at: now,
@@ -278,8 +291,11 @@ impl Convoy {
         let pct = self.completion_percent();
         let status_icon = match self.status {
             ConvoyStatus::Pending => "⏳",
+            ConvoyStatus::Planning => "📋",
+            ConvoyStatus::PlanReady => "👀",
+            ConvoyStatus::PlanApproved => "✅",
             ConvoyStatus::InProgress => "🔄",
-            ConvoyStatus::Completed => "✅",
+            ConvoyStatus::Completed => "🏁",
             ConvoyStatus::Failed => "❌",
             ConvoyStatus::Paused => "⏸️",
         };

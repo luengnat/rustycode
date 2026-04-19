@@ -182,6 +182,9 @@ type CallbackFn = Arc<
         + Sync,
 >;
 
+/// Snapshot of a matching subscriber captured under read lock.
+type SubscriberSnapshot = (Uuid, Option<CallbackFn>, Option<broadcast::Sender<Arc<dyn Event>>>);
+
 /// Hook function type
 pub type HookFn = Arc<
     dyn Fn(&dyn Event) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>
@@ -329,46 +332,49 @@ impl EventBus {
             tracing::debug!("Publishing event: {}", event_type);
         }
 
-        let subscribers = self.subscribers.read().await;
+        // Snapshot matching subscribers under read lock, then drop it before
+        // invoking callbacks. This prevents deadlock if a callback calls
+        // subscribe/unsubscribe (which need a write lock).
+        let matches: Vec<SubscriberSnapshot> = {
+            let subscribers = self.subscribers.read().await;
+            subscribers
+                .values()
+                .filter(|s| s.filter.matches(event_type))
+                .map(|s| (s.id, s.callback.clone(), s.sender.clone()))
+                .collect()
+        };
+
         let event_arc: Arc<dyn Event> = Arc::from(event.clone_box());
         let mut recv_count = 0;
 
-        for subscriber in subscribers.values() {
-            if subscriber.filter.matches(event_type) {
-                // Handle callback delivery (zero-cost for single subscriber)
-                if let Some(callback) = &subscriber.callback {
-                    if let Err(e) = callback(event_arc.clone()) {
-                        if self.config.debug_logging {
-                            tracing::warn!(
-                                "Callback error for subscriber {}: {}",
-                                subscriber.id,
-                                e
-                            );
-                        }
-                        self.metrics.events_failed.fetch_add(1, Ordering::Relaxed);
-                    } else {
-                        recv_count += 1;
+        for (id, callback, sender) in &matches {
+            if let Some(callback) = callback {
+                if let Err(e) = callback(event_arc.clone()) {
+                    if self.config.debug_logging {
+                        tracing::warn!("Callback error for subscriber {}: {}", id, e);
+                    }
+                    self.metrics.events_failed.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    recv_count += 1;
+                    self.metrics
+                        .events_delivered
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+            }
+
+            if let Some(sender) = sender {
+                match sender.send(event_arc.clone()) {
+                    Ok(count) => {
+                        recv_count += count;
                         self.metrics
                             .events_delivered
-                            .fetch_add(1, Ordering::Relaxed);
+                            .fetch_add(count as u64, Ordering::Relaxed);
                     }
-                }
-
-                // Handle broadcast delivery
-                if let Some(sender) = &subscriber.sender {
-                    match sender.send(event_arc.clone()) {
-                        Ok(count) => {
-                            recv_count += count;
-                            self.metrics
-                                .events_delivered
-                                .fetch_add(count as u64, Ordering::Relaxed);
+                    Err(_) => {
+                        if self.config.debug_logging {
+                            tracing::warn!("No receivers for subscriber {}", id);
                         }
-                        Err(_) => {
-                            // No active receivers for this subscriber
-                            if self.config.debug_logging {
-                                tracing::warn!("No receivers for subscriber {}", subscriber.id);
-                            }
-                        }
+                        self.metrics.events_failed.fetch_add(1, Ordering::Relaxed);
                     }
                 }
             }
@@ -1820,5 +1826,38 @@ mod tests {
         bus.publish(event).await.unwrap();
 
         assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn test_callback_can_subscribe_during_publish_no_deadlock() {
+        let bus = Arc::new(EventBus::new());
+        let subscribed = Arc::new(AtomicBool::new(false));
+
+        let bus_clone = bus.clone();
+        let subscribed_clone = subscribed.clone();
+        let _id = bus
+            .subscribe_callback("session.started", move |_event| {
+                // This callback subscribes a new listener during event delivery.
+                // Before the deadlock fix, this would deadlock because publish()
+                // held a read lock while invoking callbacks, and subscribe needs
+                // a write lock.
+                let bus = bus_clone.clone();
+                let subscribed = subscribed_clone.clone();
+                tokio::spawn(async move {
+                    let (_id, _rx) = bus.subscribe("session.*").await.unwrap();
+                    subscribed.store(true, Ordering::SeqCst);
+                });
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        let event =
+            SessionStartedEvent::new(SessionId::new(), "test".to_string(), "test".to_string());
+        bus.publish(event).await.unwrap();
+
+        // Give the spawned task time to complete
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        assert!(subscribed.load(Ordering::SeqCst));
     }
 }

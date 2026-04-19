@@ -176,7 +176,7 @@ pub fn save_activity_log(
     // Write entries to file
     match write_activity_log(&file_path, entries) {
         Ok(()) => {
-            state.next_seq += 1;
+            state.next_seq = state.next_seq.saturating_add(1);
             state
                 .last_snapshot_key_by_unit
                 .insert(unit_key, snapshot_key);

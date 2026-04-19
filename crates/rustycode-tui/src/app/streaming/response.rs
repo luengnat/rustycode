@@ -1069,6 +1069,17 @@ pub async fn stream_llm_response(config: StreamConfig) -> Result<()> {
             content_blocks.len(),
         );
 
+        // Some providers/users get to the end of a tool turn without a
+        // trustworthy stop_reason. If we have tool executions, we should still
+        // continue the conversation so the model can see tool results and
+        // produce the next step instead of silently stalling after one call.
+        if !tool_executions.is_empty() && matches!(stop_action, ToolUseAction::None) {
+            tracing::warn!(
+                "Tool executions were produced but stop_reason was None; continuing turn anyway"
+            );
+            stop_action = ToolUseAction::ExecuteTools;
+        }
+
         // Decide what to do next based on stop_reason
         match stop_action {
             ToolUseAction::ExecuteTools => {
