@@ -203,7 +203,7 @@ pub fn handle_team_command(parts: &[&str], ctx: CommandContext<'_>) -> Result<Co
     }
 }
 
-/// Handle /plan command - design and discussion mode
+/// Handle /plan command - toggle between planning and implementation modes
 pub fn handle_plan_command(parts: &[&str], _ctx: CommandContext<'_>) -> Result<CommandEffect> {
     if parts.len() < 2 {
         return Ok(CommandEffect::SystemMessage(
@@ -220,7 +220,7 @@ pub fn handle_plan_command(parts: &[&str], _ctx: CommandContext<'_>) -> Result<C
              Example flow:\n\
              1. /plan Add user auth\n\
              2. Review proposed approach\n\
-             3. /team Implement the auth system"
+             3. Use /plan again to switch back to implementation mode"
                 .to_string(),
         ));
     }
@@ -235,7 +235,7 @@ pub fn handle_plan_command(parts: &[&str], _ctx: CommandContext<'_>) -> Result<C
          • Identify risks and trade-offs\n\
          • Wait for your approval\n\n\
          No files will be modified.\n\
-         When ready, use /team to execute.",
+         Use /plan again to switch to implementation mode.",
         task
     )))
 }

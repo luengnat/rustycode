@@ -41,6 +41,8 @@ pub struct Header {
 pub enum HeaderStatus {
     #[default]
     Ready,
+    Planning,
+    Stalled,
     Thinking,
     RunningTools,
     Error,
@@ -50,6 +52,8 @@ impl HeaderStatus {
     fn label(&self) -> &'static str {
         match self {
             Self::Ready => "ready",
+            Self::Planning => "planning",
+            Self::Stalled => "stalled",
             Self::Thinking => "thinking",
             Self::RunningTools => "tools",
             Self::Error => "error",
@@ -59,6 +63,8 @@ impl HeaderStatus {
     fn color(&self) -> Color {
         match self {
             Self::Ready => Color::Rgb(80, 200, 120), // teal/green
+            Self::Planning => Color::Cyan,
+            Self::Stalled => Color::Red,
             Self::Thinking => Color::Cyan,
             Self::RunningTools => Color::Rgb(255, 200, 80), // gold
             Self::Error => Color::Rgb(255, 80, 80),         // cranberry

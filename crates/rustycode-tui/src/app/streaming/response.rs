@@ -358,6 +358,11 @@ pub async fn stream_llm_response(config: StreamConfig) -> Result<()> {
             std::env::consts::OS,
             chrono::Utc::now().format("%Y-%m-%d")
         ),
+        "Planning mode policy:\n\
+        - If a requested action is blocked by planning mode, say you are stalled, name the blocker briefly, and ask the user to switch to implementation mode with /plan.\n\
+        - If a required instruction file is missing or empty, say so explicitly and stop.\n\
+        - If planning appears complete, say you are ready to switch to implementation mode and wait for the user's confirmation.\n\
+        - Do not silently stop after a blocker; explain the next step.".to_string(),
     ];
 
     if let Some(mode) = agent_mode {
@@ -383,13 +388,6 @@ pub async fn stream_llm_response(config: StreamConfig) -> Result<()> {
                 }
             }
         }
-    }
-    if let Some((filename, content)) = crate::workspace_context::find_project_instruction_file(&cwd)
-    {
-        system_parts.push(format!(
-            "## Project Instructions (authoritative: {})\nFollow the instructions below exactly unless they conflict with safety or explicit user requests.\n\n{}",
-            filename, content
-        ));
     }
     // Also load .rustycode_system_prompt from project root (Goose hints pattern)
     if let Some(cwd_str) = cwd.to_str() {

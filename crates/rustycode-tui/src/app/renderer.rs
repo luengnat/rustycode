@@ -60,6 +60,8 @@ pub struct RendererState {
     pub turn_count: usize,
     /// Number of active tool executions.
     pub pending_tools: usize,
+    /// Active plan-mode banner, if any.
+    pub plan_mode_banner: Option<crate::app::plan_mode_ops::PlanModeBanner>,
 
     // ── Tasks ─────────────────────────────────────────────────────────────────
     /// Total task count in workspace.
@@ -94,7 +96,9 @@ impl RendererState {
             .unwrap_or("unknown")
             .to_string();
 
-        let header_status = if tui.error_manager.is_showing() {
+        let header_status = if let Some(banner) = &tui.plan_mode_banner {
+            banner.header_status()
+        } else if tui.error_manager.is_showing() {
             HeaderStatus::Error
         } else if tui.is_streaming {
             if tui.active_tools.is_empty() {
@@ -146,6 +150,7 @@ impl RendererState {
             header_status,
             turn_count,
             pending_tools: tui.active_tools.len(),
+            plan_mode_banner: tui.plan_mode_banner.clone(),
             task_count: tui.workspace_tasks.tasks.len(),
             task_summary,
             session_secs: tui.start_time.elapsed().as_secs(),

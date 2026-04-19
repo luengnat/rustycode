@@ -8,6 +8,12 @@
 
 /// Status for the status bar (local to render implementation)
 enum RenderStatus {
+    Planning {
+        banner: crate::app::plan_mode_ops::PlanModeBanner,
+    },
+    Stalled {
+        banner: crate::app::plan_mode_ops::PlanModeBanner,
+    },
     Thinking {
         chunks_received: usize,
     },

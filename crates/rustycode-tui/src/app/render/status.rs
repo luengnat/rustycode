@@ -4,6 +4,7 @@ impl crate::app::renderer::PolishedRenderer {
         use ratatui::style::Style;
         use ratatui::text::{Line, Span};
         use ratatui::widgets::Paragraph;
+        use crate::app::plan_mode_ops::PlanModeBanner;
 
         let anim_frame = tui.animator.current_frame();
         let width = area.width as usize;
@@ -16,8 +17,17 @@ impl crate::app::renderer::PolishedRenderer {
         let _show_scroll_pos = true; // Always show when user scrolled
         let show_task_counts = width >= 80;
 
-        // Determine current status and create appropriate spinner
-        let status = if tui.is_streaming {
+        // Determine current status and create appropriate spinner.
+        // Plan-mode banners take priority because they are the most important
+        // user-facing state changes in this workflow.
+        let status = if let Some(banner) = tui.plan_mode_banner.clone() {
+            match banner {
+                PlanModeBanner::Planning { .. } | PlanModeBanner::ReadyToSwitch { .. } => {
+                    RenderStatus::Planning { banner }
+                }
+                PlanModeBanner::Stalled { .. } => RenderStatus::Stalled { banner },
+            }
+        } else if tui.is_streaming {
             RenderStatus::Thinking {
                 chunks_received: tui.chunks_received,
             }
@@ -39,6 +49,32 @@ impl crate::app::renderer::PolishedRenderer {
         let mut spans = Vec::new();
 
         match status {
+            RenderStatus::Planning { banner } => {
+                let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                let frame_idx = (anim_frame.progress_frame / 5) % frames.len();
+                spans.push(Span::styled(
+                    format!("{} {} ", frames[frame_idx], banner.title()),
+                    Style::default()
+                        .fg(banner.status_color())
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ));
+                spans.push(Span::styled(
+                    banner.description(),
+                    Style::default().fg(banner.status_color()),
+                ));
+            }
+            RenderStatus::Stalled { banner } => {
+                spans.push(Span::styled(
+                    format!("⚠ {} ", banner.title()),
+                    Style::default()
+                        .fg(banner.status_color())
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ));
+                spans.push(Span::styled(
+                    banner.description(),
+                    Style::default().fg(banner.status_color()),
+                ));
+            }
             RenderStatus::Thinking { chunks_received } => {
                 let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
                 let frame_idx = (anim_frame.progress_frame / 5) % frames.len();

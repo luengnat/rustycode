@@ -23,6 +23,7 @@ pub mod input;
 pub mod keyboard_shortcuts;
 pub mod memory_manager;
 pub mod memory_ops;
+pub mod plan_mode_ops;
 pub mod message_management;
 pub mod message_ops;
 pub mod rate_limit;

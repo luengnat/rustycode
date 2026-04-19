@@ -140,6 +140,7 @@ pub struct TUI {
     pub(crate) pending_bash_result: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     pub(crate) stream_start_time: Option<std::time::Instant>, // Goose pattern: response timing
     pub(crate) last_response_duration: Option<std::time::Duration>, // Shows in status bar after completion
+    pub(crate) plan_mode_banner: Option<crate::app::plan_mode_ops::PlanModeBanner>,
 
     // Tool execution tracking
     pub(crate) active_tools: std::collections::HashMap<String, ToolExecution>,
@@ -454,6 +455,7 @@ impl TUI {
             chunks_received: 0,
             stream_start_time: None,
             last_response_duration: None,
+            plan_mode_banner: None,
             active_tools: std::collections::HashMap::new(),
             workspace_loaded: false,
             workspace_context: None, // Initialize workspace context as None
@@ -639,6 +641,7 @@ impl TUI {
             chunks_received: 0,
             stream_start_time: None,
             last_response_duration: None,
+            plan_mode_banner: None,
             active_tools: std::collections::HashMap::new(),
             workspace_loaded: false,
             workspace_context: None,
@@ -1402,12 +1405,14 @@ impl TUI {
             match current {
                 ExecutionPhase::Planning => {
                     self.plan_mode.approve().ok();
+                    self.clear_plan_mode_banner();
                     self.add_system_message(
                         "Plan mode: switched to implementation phase".to_string(),
                     );
                 }
                 ExecutionPhase::Implementation => {
                     self.plan_mode.reset();
+                    self.show_plan_mode_planning();
                     self.add_system_message("Plan mode: switched to planning phase".to_string());
                 }
             }
@@ -1521,6 +1526,7 @@ impl TUI {
                 self.chunks_received = 0;
                 self.queued_message = None;
                 self.stashed_prompt = None;
+                self.clear_plan_mode_banner();
                 // Reset session usage tracking
                 self.session_input_tokens = 0;
                 self.session_output_tokens = 0;
@@ -1563,6 +1569,7 @@ impl TUI {
                 self.chunks_received = 0;
                 self.queued_message = None;
                 self.stashed_prompt = None;
+                self.clear_plan_mode_banner();
                 // Reset session usage tracking
                 self.session_input_tokens = 0;
                 self.session_output_tokens = 0;
@@ -1576,8 +1583,10 @@ impl TUI {
             }
             CommandEffect::SetPlanMode { planning } => {
                 if planning {
+                    self.show_plan_mode_planning();
                     self.add_system_message("Plan mode enabled — tools are read-only".to_string());
                 } else {
+                    self.clear_plan_mode_banner();
                     self.add_system_message("Plan mode disabled — full tool access".to_string());
                 }
             }
