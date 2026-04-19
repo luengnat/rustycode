@@ -647,7 +647,9 @@ impl Usage {
         cache_creation_input_tokens: u32,
     ) -> Self {
         // Total input = cache read + cache write + non-cached input
-        let total_input = cache_read_input_tokens + cache_creation_input_tokens + input_tokens;
+        let total_input = cache_read_input_tokens
+            .saturating_add(cache_creation_input_tokens)
+            .saturating_add(input_tokens);
         Self {
             input_tokens,
             output_tokens,
@@ -1866,5 +1868,18 @@ mod tests {
         headers.insert("authorization".to_string(), "Bearer token".to_string());
         let result = validate_extra_headers(&Some(headers));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_usage_saturating_add_no_overflow() {
+        let usage = Usage::new(u32::MAX, u32::MAX);
+        assert_eq!(usage.total_tokens, u32::MAX);
+    }
+
+    #[test]
+    fn test_usage_with_cache_saturating() {
+        let usage = Usage::with_cache(u32::MAX, 100, 50, 25);
+        // total = cache_read + cache_creation + input = MAX + 50 + 25 → saturates
+        assert_eq!(usage.total_tokens, u32::MAX);
     }
 }

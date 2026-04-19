@@ -2438,7 +2438,11 @@ impl<'a> BrutalistRenderer<'a> {
                 tool.progress_total,
                 &tool.progress_description,
             ) {
-                let pct = (current as f64 / total as f64 * 100.0) as u8;
+                let pct = if total > 0 {
+                    (current as f64 / total as f64 * 100.0) as u8
+                } else {
+                    0
+                };
                 let bar_width = 10;
                 let filled = ((pct as usize * bar_width) / 100).min(bar_width);
                 let empty = bar_width - filled;

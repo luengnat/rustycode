@@ -1425,12 +1425,14 @@ impl AnthropicProvider {
                                             .and_then(|t| t.as_u64())
                                             .unwrap_or(0) as u32;
 
-                                        let total_input = cache_read_input_tokens + cache_creation_input_tokens + input_tokens;
+                                        let total_input = cache_read_input_tokens
+                                            .saturating_add(cache_creation_input_tokens)
+                                            .saturating_add(input_tokens);
 
                                         Some(crate::provider_v2::Usage {
                                             input_tokens,
                                             output_tokens,
-                                            total_tokens: total_input + output_tokens,
+                                            total_tokens: total_input.saturating_add(output_tokens),
                                             cache_read_input_tokens,
                                             cache_creation_input_tokens,
                                         })

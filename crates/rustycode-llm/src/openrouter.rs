@@ -619,7 +619,7 @@ impl LLMProvider for OpenRouterProvider {
                                         Some(Usage {
                                             input_tokens,
                                             output_tokens,
-                                            total_tokens: input_tokens + output_tokens,
+                                            total_tokens: input_tokens.saturating_add(output_tokens),
                                             cache_read_input_tokens: u
                                                 .get("prompt_tokens_details")
                                                 .and_then(|d| d.get("cached_tokens"))

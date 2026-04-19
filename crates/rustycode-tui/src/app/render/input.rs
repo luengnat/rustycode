@@ -1,63 +1,89 @@
 impl crate::app::renderer::PolishedRenderer {
     /// Render input area with label and keyboard hints
-    pub fn render_input(&self, tui: &mut crate::app::event_loop::TUI, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
-        use ratatui::style::Color;
-        use ratatui::style::Style;
-        use ratatui::text::{Line, Span};
-        use ratatui::widgets::Paragraph;
-
+    pub fn render_input(
+        &self,
+        tui: &mut crate::app::event_loop::TUI,
+        frame: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+    ) {
         let is_multiline =
             tui.input_handler.state.mode == crate::ui::input::InputMode::MultiLine;
+        let (label_area, input_area, hints_area) = self.input_areas(area);
+        self.render_input_label(tui, frame, label_area, is_multiline);
+        self.render_input_lines(tui, frame, input_area, is_multiline);
+        self.render_input_hints(tui, frame, area, hints_area, is_multiline);
+    }
 
-        // Top label row - shows context/mode
+    fn input_areas(
+        &self,
+        area: ratatui::layout::Rect,
+    ) -> (
+        ratatui::layout::Rect,
+        ratatui::layout::Rect,
+        ratatui::layout::Rect,
+    ) {
         let label_area = ratatui::layout::Rect::new(area.x, area.y, area.width, 1);
-
-        // Input content row(s)
         let input_area = ratatui::layout::Rect::new(
             area.x,
             area.y + 1,
             area.width,
             area.height.saturating_sub(2),
         );
-
-        // Bottom hints row - shows keyboard shortcuts
         let hints_area = ratatui::layout::Rect::new(
             area.x,
             area.y + area.height.saturating_sub(1),
             area.width,
             1,
         );
+        (label_area, input_area, hints_area)
+    }
 
-        // Render label — show streaming indicator when AI is generating
-        let label_spans = if tui.is_streaming {
+    fn render_input_label(
+        &self,
+        tui: &crate::app::event_loop::TUI,
+        frame: &mut ratatui::Frame,
+        label_area: ratatui::layout::Rect,
+        is_multiline: bool,
+    ) {
+        use ratatui::text::Line;
+        use ratatui::widgets::Paragraph;
+
+        let label_spans = self.input_label_spans(tui, is_multiline);
+        frame.render_widget(Paragraph::new(Line::from(label_spans)), label_area);
+    }
+
+    fn input_label_spans(
+        &self,
+        tui: &crate::app::event_loop::TUI,
+        is_multiline: bool,
+    ) -> Vec<ratatui::text::Span<'static>> {
+        use ratatui::style::{Color, Style};
+        use ratatui::text::Span;
+
+        if tui.is_streaming {
             let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let anim_frame = tui.animator.current_frame();
             let frame_idx = (anim_frame.progress_frame / 5) % frames.len();
-
-            // Use shared thinking messages module (cycle every ~2s at 4FPS)
             let msg_idx = anim_frame.progress_frame / 8;
 
             let mut spans = vec![
                 Span::styled("│", Style::default().fg(Color::DarkGray)),
                 Span::styled(" ", Style::default().fg(Color::White)),
                 Span::styled(
-                    format!("{} {}", frames[frame_idx], crate::app::thinking_messages::get_thinking_message(msg_idx)),
-                    Style::default().fg(Color::Rgb(255, 200, 80)), // Amber
+                    format!(
+                        "{} {}",
+                        frames[frame_idx],
+                        crate::app::thinking_messages::get_thinking_message(msg_idx)
+                    ),
+                    Style::default().fg(Color::Rgb(255, 200, 80)),
                 ),
                 Span::styled("  Ctrl+C cancel", Style::default().fg(Color::DarkGray)),
             ];
-            // Show queue state hint so users know they can type ahead
-            if tui.queued_message.is_some() {
-                spans.push(Span::styled(
-                    "  📝 1 queued",
-                    Style::default().fg(Color::Rgb(180, 180, 255)),
-                ));
+            spans.push(if tui.queued_message.is_some() {
+                Span::styled("  📝 1 queued", Style::default().fg(Color::Rgb(180, 180, 255)))
             } else {
-                spans.push(Span::styled(
-                    "  type to queue",
-                    Style::default().fg(Color::Rgb(120, 120, 140)),
-                ));
-            }
+                Span::styled("  type to queue", Style::default().fg(Color::Rgb(120, 120, 140)))
+            });
             spans
         } else {
             let mut spans = vec![
@@ -69,7 +95,6 @@ impl crate::app::renderer::PolishedRenderer {
                 ),
                 Span::styled(" ", Style::default().fg(Color::DarkGray)),
             ];
-            // Show image attachment count when images are attached
             let img_count = tui.input_handler.state.images.len();
             if img_count > 0 {
                 spans.push(Span::styled(
@@ -77,7 +102,6 @@ impl crate::app::renderer::PolishedRenderer {
                     Style::default().fg(Color::Rgb(255, 200, 80)),
                 ));
             }
-            // Show reverse search indicator (readline Ctrl+R)
             let (rs_query, _rs_match, rs_total) = tui.input_handler.reverse_search_info();
             if !rs_query.is_empty() {
                 spans.push(Span::styled(
@@ -85,7 +109,6 @@ impl crate::app::renderer::PolishedRenderer {
                     Style::default().fg(Color::Rgb(255, 200, 80)),
                 ));
             } else {
-                // Show history browsing position
                 let (hist_pos, hist_total) = tui.input_handler.history_position();
                 if hist_pos > 0 {
                     spans.push(Span::styled(
@@ -94,7 +117,6 @@ impl crate::app::renderer::PolishedRenderer {
                     ));
                 }
             }
-            // Character count for long messages (goose pattern: show when > 500 chars)
             let char_count: usize = tui.input_handler.state.all_text().chars().count();
             if char_count > 500 {
                 let count_color = if char_count > 5000 {
@@ -115,24 +137,34 @@ impl crate::app::renderer::PolishedRenderer {
                 ));
             }
             spans
-        };
-        let label = Paragraph::new(Line::from(label_spans));
-        frame.render_widget(label, label_area);
+        }
+    }
 
-        // Collect all lines for display
+    fn render_input_lines(
+        &self,
+        tui: &crate::app::event_loop::TUI,
+        frame: &mut ratatui::Frame,
+        input_area: ratatui::layout::Rect,
+        is_multiline: bool,
+    ) {
+        use ratatui::widgets::Paragraph;
+
+        let lines = self.visible_input_lines(tui, input_area.height as usize, is_multiline);
+        frame.render_widget(Paragraph::new(lines), input_area);
+    }
+
+    fn visible_input_lines(
+        &self,
+        tui: &crate::app::event_loop::TUI,
+        max_display_lines: usize,
+        is_multiline: bool,
+    ) -> Vec<ratatui::text::Line<'static>> {
+        use ratatui::text::Line;
+
         let state = &tui.input_handler.state;
         let lines = &state.lines;
         let cursor_row = state.cursor_row.min(lines.len().saturating_sub(1));
         let cursor_col = state.cursor_col;
-
-        // Build visible lines (show up to area.height lines in multiline mode)
-        let max_display_lines = if is_multiline {
-            input_area.height as usize
-        } else {
-            1
-        };
-
-        // Calculate which lines to show (scroll if needed)
         let start_row = if is_multiline && cursor_row >= max_display_lines {
             cursor_row - max_display_lines + 1
         } else {
@@ -140,136 +172,207 @@ impl crate::app::renderer::PolishedRenderer {
         };
 
         let mut display_lines = Vec::new();
-
         for (row_idx, row) in lines.iter().enumerate().skip(start_row).take(max_display_lines) {
-            let mut spans = vec![];
-
-            // Add line number in multiline mode
-            if is_multiline {
-                let line_num = row_idx + 1;
-                spans.push(Span::styled(
-                    format!("{:>2} ", line_num),
-                    Style::default().fg(Color::DarkGray),
-                ));
-            } else {
-                // Goose pattern: cranberry ❯ prompt for distinctive visual identity
-                spans.push(Span::styled("❯", Style::default().fg(Color::Rgb(220, 80, 100))));
-                spans.push(Span::raw(" "));
-            }
-
-            if row_idx == cursor_row {
-                // Split at cursor for cursor rendering
-                let col = cursor_col.min(row.len());
-                let (before, after) = row.split_at(col);
-
-                if !before.is_empty() {
-                    spans.push(Span::raw(before.to_string()));
-                }
-
-                // Blinking cursor
-                let cursor_visible = (tui.animator.frame_count() / 2).is_multiple_of(2);
-                if cursor_visible {
-                    spans.push(Span::styled("▏", Style::default().fg(Color::White)));
-                } else {
-                    spans.push(Span::styled("▏", Style::default().fg(Color::DarkGray)));
-                }
-
-                if !after.is_empty() {
-                    spans.push(Span::raw(after.to_string()));
-                } else if row.is_empty() && !is_multiline && !tui.is_streaming {
-                    // Show placeholder when cursor line is empty (kilocode pattern)
-                    let placeholder = if tui.messages.is_empty() {
-                        " Ask me anything..."
-                    } else {
-                        " Message..."
-                    };
-                    spans.push(Span::styled(
-                        placeholder,
-                        Style::default().fg(Color::Rgb(80, 80, 100)),
-                    ));
-                }
-            } else {
-                spans.push(Span::raw(row.clone()));
-            }
-
-            display_lines.push(Line::from(spans));
+            display_lines.push(Line::from(self.input_line_spans(
+                tui,
+                row_idx,
+                row,
+                cursor_row,
+                cursor_col,
+                is_multiline,
+            )));
         }
 
-        // Ensure at least one line is rendered (with context-aware placeholder)
         if display_lines.is_empty() {
-            let mut spans = vec![Span::styled("❯", Style::default().fg(Color::Rgb(220, 80, 100))), Span::raw(" ")];
-            let cursor_visible = (tui.animator.frame_count() / 2).is_multiple_of(2);
-            if cursor_visible {
-                spans.push(Span::styled("▏", Style::default().fg(Color::White)));
-            } else {
-                spans.push(Span::styled("▏", Style::default().fg(Color::DarkGray)));
+            display_lines.push(Line::from(self.empty_input_line_spans(tui)));
+        }
+
+        display_lines
+    }
+
+    fn input_line_spans(
+        &self,
+        tui: &crate::app::event_loop::TUI,
+        row_idx: usize,
+        row: &str,
+        cursor_row: usize,
+        cursor_col: usize,
+        is_multiline: bool,
+    ) -> Vec<ratatui::text::Span<'static>> {
+        use ratatui::style::{Color, Style};
+        use ratatui::text::Span;
+
+        let mut spans = Vec::new();
+        if is_multiline {
+            spans.push(Span::styled(
+                format!("{:>2} ", row_idx + 1),
+                Style::default().fg(Color::DarkGray),
+            ));
+        } else {
+            spans.push(Span::styled("❯", Style::default().fg(Color::Rgb(220, 80, 100))));
+            spans.push(Span::raw(" "));
+        }
+
+        if row_idx == cursor_row {
+            let col = cursor_col.min(row.len());
+            let (before, after) = row.split_at(col);
+
+            if !before.is_empty() {
+                spans.push(Span::raw(before.to_string()));
             }
-            // Context-aware placeholder (kilocode pattern)
-            let placeholder = if tui.is_streaming {
-                "" // No placeholder during streaming — spinner is in label
-            } else if tui.messages.is_empty() {
-                " Ask me anything..."
-            } else {
-                " Message..."
-            };
-            if !placeholder.is_empty() {
+
+            spans.push(self.cursor_span(tui));
+
+            if !after.is_empty() {
+                spans.push(Span::raw(after.to_string()));
+            } else if row.is_empty() && !is_multiline && !tui.is_streaming {
                 spans.push(Span::styled(
-                    placeholder,
+                    self.input_placeholder(tui),
                     Style::default().fg(Color::Rgb(80, 80, 100)),
                 ));
             }
-            display_lines.push(Line::from(spans));
+        } else {
+            spans.push(Span::raw(row.to_string()));
         }
 
-        let paragraph = Paragraph::new(display_lines);
-        frame.render_widget(paragraph, input_area);
+        spans
+    }
 
-        // Render keyboard hints (right-aligned, hidden on narrow terminals)
-        let send_hint = if tui.is_streaming { "⏎ Queue" } else { "⏎ Send" };
-        let mode_hint = if is_multiline { "Ctrl+J" } else { "" };
+    fn empty_input_line_spans(
+        &self,
+        tui: &crate::app::event_loop::TUI,
+    ) -> Vec<ratatui::text::Span<'static>> {
+        use ratatui::style::{Color, Style};
+        use ratatui::text::Span;
 
-        // Goose pattern: show scroll hint when viewport is scrolled up
-        let scroll_hint = if tui.user_scrolled {
-            "Home/End = top/bottom"
+        let mut spans = vec![
+            Span::styled("❯", Style::default().fg(Color::Rgb(220, 80, 100))),
+            Span::raw(" "),
+            self.cursor_span(tui),
+        ];
+
+        let placeholder = self.input_placeholder(tui);
+        if !placeholder.is_empty() {
+            spans.push(Span::styled(
+                placeholder,
+                Style::default().fg(Color::Rgb(80, 80, 100)),
+            ));
+        }
+        spans
+    }
+
+    fn cursor_span(&self, tui: &crate::app::event_loop::TUI) -> ratatui::text::Span<'static> {
+        use ratatui::style::{Color, Style};
+        use ratatui::text::Span;
+
+        let cursor_visible = (tui.animator.frame_count() / 2).is_multiple_of(2);
+        if cursor_visible {
+            Span::styled("▏", Style::default().fg(Color::White))
         } else {
+            Span::styled("▏", Style::default().fg(Color::DarkGray))
+        }
+    }
+
+    fn input_placeholder(&self, tui: &crate::app::event_loop::TUI) -> &'static str {
+        if tui.is_streaming {
             ""
+        } else if tui.messages.is_empty() {
+            " Ask me anything..."
+        } else {
+            " Message..."
+        }
+    }
+
+    fn render_input_hints(
+        &self,
+        tui: &crate::app::event_loop::TUI,
+        frame: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+        hints_area: ratatui::layout::Rect,
+        is_multiline: bool,
+    ) {
+        use ratatui::text::Line;
+        use ratatui::widgets::Paragraph;
+
+        let send_hint = if tui.is_streaming {
+            "⏎ Queue".to_string()
+        } else {
+            "⏎ Send".to_string()
+        };
+        let mode_hint = if is_multiline {
+            "Ctrl+J".to_string()
+        } else {
+            String::new()
+        };
+        let scroll_hint = if tui.user_scrolled {
+            "Home/End = top/bottom".to_string()
+        } else {
+            String::new()
         };
 
-        if area.width > 70 {
-            // Show context-appropriate hints
-            let hints_text = if tui.is_streaming {
-                "Ctrl+C cancel · ↑↓ scroll"
-            } else {
-                "Ctrl+A/E nav · Ctrl+U/D scroll · Ctrl+X edit · Ctrl+R search"
-            };
-            let spacer_len = area.width.saturating_sub(68) as usize;
-
-            let mut hints = vec![
-                Span::styled("│ ", Style::default().fg(Color::DarkGray)),
-                Span::styled(hints_text, Style::default().fg(Color::DarkGray)),
-            ];
-            // Show scroll hint if scrolled up (goose pattern)
-            if !scroll_hint.is_empty() {
-                hints.push(Span::raw(" ".repeat(spacer_len.min(4))));
-                hints.push(Span::styled(scroll_hint, Style::default().fg(Color::Cyan)));
-                hints.push(Span::raw(" ".repeat(spacer_len.saturating_sub(scroll_hint.len() + 4))));
-            } else {
-                hints.push(Span::raw(" ".repeat(spacer_len)));
-            }
-            hints.push(Span::styled(send_hint, Style::default().fg(Color::Green)));
-            hints.push(Span::raw("  "));
-            hints.push(Span::styled(mode_hint, Style::default().fg(Color::DarkGray)));
-            hints.push(Span::styled(" │", Style::default().fg(Color::DarkGray)));
-            frame.render_widget(Paragraph::new(Line::from(hints)), hints_area);
+        let hints = if area.width > 70 {
+            self.wide_input_hints(tui, area, send_hint, mode_hint, scroll_hint)
         } else {
-            // Compact hints on narrow terminals
-            let hints = vec![
-                Span::styled("│ ", Style::default().fg(Color::DarkGray)),
-                Span::raw(" ".repeat(area.width.saturating_sub(12) as usize)),
-                Span::styled(send_hint, Style::default().fg(Color::Green)),
-                Span::styled(" │", Style::default().fg(Color::DarkGray)),
-            ];
-            frame.render_widget(Paragraph::new(Line::from(hints)), hints_area);
+            self.narrow_input_hints(area, send_hint)
+        };
+
+        frame.render_widget(Paragraph::new(Line::from(hints)), hints_area);
+    }
+
+    fn wide_input_hints(
+        &self,
+        tui: &crate::app::event_loop::TUI,
+        area: ratatui::layout::Rect,
+        send_hint: String,
+        mode_hint: String,
+        scroll_hint: String,
+    ) -> Vec<ratatui::text::Span<'static>> {
+        use ratatui::style::{Color, Style};
+        use ratatui::text::Span;
+
+        let hints_text = if tui.is_streaming {
+            "Ctrl+C cancel · ↑↓ scroll"
+        } else {
+            "Ctrl+A/E nav · Ctrl+U/D scroll · Ctrl+X edit · Ctrl+R search"
+        };
+        let spacer_len = area.width.saturating_sub(68) as usize;
+        let scroll_hint_len = scroll_hint.len();
+
+        let mut hints = vec![
+            Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+            Span::styled(hints_text, Style::default().fg(Color::DarkGray)),
+        ];
+
+        if !scroll_hint.is_empty() {
+            hints.push(Span::raw(" ".repeat(spacer_len.min(4))));
+            hints.push(Span::raw(scroll_hint.to_string()));
+            hints.push(Span::raw(
+                " ".repeat(spacer_len.saturating_sub(scroll_hint_len + 4)),
+            ));
+        } else {
+            hints.push(Span::raw(" ".repeat(spacer_len)));
         }
+
+        hints.push(Span::styled(send_hint, Style::default().fg(Color::Green)));
+        hints.push(Span::raw("  "));
+        hints.push(Span::styled(mode_hint, Style::default().fg(Color::DarkGray)));
+        hints.push(Span::styled(" │", Style::default().fg(Color::DarkGray)));
+        hints
+    }
+
+    fn narrow_input_hints(
+        &self,
+        area: ratatui::layout::Rect,
+        send_hint: String,
+    ) -> Vec<ratatui::text::Span<'static>> {
+        use ratatui::style::{Color, Style};
+        use ratatui::text::Span;
+
+        vec![
+            Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+            Span::raw(" ".repeat(area.width.saturating_sub(12) as usize)),
+            Span::styled(send_hint, Style::default().fg(Color::Green)),
+            Span::styled(" │", Style::default().fg(Color::DarkGray)),
+        ]
     }
 }

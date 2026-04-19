@@ -112,7 +112,11 @@ impl crate::app::renderer::PolishedRenderer {
 
         // Show workspace scan progress if active
         if let Some((scanned, total)) = tui.workspace_scan_progress {
-            let pct = (scanned as f64 / total as f64 * 100.0) as u8;
+            let pct = if total > 0 {
+                (scanned as f64 / total as f64 * 100.0) as u8
+            } else {
+                0
+            };
             spans.push(Span::styled(
                 format!("🔍 Scanning... {}% ({}/{})", pct, scanned, total),
                 Style::default()

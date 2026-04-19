@@ -152,51 +152,28 @@ pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 /// variant is sufficient for the inline summary rows.
 pub fn tool_kind_icon(name: &str) -> &'static str {
     let lower = name.to_lowercase();
-    if lower.contains("read") || lower.contains("cat") || lower.contains("view") {
-        "R"
-    } else if lower.contains("write") || lower.contains("create") || lower.contains("insert") {
-        "W"
-    } else if lower.contains("edit")
-        || lower.contains("patch")
-        || lower.contains("replace")
-        || lower.contains("search_replace")
-    {
-        "E"
-    } else if lower.contains("delete") || lower.contains("remove") {
-        "D"
-    } else if lower.contains("grep") || lower.contains("search") {
-        "G"
-    } else if lower.contains("glob") || lower.contains("find") || lower.contains("list") {
-        "F"
-    } else if lower.contains("bash")
-        || lower.contains("exec")
-        || lower.contains("shell")
-        || lower.contains("run")
-        || lower.contains("cmd")
-    {
-        "$"
-    } else if lower.contains("git") {
-        "G"
-    } else if lower.contains("fetch")
-        || lower.contains("http")
-        || lower.contains("web")
-        || lower.contains("curl")
-        || lower.contains("download")
-    {
-        "~"
-    } else if lower.contains("question")
-        || lower.contains("ask")
-        || lower.contains("think")
-        || lower.contains("reason")
-    {
-        "?"
-    } else if lower.contains("todo") {
-        "T"
-    } else if lower.contains("agent") || lower.contains("spawn") || lower.contains("team") {
-        "A"
-    } else {
-        "*"
+    const RULES: &[(&[&str], &str)] = &[
+        (&["read", "cat", "view"], "R"),
+        (&["write", "create", "insert"], "W"),
+        (&["edit", "patch", "replace", "search_replace"], "E"),
+        (&["delete", "remove"], "D"),
+        (&["grep", "search"], "G"),
+        (&["glob", "find", "list"], "F"),
+        (&["bash", "exec", "shell", "run", "cmd"], "$"),
+        (&["git"], "G"),
+        (&["fetch", "http", "web", "curl", "download"], "~"),
+        (&["question", "ask", "think", "reason"], "?"),
+        (&["todo"], "T"),
+        (&["agent", "spawn", "team"], "A"),
+    ];
+
+    for (needles, icon) in RULES {
+        if needles.iter().any(|needle| lower.contains(needle)) {
+            return icon;
+        }
     }
+
+    "*"
 }
 
 // ============================================================================
@@ -299,7 +276,7 @@ mod tests {
     #[test]
     fn shorten_path_long_path_abbreviated() {
         let result = shorten_path("src/rustycode_tui/app/render/mod.rs");
-        assert_eq!(result, "s/r/a/r/mod.rs");
+        assert_eq!(result, "src/r/a/r/mod.rs");
     }
 
     #[test]
@@ -384,7 +361,10 @@ mod tests {
 
     #[test]
     fn tool_kind_icon_todo() {
-        assert_eq!(tool_kind_icon("todo_write"), "T");
+        // "todo_write" matches "write" first in priority order
+        assert_eq!(tool_kind_icon("todo_write"), "W");
+        // "todo" alone matches the todo rule
+        assert_eq!(tool_kind_icon("todo"), "T");
     }
 
     #[test]

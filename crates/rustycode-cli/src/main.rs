@@ -336,7 +336,50 @@ async fn async_main() -> Result<()> {
             if let Some(config) = json.get_mut("config") {
                 *config = runtime.config().redacted_for_display();
             }
-            println!("{}", serde_json::to_string_pretty(&json)?);
+            if cli.format == "json" {
+                println!("{}", serde_json::to_string_pretty(&json)?);
+            } else {
+                println!("RustyCode Doctor");
+                println!("================");
+                if let Some(git) = json.get("git") {
+                    println!();
+                    println!("Git:");
+                    if let Some(branch) = git.get("branch").and_then(|v| v.as_str()) {
+                        println!("  Branch:  {}", branch);
+                    }
+                    if let Some(root) = git.get("root").and_then(|v| v.as_str()) {
+                        println!("  Root:    {}", root);
+                    }
+                    let dirty = git.get("dirty").and_then(|v| v.as_bool()).unwrap_or(false);
+                    println!("  Dirty:   {}", if dirty { "yes" } else { "no" });
+                }
+                if let Some(config) = json.get("config") {
+                    println!();
+                    println!("Config:");
+                    if let Some(model) = config.get("model").and_then(|v| v.as_str()) {
+                        println!("  Model:       {}", model);
+                    }
+                    if let Some(max_tokens) = config.get("max_tokens").and_then(|v| v.as_u64()) {
+                        println!("  Max Tokens:  {}", max_tokens);
+                    }
+                    if let Some(temp) = config.get("temperature").and_then(|v| v.as_f64()) {
+                        println!("  Temperature: {:.1}", temp);
+                    }
+                    if let Some(data_dir) = config.get("data_dir").and_then(|v| v.as_str()) {
+                        println!("  Data Dir:    {}", data_dir);
+                    }
+                    if let Some(mem_dir) = config.get("memory_dir").and_then(|v| v.as_str()) {
+                        println!("  Memory Dir:  {}", mem_dir);
+                    }
+                    if let Some(skills_dir) = config.get("skills_dir").and_then(|v| v.as_str()) {
+                        println!("  Skills Dir:  {}", skills_dir);
+                    }
+                }
+                println!();
+                println!("LSP Servers:   {}", json.get("lsp_servers").map(|v| v.as_array().map_or(0, |a| a.len())).unwrap_or(0));
+                println!("Memory Entries: {}", json.get("memory_entries").and_then(|v| v.as_u64()).unwrap_or(0));
+                println!("Skills:        {}", json.get("skills").and_then(|v| v.as_u64()).unwrap_or(0));
+            }
         }
         Command::Config {
             command: ConfigCommand::Show,

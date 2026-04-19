@@ -543,6 +543,12 @@ impl Config {
             }
         }
 
+        // Round f32 temperature to avoid floating-point display artifacts
+        // (e.g., 0.1f32 renders as 0.100000001490116)
+        if let Some(temp) = json.get_mut("temperature").and_then(|t| t.as_f64()) {
+            *json.get_mut("temperature").unwrap() = serde_json::json!(format!("{:.2}", temp).parse::<f64>().unwrap_or(temp));
+        }
+
         json
     }
 }
