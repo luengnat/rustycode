@@ -53,8 +53,6 @@ use std::sync::mpsc;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-// Include render implementation extracted to separate module
-include!("tui_render_impl.rs");
 
 /// Terminal cleanup guard - ensures terminal is restored even on panic
 struct TerminalCleanupGuard;
@@ -1858,326 +1856,6 @@ impl TUI {
     pub(crate) fn render_polished(&mut self, frame: &mut ratatui::Frame) {
         let polished = crate::app::renderer::PolishedRenderer::from_tui(self, frame.area());
         polished.render(self, frame);
-        return;
-
-        use crate::ui::footer::Footer;
-        use crate::ui::header::Header;
-        use ratatui::layout::{Constraint, Direction, Layout};
-        use ratatui::style::{Color, Style};
-        use ratatui::widgets::{Block, Clear};
-
-        let size = frame.area();
-
-        // Minimum size guard: if terminal is too small, show a message instead
-        if size.width < 40 || size.height < 8 {
-            frame.render_widget(Clear, size);
-            let msg = ratatui::widgets::Paragraph::new("Terminal too small (min 40×8)")
-                .style(Style::default().fg(Color::Yellow));
-            frame.render_widget(msg, size);
-            return;
-        }
-
-        // Clear the entire frame first to prevent text overlap from previous renders
-        frame.render_widget(Clear, size);
-
-        // Auto-collapse chrome on small terminals to maximize message space
-        // Minimum layout: header(1) + input(3) = 4 rows, leaving rest for messages.
-        // Note: We don't auto-restore collapsed state because the user may have
-        // manually collapsed via Ctrl+Shift+H — they can restore it themselves.
-        // The resize handler already resets scroll_offset_line to prevent blank screens.
-        if size.height < 12 {
-            self.status_bar_collapsed = true;
-            self.footer_collapsed = true;
-        }
-
-        // New polished layout: Header | Status Bar | Messages | Input | Footer
-        // Following the TUI redesign spec for visual hierarchy
-        // Collapsible sections: status bar and footer can be hidden
-        let status_bar_height = if self.status_bar_collapsed { 0 } else { 1 };
-        let footer_height = if self.footer_collapsed { 0 } else { 1 };
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),                 // Header (1 row)
-                Constraint::Length(status_bar_height), // Status Bar (collapsible)
-                Constraint::Min(0),                    // Messages (flexible, min 0)
-                Constraint::Length(3),                 // Input Area (3 rows)
-                Constraint::Length(footer_height),     // Footer (collapsible)
-            ])
-            .split(size);
-
-        // Update viewport height from the messages area
-        self.viewport_height = chunks[2].height.max(1) as usize;
-        self.messages_area.set(chunks[2]);
-
-        // Render polished header with explicit background
-        let task_count = self.workspace_tasks.tasks.len();
-        let pending_tools = self.active_tools.len();
-        let project_name = self
-            .services
-            .cwd()
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
-
-        // Render header background first
-        let header_bg = Block::default().style(Style::default().bg(Color::Rgb(23, 23, 23)));
-        frame.render_widget(header_bg, chunks[0]);
-
-        // Determine header status (goose pattern: color-coded status in header)
-        let header_status = if self.error_manager.is_showing() {
-            crate::ui::header::HeaderStatus::Error
-        } else if self.is_streaming {
-            if self.active_tools.is_empty() {
-                crate::ui::header::HeaderStatus::Thinking
-            } else {
-                crate::ui::header::HeaderStatus::RunningTools
-            }
-        } else {
-            crate::ui::header::HeaderStatus::Ready
-        };
-
-        let header = Header::new()
-            .with_app_name("rustycode")
-            .with_project_name(project_name)
-            .with_git_branch(self.git_branch.clone())
-            .with_counts(task_count, pending_tools)
-            .with_turn_count(
-                self.messages
-                    .iter()
-                    .filter(|m| matches!(m.role, crate::ui::message::MessageRole::User))
-                    .count(),
-            )
-            .with_status(header_status)
-            .with_spinner_frame(self.animator.current_frame().progress_frame / 5);
-        header.render(frame, chunks[0]);
-
-        // Render status bar (existing implementation) - skip if collapsed
-        if !self.status_bar_collapsed {
-            self.render_status_safe(frame, chunks[1]);
-        }
-
-        // Render messages
-        self.render_messages_safe(frame, chunks[2]);
-
-        // Render input area
-        self.render_input_safe(frame, chunks[3]);
-
-        // Render polished footer - skip if collapsed
-        if !self.footer_collapsed {
-            // Render footer background first
-            let footer_bg = Block::default().style(Style::default().bg(Color::Rgb(23, 23, 23)));
-            frame.render_widget(footer_bg, chunks[4]);
-
-            let session_secs = self.start_time.elapsed().as_secs();
-            // Build task summary for footer (e.g., "✓5 ☐3")
-            let done_count = self
-                .workspace_tasks
-                .tasks
-                .iter()
-                .filter(|t| matches!(t.status, crate::tasks::TaskStatus::Completed))
-                .count();
-            let pending_count = self
-                .workspace_tasks
-                .tasks
-                .iter()
-                .filter(|t| matches!(t.status, crate::tasks::TaskStatus::Pending))
-                .count();
-            let task_summary = if done_count > 0 || pending_count > 0 {
-                format!("✓{} ☐{}", done_count, pending_count)
-            } else {
-                String::new()
-            };
-            let footer = Footer::new()
-                .with_session_duration(Footer::format_duration(session_secs))
-                .with_task_summary(task_summary)
-                .with_model(
-                    self.current_model
-                        .rsplit('/')
-                        .next()
-                        .map(|s| s.strip_prefix("claude-").unwrap_or(s))
-                        .unwrap_or(&self.current_model)
-                        .to_string(),
-                )
-                .with_session_cost(self.session_cost_usd);
-            footer.render(frame, chunks[4]);
-        }
-
-        // Overlay: search box (over message area - chunks[2])
-        if self.search_state.visible {
-            self.render_search_box(frame, chunks[2]);
-        }
-
-        // Tool panel overlay (Ctrl+P) - over message area
-        if self.showing_tool_panel {
-            self.render_tool_panel(frame, chunks[2]);
-        }
-
-        // Worker status panel overlay (Ctrl+W) - right side overlay
-        if self.worker_panel.visible {
-            self.render_worker_panel(frame, chunks[2]);
-        }
-
-        // Team agent timeline overlay (Ctrl+G) - right side overlay
-        if self.team_panel.visible {
-            frame.render_widget(ratatui::widgets::Clear, chunks[2]);
-            frame.render_widget(self.team_panel.clone(), chunks[2]);
-        }
-
-        // Overlay: clarification panel (when AI asks a question)
-        if self.awaiting_clarification && self.clarification_panel.visible {
-            // Render as a centered popup covering the middle of the screen
-            let panel_height = 15u16.min(size.height.saturating_sub(4));
-            let panel_width = (size.width * 3 / 4).min(60);
-            let x = (size.width.saturating_sub(panel_width)) / 2;
-            let y = (size.height.saturating_sub(panel_height)) / 2;
-            let panel_area = ratatui::layout::Rect::new(x, y, panel_width, panel_height);
-            frame.render_widget(ratatui::widgets::Clear, panel_area);
-            frame.render_widget(self.clarification_panel.clone(), panel_area);
-        }
-
-        // Overlay: provider selector
-        if self.showing_provider_selector {
-            self.render_provider_selector(frame);
-        }
-
-        // Overlay: file finder
-        if self.file_finder.is_visible() {
-            self.file_finder.render(frame, size);
-        }
-
-        // Overlay: model selector (Alt+P)
-        if self.model_selector.is_visible() {
-            self.model_selector.render(frame, size);
-        }
-
-        // Overlay: file selector (@)
-        if self.file_selector.is_visible() {
-            self.file_selector.render(frame, size);
-        }
-
-        // Overlay: skill palette
-        if self.skill_palette.is_visible() {
-            self.skill_palette.render(frame, size);
-        }
-
-        // Overlay: theme preview
-        if self.theme_preview.is_visible() {
-            self.theme_preview.render(frame, size);
-        }
-
-        // Overlay: command palette (Ctrl+K)
-        if self.command_palette.is_visible() {
-            self.command_palette.render(frame, size);
-        }
-
-        // Overlay: help panel (?)
-        if self.help_state.visible {
-            crate::help::render_help(frame, size, &self.help_state);
-        }
-
-        // Overlay: approval dialog
-        if self.awaiting_approval {
-            if let Some(ref req) = self.pending_approval_request {
-                let panel_height = 12u16.min(size.height.saturating_sub(4));
-                let panel_width = 70u16.min(size.width.saturating_sub(4));
-                let x = (size.width.saturating_sub(panel_width)) / 2;
-                let y = (size.height.saturating_sub(panel_height)) / 2;
-                let panel_area = ratatui::layout::Rect::new(x, y, panel_width, panel_height);
-                // render_approval_prompt calls Clear internally
-                crate::tool_approval::render_approval_prompt(frame, panel_area, req);
-            }
-        }
-
-        // Overlay: error display
-        if self.error_manager.is_showing() {
-            frame.render_widget(ratatui::widgets::Clear, size);
-            self.error_manager.render(frame, size);
-        }
-
-        // Overlay: session sidebar (Ctrl+B)
-        if self.session_sidebar.is_visible() {
-            self.session_sidebar.render(frame, size);
-        }
-
-        // Overlay: compaction preview (while pending)
-        if self.showing_compaction_preview {
-            self.render_compaction_preview(frame, size);
-        }
-
-        // Overlay: first-run wizard (covers entire screen)
-        if self.wizard.showing_wizard {
-            if let Some(ref mut wizard) = self.wizard.wizard {
-                frame.render_widget(ratatui::widgets::Clear, size);
-                wizard.render(frame, size);
-            }
-        }
-
-        // Overlay: toast notifications (topmost — always visible)
-        self.toast_manager.render(frame, size);
-    }
-
-    /// Render messages with panic recovery
-    pub(crate) fn render_messages_safe(
-        &mut self,
-        frame: &mut ratatui::Frame,
-        area: ratatui::layout::Rect,
-    ) {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.render_messages(frame, area);
-        }));
-        if result.is_err() {
-            tracing::error!("Panic in render_messages — showing fallback");
-            Self::render_fallback_error(frame, area, "Message render error");
-        }
-    }
-
-    /// Render input with panic recovery
-    pub(crate) fn render_input_safe(
-        &mut self,
-        frame: &mut ratatui::Frame,
-        area: ratatui::layout::Rect,
-    ) {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.render_input(frame, area);
-        }));
-        if result.is_err() {
-            tracing::error!("Panic in render_input — showing fallback");
-            Self::render_fallback_error(frame, area, "Input render error");
-        }
-    }
-
-    /// Render status bar with panic recovery
-    pub(crate) fn render_status_safe(
-        &mut self,
-        frame: &mut ratatui::Frame,
-        area: ratatui::layout::Rect,
-    ) {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.render_status(frame, area);
-        }));
-        if result.is_err() {
-            tracing::error!("Panic in render_status — showing fallback");
-            Self::render_fallback_error(frame, area, "Status render error");
-        }
-    }
-
-    /// Fallback error display when a component panics
-    fn render_fallback_error(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, msg: &str) {
-        use ratatui::style::{Color, Style};
-        use ratatui::widgets::Paragraph;
-
-        let text = ratatui::text::Line::from(vec![
-            ratatui::text::Span::styled(format!("⚠ {} ", msg), Style::default().fg(Color::Yellow)),
-            ratatui::text::Span::styled(
-                "(component recovered)",
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]);
-        let paragraph = Paragraph::new(text);
-        frame.render_widget(paragraph, area);
     }
 
     /// Render using brutalist renderer (complete UI)
@@ -2306,9 +1984,8 @@ impl TUI {
         if self.awaiting_clarification && self.clarification_panel.visible {
             let panel_height = 15u16.min(size.height.saturating_sub(4));
             let panel_width = (size.width * 3 / 4).min(60);
-            let x = (size.width.saturating_sub(panel_width)) / 2;
-            let y = (size.height.saturating_sub(panel_height)) / 2;
-            let panel_area = ratatui::layout::Rect::new(x, y, panel_width, panel_height);
+            let panel_area =
+                crate::app::render::shared::centered_rect(panel_width, panel_height, size);
             frame.render_widget(ratatui::widgets::Clear, panel_area);
             frame.render_widget(self.clarification_panel.clone(), panel_area);
         }
@@ -2321,7 +1998,7 @@ impl TUI {
                 width: size.width,
                 height: main_height,
             };
-            self.render_search_box(frame, search_area);
+            crate::app::renderer::render_search_box(self, frame, search_area);
         }
 
         // Tool panel overlay (Ctrl+P) - over message area
@@ -2332,12 +2009,12 @@ impl TUI {
                 width: size.width,
                 height: main_height,
             };
-            self.render_tool_panel(frame, tool_area);
+            crate::app::renderer::render_tool_panel(self, frame, tool_area);
         }
 
         // Overlay: provider selector
         if self.showing_provider_selector {
-            self.render_provider_selector(frame);
+            crate::app::renderer::render_provider_selector(frame);
         }
 
         // Overlay: file finder
@@ -2380,9 +2057,8 @@ impl TUI {
             if let Some(ref req) = self.pending_approval_request {
                 let panel_height = 12u16.min(size.height.saturating_sub(4));
                 let panel_width = 70u16.min(size.width.saturating_sub(4));
-                let x = (size.width.saturating_sub(panel_width)) / 2;
-                let y = (size.height.saturating_sub(panel_height)) / 2;
-                let panel_area = ratatui::layout::Rect::new(x, y, panel_width, panel_height);
+                let panel_area =
+                    crate::app::render::shared::centered_rect(panel_width, panel_height, size);
                 crate::tool_approval::render_approval_prompt(frame, panel_area, req);
             }
         }
@@ -2425,9 +2101,7 @@ impl TUI {
 
         let width = 50u16.min(size.width.saturating_sub(4));
         let height = 5u16;
-        let x = (size.width.saturating_sub(width)) / 2;
-        let y = (size.height.saturating_sub(height)) / 2;
-        let area = ratatui::layout::Rect::new(x, y, width, height);
+        let area = crate::app::render::shared::centered_rect(width, height, size);
 
         frame.render_widget(Clear, area);
 

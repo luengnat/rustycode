@@ -1,17 +1,11 @@
-impl TUI {
-    pub fn render_status(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
-        // Branch to brutalist renderer if enabled
-        if self.renderer_mode.is_brutalist() {
-            self.render_status_brutalist(frame, area);
-            return;
-        }
-
+impl crate::app::renderer::PolishedRenderer {
+    pub fn render_status(&self, tui: &mut crate::app::event_loop::TUI, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         use ratatui::style::Color;
         use ratatui::style::Style;
         use ratatui::text::{Line, Span};
         use ratatui::widgets::Paragraph;
 
-        let anim_frame = self.animator.current_frame();
+        let anim_frame = tui.animator.current_frame();
         let width = area.width as usize;
 
         // Width tiers for progressive indicator hiding
@@ -23,17 +17,17 @@ impl TUI {
         let show_task_counts = width >= 80;
 
         // Determine current status and create appropriate spinner
-        let status = if self.is_streaming {
+        let status = if tui.is_streaming {
             RenderStatus::Thinking {
-                chunks_received: self.chunks_received,
+                chunks_received: tui.chunks_received,
             }
-        } else if !self.active_tools.is_empty() {
+        } else if !tui.active_tools.is_empty() {
             // Collect all running tool names from active_tools map
-            let tool_names: Vec<String> = self.active_tools.keys().take(3).cloned().collect();
-            let remaining = self.active_tools.len().saturating_sub(3);
+            let tool_names: Vec<String> = tui.active_tools.keys().take(3).cloned().collect();
+            let remaining = tui.active_tools.len().saturating_sub(3);
 
             RenderStatus::RunningTools {
-                count: self.active_tools.len(),
+                count: tui.active_tools.len(),
                 tool_names,
                 remaining,
             }
@@ -92,7 +86,7 @@ impl TUI {
             RenderStatus::Idle => {
                 spans.push(Span::styled("✓ Ready", Style::default().fg(Color::Green)));
                 // Show last response duration (Goose pattern: response timing)
-                if let Some(dur) = self.last_response_duration {
+                if let Some(dur) = tui.last_response_duration {
                     spans.push(Span::styled(
                         format!(" {}", format_response_duration(dur)),
                         Style::default().fg(Color::DarkGray),
@@ -102,7 +96,7 @@ impl TUI {
         }
 
         // Turn counter (goose pattern) — count user+assistant message pairs
-        let turn_count = self.messages.iter()
+        let turn_count = tui.messages.iter()
             .filter(|m| matches!(m.role, crate::ui::message::MessageRole::User))
             .count();
         if turn_count > 0 {
@@ -117,7 +111,7 @@ impl TUI {
         spans.push(Span::raw(" | "));
 
         // Show workspace scan progress if active
-        if let Some((scanned, total)) = self.workspace_scan_progress {
+        if let Some((scanned, total)) = tui.workspace_scan_progress {
             let pct = (scanned as f64 / total as f64 * 100.0) as u8;
             spans.push(Span::styled(
                 format!("🔍 Scanning... {}% ({}/{})", pct, scanned, total),
@@ -129,7 +123,7 @@ impl TUI {
         }
 
         // Show rate limit countdown if active
-        if let Some(until) = self.rate_limit.until {
+        if let Some(until) = tui.rate_limit.until {
             let remaining = until.saturating_duration_since(std::time::Instant::now());
             let remaining_secs = remaining.as_secs();
             if remaining_secs > 0 {
@@ -142,7 +136,7 @@ impl TUI {
         }
 
         // Show input mode
-        let mode_text = match self.input_mode {
+        let mode_text = match tui.input_mode {
             crate::ui::input::InputMode::SingleLine => "📝 Single-line",
             crate::ui::input::InputMode::MultiLine => "📄 Multi-line",
         };
@@ -150,7 +144,7 @@ impl TUI {
 
         // Show agent mode (hide on narrow terminals)
         if show_agent_mode {
-            let mode = self.services.agent_mode();
+            let mode = tui.services.agent_mode();
             spans.push(Span::raw(" | "));
             spans.push(Span::styled(
                 format!("🔧 {}", mode.display_name()),
@@ -159,21 +153,19 @@ impl TUI {
         }
 
         // Show task/agent/todo indicators if any are active
-        let agents = self.agent_manager.get_agents();
+        let agents = tui.agent_manager.get_agents();
         let running_agents: Vec<_> = agents
             .iter()
             .filter(|a| matches!(a.status, crate::agents::AgentStatus::Running))
             .collect();
 
-        let in_progress_tasks = self
-            .workspace_tasks
+        let in_progress_tasks = tui.workspace_tasks
             .tasks
             .iter()
             .filter(|t| matches!(t.status, crate::tasks::TaskStatus::InProgress))
             .count();
 
-        let pending_todos = self
-            .workspace_tasks
+        let pending_todos = tui.workspace_tasks
             .todos
             .iter()
             .filter(|t| !t.done)
@@ -223,7 +215,7 @@ impl TUI {
 
         // Context usage with goose-style progress bar + token counts (hide on narrow terminals)
         if show_context_bar {
-            let usage_pct = (self.context_monitor.usage_percentage() * 100.0) as usize;
+            let usage_pct = (tui.context_monitor.usage_percentage() * 100.0) as usize;
             // Always show model name + context bar (even at 0% so user sees what model is active)
             spans.push(Span::raw(" | "));
             let token_color = if usage_pct < 50 {
@@ -252,10 +244,10 @@ impl TUI {
                     n.to_string()
                 }
             };
-            let current_tokens = self.context_monitor.current_tokens;
-            let max_tokens = self.context_monitor.max_tokens;
+            let current_tokens = tui.context_monitor.current_tokens;
+            let max_tokens = tui.context_monitor.max_tokens;
             // Shorten model name for display (take last segment after '/')
-            let display_model = self.current_model
+            let display_model = tui.current_model
                 .rsplit('/')
                 .next()
                 .map(|s| {
@@ -265,7 +257,7 @@ impl TUI {
                         s
                     }
                 })
-                .unwrap_or(&self.current_model);
+                .unwrap_or(&tui.current_model);
             spans.push(Span::styled(bar, Style::default().fg(token_color)));
             spans.push(Span::raw(" "));
             // Show token counts on wide terminals, model name on narrow
@@ -283,13 +275,13 @@ impl TUI {
         }
 
         // Session cost display (hide on narrow terminals)
-        if show_cost && self.session_cost_usd > 0.0 {
-            let cost_str = if self.session_cost_usd < 0.01 {
-                format!("${:.4}", self.session_cost_usd)
-            } else if self.session_cost_usd < 1.0 {
-                format!("${:.3}", self.session_cost_usd)
+        if show_cost && tui.session_cost_usd > 0.0 {
+            let cost_str = if tui.session_cost_usd < 0.01 {
+                format!("${:.4}", tui.session_cost_usd)
+            } else if tui.session_cost_usd < 1.0 {
+                format!("${:.3}", tui.session_cost_usd)
             } else {
-                format!("${:.2}", self.session_cost_usd)
+                format!("${:.2}", tui.session_cost_usd)
             };
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
@@ -300,7 +292,7 @@ impl TUI {
 
         // Git branch indicator (hide on narrow terminals)
         if show_git_branch {
-            if let Some(branch) = &self.git_branch {
+            if let Some(branch) = &tui.git_branch {
                 // Truncate long branch names to prevent overflow
                 let display_branch = if branch.len() > 25 {
                     format!("{}…", &branch[..branch.floor_char_boundary(24)])
@@ -318,14 +310,14 @@ impl TUI {
         }
 
         // Scroll position indicator (shows position when user has scrolled)
-        if self.user_scrolled {
-            let total = self.last_total_lines.get();
+        if tui.user_scrolled {
+            let total = tui.last_total_lines.get();
             if total > 0 {
-                let safe_viewport = self.viewport_height.max(1);
+                let safe_viewport = tui.viewport_height.max(1);
                 let max_scroll = total.saturating_sub(safe_viewport);
                 if max_scroll > 0 {
                     // Clamp offset to valid range (may be stale if messages changed)
-                    let offset = self.scroll_offset_line.min(max_scroll);
+                    let offset = tui.scroll_offset_line.min(max_scroll);
                     let pos_label = if offset == 0 {
                         "Top".to_string()
                     } else if offset >= max_scroll {
@@ -342,11 +334,11 @@ impl TUI {
         }
 
         // Team mode indicator (shows when orchestrator is running)
-        if self.team_handler.event_rx.is_some() {
+        if tui.team_handler.event_rx.is_some() {
             spans.push(Span::raw(" "));
             let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let frame_idx = (anim_frame.progress_frame / 5) % frames.len();
-            let active_agent = self.team_panel.active_agent_name();
+            let active_agent = tui.team_panel.active_agent_name();
             if let Some(agent) = active_agent {
                 // Truncate long agent names to prevent overflow
                 let display_agent = if agent.len() > 15 {
@@ -355,7 +347,7 @@ impl TUI {
                     agent.clone()
                 };
                 spans.push(Span::styled(
-                    format!("{}TEAM {}{}", frames[frame_idx], self.team_panel.current_turn(), display_agent),
+                    format!("{}TEAM {}{}", frames[frame_idx], tui.team_panel.current_turn(), display_agent),
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(ratatui::style::Modifier::BOLD),
@@ -364,9 +356,9 @@ impl TUI {
                 spans.push(Span::styled(
                     format!("{}TEAM T:{}/{} Tr:{:.0}%",
                         frames[frame_idx],
-                        self.team_panel.current_turn(),
-                        self.team_panel.max_turns(),
-                        self.team_panel.trust_value() * 100.0,
+                        tui.team_panel.current_turn(),
+                        tui.team_panel.max_turns(),
+                        tui.team_panel.trust_value() * 100.0,
                     ),
                     Style::default().fg(Color::Cyan),
                 ));
@@ -376,13 +368,6 @@ impl TUI {
         let line = Line::from(spans);
         let paragraph = Paragraph::new(line);
         frame.render_widget(paragraph, area);
-    }
-
-    /// Render status bar using brutalist renderer
-    fn render_status_brutalist(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
-        let input_text = self.input_handler.state.all_text();
-        let renderer = self.create_brutalist_renderer(&input_text);
-        renderer.render_footer_area(frame, area);
     }
 
 }

@@ -1,14 +1,13 @@
-impl TUI {
     /// Render search box as a single-line bar at the bottom of the messages area.
     ///
     /// Messages remain visible above with search highlights so the user can
     /// see context around matches.
-    pub fn render_search_box(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
+    pub fn render_search_box(tui: &mut crate::app::event_loop::TUI, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         use ratatui::style::{Color, Style};
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{Block, Clear, Paragraph};
 
-        if !self.search_state.visible {
+        if !tui.search_state.visible {
             return;
         }
 
@@ -33,7 +32,7 @@ impl TUI {
         ));
 
         // Query text (truncate if too long for the bar)
-        let query = &self.search_state.query;
+        let query = &tui.search_state.query;
         let remaining_width = area.width as usize;
         // Reserve space for: "Search> " (8) + cursor (1) + match info (~15) + help (~30) = ~54
         let max_query = remaining_width.saturating_sub(54).max(10);
@@ -52,13 +51,13 @@ impl TUI {
         spans.push(Span::styled("│", Style::default().fg(Color::Cyan)));
 
         // Match count
-        let match_info = if self.search_state.match_count() == 0 {
+        let match_info = if tui.search_state.match_count() == 0 {
             " no matches".to_string()
         } else {
             format!(
                 " {}/{}",
-                self.search_state.current_match_number(),
-                self.search_state.match_count()
+                tui.search_state.current_match_number(),
+                tui.search_state.match_count()
             )
         };
         spans.push(Span::styled(match_info, Style::default().fg(Color::Gray)));
@@ -75,4 +74,3 @@ impl TUI {
 
         frame.render_widget(paragraph, bar_area);
     }
-}

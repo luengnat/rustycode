@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 description = "Benchmark runner for agent evaluation (Terminal Bench compatible)"
 
+[[bin]]
+name = "rtk-bench"
+path = "src/bin/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
@@ -18,3 +22,5 @@ chrono.workspace = true
 async-trait.workspace = true
 rustycode-llm = { path = "../rustycode-llm" }
 secrecy.workspace = true
+clap = { workspace = true, features = ["derive"] }
+tracing-subscriber.workspace = true

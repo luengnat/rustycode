@@ -4,6 +4,8 @@
 //! and brutalist render paths. Both `render/messages.rs` (polished) and
 //! `brutalist_renderer.rs` should import from here.
 
+use ratatui::layout::Rect;
+
 // ============================================================================
 // LINE ESTIMATION
 // ============================================================================
@@ -124,6 +126,22 @@ pub fn safe_truncate(s: &str, max_chars: usize) -> String {
 }
 
 // ============================================================================
+// LAYOUT HELPERS
+// ============================================================================
+
+/// Build a fixed-size rectangle centered within the given area.
+///
+/// The requested size is clamped to the available area so callers can use
+/// it safely for both full-screen overlays and smaller modal panes.
+pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    Rect::new(x, y, width, height)
+}
+
+// ============================================================================
 // TOOL KIND ICONS
 // ============================================================================
 
@@ -207,7 +225,7 @@ mod tests {
         let big = line.repeat(100); // 10100 bytes, 100 lines
         let est = estimate_line_count(&big);
         // Should be in the right ballpark (not exact, but within 2×)
-        assert!(est >= 50 && est <= 200, "estimate out of range: {}", est);
+        assert!((50..=200).contains(&est), "estimate out of range: {}", est);
     }
 
     #[test]
@@ -264,5 +282,119 @@ mod tests {
     #[test]
     fn tool_kind_icon_unknown() {
         assert_eq!(tool_kind_icon("something_exotic"), "*");
+    }
+
+    // ── shorten_path tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn shorten_path_short_path_unchanged() {
+        assert_eq!(shorten_path("src/main.rs"), "src/main.rs");
+    }
+
+    #[test]
+    fn shorten_path_three_components_unchanged() {
+        assert_eq!(shorten_path("a/b/c"), "a/b/c");
+    }
+
+    #[test]
+    fn shorten_path_long_path_abbreviated() {
+        let result = shorten_path("src/rustycode_tui/app/render/mod.rs");
+        assert_eq!(result, "s/r/a/r/mod.rs");
+    }
+
+    #[test]
+    fn shorten_path_hidden_dir() {
+        let result = shorten_path("src/.hidden/deep/file.rs");
+        assert_eq!(result, "src/.h/d/file.rs");
+    }
+
+    // ── centered_rect tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn centered_rect_exact_center() {
+        let area = Rect::new(0, 0, 80, 24);
+        let result = centered_rect(20, 10, area);
+        assert_eq!(result.x, 30);
+        assert_eq!(result.y, 7);
+        assert_eq!(result.width, 20);
+        assert_eq!(result.height, 10);
+    }
+
+    #[test]
+    fn centered_rect_clamps_to_area() {
+        let area = Rect::new(0, 0, 40, 10);
+        let result = centered_rect(100, 50, area);
+        assert_eq!(result.width, 40);
+        assert_eq!(result.height, 10);
+    }
+
+    #[test]
+    fn centered_rect_with_offset_area() {
+        let area = Rect::new(10, 5, 60, 20);
+        let result = centered_rect(20, 10, area);
+        assert_eq!(result.x, 30);
+        assert_eq!(result.y, 10);
+    }
+
+    // ── safe_truncate unicode ────────────────────────────────────────────────
+
+    #[test]
+    fn safe_truncate_unicode() {
+        let s = "héllo wörld тест";
+        let result = safe_truncate(s, 8);
+        assert_eq!(result, "héllo...");
+    }
+
+    #[test]
+    fn safe_truncate_exact_boundary() {
+        assert_eq!(safe_truncate("hello", 5), "hello");
+    }
+
+    // ── tool_kind_icon coverage ──────────────────────────────────────────────
+
+    #[test]
+    fn tool_kind_icon_edit() {
+        assert_eq!(tool_kind_icon("edit_file"), "E");
+    }
+
+    #[test]
+    fn tool_kind_icon_delete() {
+        assert_eq!(tool_kind_icon("delete_file"), "D");
+    }
+
+    #[test]
+    fn tool_kind_icon_search() {
+        assert_eq!(tool_kind_icon("grep_search"), "G");
+    }
+
+    #[test]
+    fn tool_kind_icon_git() {
+        assert_eq!(tool_kind_icon("git_commit"), "G");
+    }
+
+    #[test]
+    fn tool_kind_icon_http() {
+        assert_eq!(tool_kind_icon("web_fetch"), "~");
+    }
+
+    #[test]
+    fn tool_kind_icon_question() {
+        assert_eq!(tool_kind_icon("ask_question"), "?");
+    }
+
+    #[test]
+    fn tool_kind_icon_todo() {
+        assert_eq!(tool_kind_icon("todo_write"), "T");
+    }
+
+    #[test]
+    fn tool_kind_icon_agent() {
+        assert_eq!(tool_kind_icon("agent_spawn"), "A");
+    }
+
+    #[test]
+    fn tool_kind_icon_case_insensitive() {
+        assert_eq!(tool_kind_icon("Read_File"), "R");
+        assert_eq!(tool_kind_icon("BASH"), "$");
     }
 }

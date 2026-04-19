@@ -6,14 +6,9 @@ use crate::app::render::shared::{
     estimate_line_count, format_duration_ms, safe_truncate, shorten_path, tool_kind_icon,
 };
 
-impl TUI {
+impl crate::app::renderer::PolishedRenderer {
     /// Render messages area with line-based auto-scrolling
-    pub fn render_messages(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
-        // Branch to brutalist renderer if enabled
-        if self.renderer_mode.is_brutalist() {
-            self.render_messages_brutalist(frame, area);
-            return;
-        }
+    pub fn render_messages(&self, tui: &mut crate::app::event_loop::TUI, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
 
         use ratatui::layout::Alignment;
         use ratatui::text::Line;
@@ -21,14 +16,14 @@ impl TUI {
         use rustycode_ui_core::MessageTheme;
 
         // Clear previous message areas for click detection
-        self.clear_message_areas();
+        tui.clear_message_areas();
 
         // Calculate how many lines fit in viewport
         let viewport_height = area.height as usize;
 
         // If no user/assistant conversation yet, show helpful empty state with context
         // (System messages like "Workspace loaded" don't count as conversation)
-        let has_conversation = self.messages.iter().any(|m| {
+        let has_conversation = tui.messages.iter().any(|m| {
             matches!(
                 m.role,
                 crate::ui::message::MessageRole::User | crate::ui::message::MessageRole::Assistant
@@ -59,15 +54,14 @@ impl TUI {
             lines.push(Line::raw(""));
 
             // Context info (claw-code pattern: show model, project, branch)
-            let project_name = self
-                .services
+            let project_name = tui.services
                 .cwd()
                 .file_name()
-                .and_then(|n| n.to_str())
+                .and_then(|n: &std::ffi::OsStr| n.to_str())
                 .unwrap_or("unknown");
-            let branch_info = self.git_branch.as_deref().unwrap_or("detached");
+            let branch_info = tui.git_branch.as_deref().unwrap_or("detached");
             // Stable per-session index derived from project name
-            let greeting_idx = project_name.bytes().fold(0u8, |a, b| a.wrapping_add(b)) as usize;
+            let greeting_idx = project_name.bytes().fold(0u8, |a: u8, b: u8| a.wrapping_add(b)) as usize;
 
             lines.push(Line::from(vec![
                 ratatui::text::Span::styled(
@@ -75,7 +69,7 @@ impl TUI {
                     ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
                 ),
                 ratatui::text::Span::styled(
-                    self.current_model.clone(),
+                    tui.current_model.clone(),
                     ratatui::style::Style::default().fg(ratatui::style::Color::Gray),
                 ),
             ]));
@@ -133,7 +127,7 @@ impl TUI {
                         "Ctrl+D to quit  ·  Ctrl+C to cancel  ·  Esc to stop",
                     ];
                     let tip_idx = (greeting_idx
-                        + self.animator.current_frame().progress_frame / 20)
+                        + tui.animator.current_frame().progress_frame / 20)
                         % TIPS.len();
                     TIPS[tip_idx]
                 },
@@ -141,10 +135,10 @@ impl TUI {
             )]));
 
             // Check if API key is missing and show a warning (cached in TUI struct)
-            if !self.api_key_warning.is_empty() {
+            if !tui.api_key_warning.is_empty() {
                 lines.push(Line::raw(""));
                 lines.push(Line::from(vec![ratatui::text::Span::styled(
-                    format!("  {}", self.api_key_warning),
+                    format!("  {}", tui.api_key_warning),
                     ratatui::style::Style::default().fg(ratatui::style::Color::Rgb(255, 200, 80)),
                 )]));
             }
@@ -164,11 +158,11 @@ impl TUI {
         // Pre-estimate total lines to determine which messages are visible.
         // This avoids expensive markdown rendering for messages entirely off-screen.
         let safe_viewport_height = viewport_height.max(1);
-        let estimated_auto_scroll_start = if !self.user_scrolled {
+        let estimated_auto_scroll_start = if !tui.user_scrolled {
             // When auto-scrolled, we only need to render the last N lines that fit
             // in the viewport. Estimate total lines cheaply.
             let mut est_total: usize = 0;
-            for msg in &self.messages {
+            for msg in &tui.messages {
                 let msg_lines = estimate_line_count(&msg.content)
                     + msg
                         .thinking
@@ -185,7 +179,7 @@ impl TUI {
             }
             est_total.saturating_sub(safe_viewport_height)
         } else {
-            self.scroll_offset_line
+            tui.scroll_offset_line
         };
 
         // Track cumulative estimated lines to skip messages above viewport
@@ -194,7 +188,7 @@ impl TUI {
         // Estimate viewport end to skip messages below it
         let estimated_viewport_end = estimated_auto_scroll_start + safe_viewport_height + 10; // +10 buffer
 
-        for (msg_idx, msg) in self.messages.iter().enumerate() {
+        for (msg_idx, msg) in tui.messages.iter().enumerate() {
             // Get vertical bar style (determines border color)
             let (pipe_char, pipe_color) = msg.pipe_style();
 
@@ -291,8 +285,7 @@ impl TUI {
                 render_chunks.push((msg_idx, pipe_color, vec![line]));
             } else {
                 // Render markdown content
-                let content_lines = self
-                    .message_renderer
+                let content_lines = tui.message_renderer
                     .render_markdown_content(&msg.content, &theme);
 
                 // Collect spans for this message with highlighting
@@ -302,8 +295,8 @@ impl TUI {
                     .collect();
 
                 // Apply search highlighting if search is active
-                if !self.search_state.query.is_empty() {
-                    lines = self.apply_search_highlighting(&lines, msg_idx);
+                if !tui.search_state.query.is_empty() {
+                    lines = crate::app::renderer::apply_search_highlighting(tui, &lines, msg_idx);
                 }
 
                 // Append thinking block (collapsed header or expanded content)
@@ -364,16 +357,16 @@ impl TUI {
         total_lines += render_chunks.len().saturating_sub(1);
 
         // Save total lines for scroll initialization
-        self.last_total_lines.set(total_lines);
+        tui.last_total_lines.set(total_lines);
 
         // Ensure viewport_height is at least 1 to avoid division issues
         let safe_viewport_height = viewport_height.max(1);
 
         // Clamp scroll offset to valid range
         let max_scroll = total_lines.saturating_sub(safe_viewport_height);
-        let clamped_scroll = self.scroll_offset_line.min(max_scroll);
+        let clamped_scroll = tui.scroll_offset_line.min(max_scroll);
 
-        let start_line = if self.user_scrolled {
+        let start_line = if tui.user_scrolled {
             clamped_scroll
         } else {
             total_lines.saturating_sub(safe_viewport_height)
@@ -388,9 +381,9 @@ impl TUI {
         // Key: indexed by msg_idx (message index), not chunk position,
         // and accounts for line wrapping (div_ceil) to match scroll coordinates.
         {
-            let mut offsets = self.message_line_offsets.borrow_mut();
+            let mut offsets = tui.message_line_offsets.borrow_mut();
             offsets.clear();
-            offsets.resize(self.messages.len(), 0);
+            offsets.resize(tui.messages.len(), 0);
             let mut acc = 0usize;
             for (chunk_idx, (msg_idx, _, lines)) in render_chunks.iter().enumerate() {
                 let separator = if chunk_idx > 0 { 1 } else { 0 };
@@ -476,7 +469,7 @@ impl TUI {
                 frame.render_widget(paragraph, msg_area);
 
                 // Register click area for this message
-                self.register_message_area(*msg_idx, msg_area);
+                tui.register_message_area(*msg_idx, msg_area);
 
                 y_offset = y_offset.saturating_add(render_height);
                 rendered_any = true;
@@ -487,8 +480,8 @@ impl TUI {
 
         // Show queued message indicator at bottom when auto-scrolled
         // (goose pattern: dimmed preview of queued message)
-        if !self.user_scrolled {
-            if let Some(queued) = &self.queued_message {
+        if !tui.user_scrolled {
+            if let Some(queued) = &tui.queued_message {
                 if y_offset < area.height.saturating_sub(2) {
                     let preview: String = queued.chars().take(80).collect();
                     let ellipsis = if queued.chars().count() > 80 {
@@ -525,7 +518,7 @@ impl TUI {
 
         // Goose-inspired viewport overflow indicators
         let overflows = total_lines > safe_viewport_height;
-        if overflows && self.user_scrolled && area.height > 2 {
+        if overflows && tui.user_scrolled && area.height > 2 {
             let above = start_line;
             let below = total_lines.saturating_sub(start_line + safe_viewport_height);
 
@@ -551,8 +544,8 @@ impl TUI {
 
             // Bottom indicator — more prominent, clickable
             if below > 0 && (y_offset as usize) < area.height as usize {
-                let anim_frame = self.animator.current_frame();
-                let is_streaming = self.is_streaming;
+                let anim_frame = tui.animator.current_frame();
+                let is_streaming = tui.is_streaming;
                 // Use a brighter color when streaming to attract attention
                 let indicator_color = if is_streaming {
                     let pulse = (anim_frame.progress_frame / 10).is_multiple_of(2);
@@ -592,21 +585,19 @@ impl TUI {
 
         // Turn indicator when viewing a past turn (goose pattern)
         // Shows "turn X/Y" when user navigated to a historical message
-        if self.user_scrolled {
-            let total_turns = self
-                .messages
+        if tui.user_scrolled {
+            let total_turns = tui.messages
                 .iter()
                 .filter(|m| matches!(m.role, crate::ui::message::MessageRole::User))
                 .count();
             if total_turns > 1 {
                 // Find which turn the selected message belongs to
-                let current_turn = self.messages[..=self
-                    .selected_message
-                    .min(self.messages.len().saturating_sub(1))]
+                let current_turn = tui.messages[..=tui.selected_message
+                    .min(tui.messages.len().saturating_sub(1))]
                     .iter()
                     .filter(|m| matches!(m.role, crate::ui::message::MessageRole::User))
                     .count();
-                let is_latest = self.selected_message >= self.messages.len().saturating_sub(1);
+                let is_latest = tui.selected_message >= tui.messages.len().saturating_sub(1);
                 if !is_latest && current_turn > 0 {
                     let turn_text =
                         format!(" ◈ turn {}/{} — shift+↓ return ", current_turn, total_turns);
@@ -630,75 +621,7 @@ impl TUI {
                 }
             }
         }
-    }
-    fn render_messages_brutalist(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
-        let input_text = self.input_handler.state.all_text();
-
-        // Compute total lines for scroll system FIRST (needed for auto-scroll calc)
-        let width = area.width as usize;
-        let safe_viewport = (area.height as usize).max(1);
-
-        // Create renderer for height estimation (offset doesn't affect heights)
-        let mut renderer = self.create_brutalist_renderer(&input_text);
-
-        // Compute layout once — reuse for offsets and scroll
-        let (total_lines, heights) = renderer.compute_message_layout(width);
-        let mut offsets = self.message_line_offsets.borrow_mut();
-        offsets.clear();
-        offsets.resize(self.messages.len(), 0);
-        let mut acc = 0usize;
-        for (msg_idx, &h) in heights.iter().enumerate() {
-            offsets[msg_idx] = acc;
-            acc += h;
-        }
-        drop(offsets); // Release borrow before render
-        self.last_total_lines.set(total_lines);
-
-        // Compute effective scroll offset (auto-scroll to bottom when not user-scrolled)
-        let max_scroll = total_lines.saturating_sub(safe_viewport);
-        let effective_offset = if self.user_scrolled {
-            self.scroll_offset_line.min(max_scroll)
-        } else {
-            max_scroll // Auto-scroll to bottom
-        };
-
-        // Override scroll offset with computed value
-        renderer.scroll_offset_line = effective_offset;
-
-        // Use precomputed heights to avoid redundant estimation
-        renderer.render_messages_with_heights(frame, area, &heights);
-
-        // Register message areas for click detection using computed offsets and heights
-        self.clear_message_areas();
-        for (msg_idx, &start_line) in self.message_line_offsets.borrow().iter().enumerate() {
-            let msg_height = heights.get(msg_idx).copied().unwrap_or(1);
-            let end_line = start_line + msg_height;
-
-            // Skip messages entirely above viewport
-            if end_line <= effective_offset {
-                continue;
-            }
-            // Skip messages entirely below viewport
-            if start_line >= effective_offset + safe_viewport {
-                break;
-            }
-
-            // Calculate visible area within the viewport
-            let visible_start = start_line.saturating_sub(effective_offset);
-            let visible_end = (end_line.saturating_sub(effective_offset)).min(safe_viewport);
-            let visible_height = (visible_end.saturating_sub(visible_start)) as u16;
-
-            if visible_height > 0 {
-                let msg_area = ratatui::layout::Rect {
-                    x: area.x,
-                    y: area.y + visible_start as u16,
-                    width: area.width,
-                    height: visible_height,
-                };
-                self.register_message_area(msg_idx, msg_area);
-            }
-        }
-    }
+}
 }
 
 /// Render a compact tool execution summary for a message.
@@ -931,18 +854,7 @@ fn extract_file_path(s: &str) -> Option<String> {
     None
 }
 
-/// Goose-inspired smart path shortening for compact tool display.
-///
-/// Converts home directory paths to `~`, then shortens middle path components
-/// to their first character while preserving the filename:
-///
-/// `/Users/nat/dev/rustycode/crates/main.rs` → `~/d/r/c/main.rs`
-/// `src/rustycode_tui/app/render/mod.rs` → `s/r/a/r/mod.rs`
-///
-/// Paths with ≤ 3 components are left unchanged.
-// shorten_path is imported from super::shared at the top of this file.
-
-// tool_kind_icon is imported from super::shared at the top of this file.
+// shorten_path and tool_kind_icon are imported from super::shared at the top of this file.
 
 /// Format duration for display — thin wrapper over the shared helper.
 #[inline]

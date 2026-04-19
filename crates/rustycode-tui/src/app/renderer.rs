@@ -17,6 +17,7 @@
 //! No other files need to change.
 
 use crate::app::event_loop::TUI;
+use crate::app::render::shared::centered_rect;
 use crate::ui::footer::Footer;
 use crate::ui::header::{Header, HeaderStatus};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -242,11 +243,11 @@ impl PolishedRenderer {
         header.render(frame, chunks[0]);
 
         if !tui.status_bar_collapsed {
-            tui.render_status_safe(frame, chunks[1]);
+            self.render_status(tui, frame, chunks[1]);
         }
 
-        tui.render_messages_safe(frame, chunks[2]);
-        tui.render_input_safe(frame, chunks[3]);
+        self.render_messages(tui, frame, chunks[2]);
+        self.render_input(tui, frame, chunks[3]);
 
         if !tui.footer_collapsed {
             let footer_bg = Block::default().style(Style::default().bg(Color::Rgb(23, 23, 23)));
@@ -266,16 +267,18 @@ impl PolishedRenderer {
 
     /// Render all overlay widgets (search, panels, dialogs, …).
     fn render_overlays(&self, tui: &mut TUI, frame: &mut Frame, size: Rect, chunks: &[Rect]) {
+        // Overlay: search box (over message area - chunks[2])
         if tui.search_state.visible {
-            tui.render_search_box(frame, chunks[2]);
+            crate::app::renderer::render_search_box(tui, frame, chunks[2]);
         }
 
         if tui.showing_tool_panel {
-            tui.render_tool_panel(frame, chunks[2]);
+            crate::app::renderer::render_tool_panel(tui, frame, chunks[2]);
         }
 
+        // Worker status panel overlay (Ctrl+W) - right side overlay
         if tui.worker_panel.visible {
-            tui.render_worker_panel(frame, chunks[2]);
+            crate::app::renderer::render_worker_panel(tui, frame, chunks[2]);
         }
 
         if tui.team_panel.visible {
@@ -286,15 +289,14 @@ impl PolishedRenderer {
         if tui.awaiting_clarification && tui.clarification_panel.visible {
             let panel_height = 15u16.min(size.height.saturating_sub(4));
             let panel_width = (size.width * 3 / 4).min(60);
-            let x = (size.width.saturating_sub(panel_width)) / 2;
-            let y = (size.height.saturating_sub(panel_height)) / 2;
-            let panel_area = Rect::new(x, y, panel_width, panel_height);
+            let panel_area = centered_rect(panel_width, panel_height, size);
             frame.render_widget(Clear, panel_area);
             frame.render_widget(tui.clarification_panel.clone(), panel_area);
         }
 
+        // Overlay: provider selector
         if tui.showing_provider_selector {
-            tui.render_provider_selector(frame);
+            crate::app::renderer::render_provider_selector(frame);
         }
 
         if tui.file_finder.is_visible() {
@@ -329,9 +331,7 @@ impl PolishedRenderer {
             if let Some(ref req) = tui.pending_approval_request {
                 let panel_height = 12u16.min(size.height.saturating_sub(4));
                 let panel_width = 70u16.min(size.width.saturating_sub(4));
-                let x = (size.width.saturating_sub(panel_width)) / 2;
-                let y = (size.height.saturating_sub(panel_height)) / 2;
-                let panel_area = Rect::new(x, y, panel_width, panel_height);
+                let panel_area = centered_rect(panel_width, panel_height, size);
                 crate::tool_approval::render_approval_prompt(frame, panel_area, req);
             }
         }
@@ -345,6 +345,7 @@ impl PolishedRenderer {
             tui.session_sidebar.render(frame, size);
         }
 
+        // Overlay: compaction preview (while pending)
         if tui.showing_compaction_preview {
             tui.render_compaction_preview(frame, size);
         }
@@ -438,6 +439,9 @@ impl FrameRenderer for RendererMode {
 // ============================================================================
 // TESTS
 // ============================================================================
+
+// Bring in the modular render implementations for PolishedRenderer
+include!("tui_render_impl.rs");
 
 #[cfg(test)]
 mod tests {

@@ -1,19 +1,13 @@
-impl TUI {
+impl crate::app::renderer::PolishedRenderer {
     /// Render input area with label and keyboard hints
-    pub fn render_input(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
-        // Branch to brutalist renderer if enabled
-        if self.renderer_mode.is_brutalist() {
-            self.render_input_brutalist(frame, area);
-            return;
-        }
-
+    pub fn render_input(&self, tui: &mut crate::app::event_loop::TUI, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         use ratatui::style::Color;
         use ratatui::style::Style;
         use ratatui::text::{Line, Span};
         use ratatui::widgets::Paragraph;
 
         let is_multiline =
-            self.input_handler.state.mode == crate::ui::input::InputMode::MultiLine;
+            tui.input_handler.state.mode == crate::ui::input::InputMode::MultiLine;
 
         // Top label row - shows context/mode
         let label_area = ratatui::layout::Rect::new(area.x, area.y, area.width, 1);
@@ -35,9 +29,9 @@ impl TUI {
         );
 
         // Render label — show streaming indicator when AI is generating
-        let label_spans = if self.is_streaming {
+        let label_spans = if tui.is_streaming {
             let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-            let anim_frame = self.animator.current_frame();
+            let anim_frame = tui.animator.current_frame();
             let frame_idx = (anim_frame.progress_frame / 5) % frames.len();
 
             // Use shared thinking messages module (cycle every ~2s at 4FPS)
@@ -53,7 +47,7 @@ impl TUI {
                 Span::styled("  Ctrl+C cancel", Style::default().fg(Color::DarkGray)),
             ];
             // Show queue state hint so users know they can type ahead
-            if self.queued_message.is_some() {
+            if tui.queued_message.is_some() {
                 spans.push(Span::styled(
                     "  📝 1 queued",
                     Style::default().fg(Color::Rgb(180, 180, 255)),
@@ -76,7 +70,7 @@ impl TUI {
                 Span::styled(" ", Style::default().fg(Color::DarkGray)),
             ];
             // Show image attachment count when images are attached
-            let img_count = self.input_handler.state.images.len();
+            let img_count = tui.input_handler.state.images.len();
             if img_count > 0 {
                 spans.push(Span::styled(
                     format!(" 🖼 {} ", img_count),
@@ -84,7 +78,7 @@ impl TUI {
                 ));
             }
             // Show reverse search indicator (readline Ctrl+R)
-            let (rs_query, _rs_match, rs_total) = self.input_handler.reverse_search_info();
+            let (rs_query, _rs_match, rs_total) = tui.input_handler.reverse_search_info();
             if !rs_query.is_empty() {
                 spans.push(Span::styled(
                     format!(" 🔍 '{}/{} ", rs_query, rs_total),
@@ -92,7 +86,7 @@ impl TUI {
                 ));
             } else {
                 // Show history browsing position
-                let (hist_pos, hist_total) = self.input_handler.history_position();
+                let (hist_pos, hist_total) = tui.input_handler.history_position();
                 if hist_pos > 0 {
                     spans.push(Span::styled(
                         format!(" 📜 {}/{} ", hist_pos, hist_total),
@@ -101,7 +95,7 @@ impl TUI {
                 }
             }
             // Character count for long messages (goose pattern: show when > 500 chars)
-            let char_count: usize = self.input_handler.state.all_text().chars().count();
+            let char_count: usize = tui.input_handler.state.all_text().chars().count();
             if char_count > 500 {
                 let count_color = if char_count > 5000 {
                     Color::Red
@@ -126,7 +120,7 @@ impl TUI {
         frame.render_widget(label, label_area);
 
         // Collect all lines for display
-        let state = &self.input_handler.state;
+        let state = &tui.input_handler.state;
         let lines = &state.lines;
         let cursor_row = state.cursor_row.min(lines.len().saturating_sub(1));
         let cursor_col = state.cursor_col;
@@ -173,7 +167,7 @@ impl TUI {
                 }
 
                 // Blinking cursor
-                let cursor_visible = (self.animator.frame_count() / 2).is_multiple_of(2);
+                let cursor_visible = (tui.animator.frame_count() / 2).is_multiple_of(2);
                 if cursor_visible {
                     spans.push(Span::styled("▏", Style::default().fg(Color::White)));
                 } else {
@@ -182,9 +176,9 @@ impl TUI {
 
                 if !after.is_empty() {
                     spans.push(Span::raw(after.to_string()));
-                } else if row.is_empty() && !is_multiline && !self.is_streaming {
+                } else if row.is_empty() && !is_multiline && !tui.is_streaming {
                     // Show placeholder when cursor line is empty (kilocode pattern)
-                    let placeholder = if self.messages.is_empty() {
+                    let placeholder = if tui.messages.is_empty() {
                         " Ask me anything..."
                     } else {
                         " Message..."
@@ -204,16 +198,16 @@ impl TUI {
         // Ensure at least one line is rendered (with context-aware placeholder)
         if display_lines.is_empty() {
             let mut spans = vec![Span::styled("❯", Style::default().fg(Color::Rgb(220, 80, 100))), Span::raw(" ")];
-            let cursor_visible = (self.animator.frame_count() / 2).is_multiple_of(2);
+            let cursor_visible = (tui.animator.frame_count() / 2).is_multiple_of(2);
             if cursor_visible {
                 spans.push(Span::styled("▏", Style::default().fg(Color::White)));
             } else {
                 spans.push(Span::styled("▏", Style::default().fg(Color::DarkGray)));
             }
             // Context-aware placeholder (kilocode pattern)
-            let placeholder = if self.is_streaming {
+            let placeholder = if tui.is_streaming {
                 "" // No placeholder during streaming — spinner is in label
-            } else if self.messages.is_empty() {
+            } else if tui.messages.is_empty() {
                 " Ask me anything..."
             } else {
                 " Message..."
@@ -231,11 +225,11 @@ impl TUI {
         frame.render_widget(paragraph, input_area);
 
         // Render keyboard hints (right-aligned, hidden on narrow terminals)
-        let send_hint = if self.is_streaming { "⏎ Queue" } else { "⏎ Send" };
+        let send_hint = if tui.is_streaming { "⏎ Queue" } else { "⏎ Send" };
         let mode_hint = if is_multiline { "Ctrl+J" } else { "" };
 
         // Goose pattern: show scroll hint when viewport is scrolled up
-        let scroll_hint = if self.user_scrolled {
+        let scroll_hint = if tui.user_scrolled {
             "Home/End = top/bottom"
         } else {
             ""
@@ -243,7 +237,7 @@ impl TUI {
 
         if area.width > 70 {
             // Show context-appropriate hints
-            let hints_text = if self.is_streaming {
+            let hints_text = if tui.is_streaming {
                 "Ctrl+C cancel · ↑↓ scroll"
             } else {
                 "Ctrl+A/E nav · Ctrl+U/D scroll · Ctrl+X edit · Ctrl+R search"
@@ -277,17 +271,5 @@ impl TUI {
             ];
             frame.render_widget(Paragraph::new(Line::from(hints)), hints_area);
         }
-    }
-
-    /// Render input using brutalist renderer
-    fn render_input_brutalist(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
-        let input_text = self.input_handler.state.all_text();
-        let renderer = self.create_brutalist_renderer(&input_text);
-        let colors = self
-            .theme_colors
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        renderer.render_input(frame, area, &colors);
     }
 }

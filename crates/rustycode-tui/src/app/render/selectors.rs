@@ -1,6 +1,6 @@
-impl TUI {
-    pub fn render_model_selector(&self, frame: &mut ratatui::Frame) {
+    pub fn render_model_selector(frame: &mut ratatui::Frame) {
         use crate::providers::get_all_available_models;
+        use crate::app::render::shared::centered_rect;
         use ratatui::layout::Alignment;
         use ratatui::style::{Color, Style};
         use ratatui::text::Line;
@@ -11,11 +11,7 @@ impl TUI {
         // Calculate modal size (80% width, 70% height), clamped to minimums
         let width = ((size.width as usize * 80) / 100).max(20).min(size.width as usize) as u16;
         let height = ((size.height as usize * 70) / 100).max(5).min(size.height as usize) as u16;
-
-        // Center the modal
-        let x = size.x + size.width.saturating_sub(width) / 2;
-        let y = size.y + size.height.saturating_sub(height) / 2;
-        let modal_area = ratatui::layout::Rect::new(x, y, width, height);
+        let modal_area = centered_rect(width, height, size);
 
         // Clear the area behind the modal
         frame.render_widget(Clear, modal_area);
@@ -75,8 +71,9 @@ impl TUI {
     }
 
     /// Render provider selector overlay
-    pub fn render_provider_selector(&self, frame: &mut ratatui::Frame) {
+    pub fn render_provider_selector(frame: &mut ratatui::Frame) {
         use crate::providers::get_available_providers;
+        use crate::app::render::shared::centered_rect;
         use ratatui::layout::Alignment;
         use ratatui::style::{Color, Style};
         use ratatui::text::Line;
@@ -87,11 +84,7 @@ impl TUI {
         // Calculate modal size (80% width, 70% height), clamped to minimums
         let width = ((size.width as usize * 80) / 100).max(20).min(size.width as usize) as u16;
         let height = ((size.height as usize * 70) / 100).max(5).min(size.height as usize) as u16;
-
-        // Center the modal
-        let x = size.x + size.width.saturating_sub(width) / 2;
-        let y = size.y + size.height.saturating_sub(height) / 2;
-        let modal_area = ratatui::layout::Rect::new(x, y, width, height);
+        let modal_area = centered_rect(width, height, size);
 
         // Clear the area behind the modal
         frame.render_widget(Clear, modal_area);
@@ -151,8 +144,8 @@ impl TUI {
     /// Performance: caps at 50 matches per message to prevent span explosion
     /// when searching for short strings in large content. Properly merges
     /// overlapping match segments to minimize Span count.
-    fn apply_search_highlighting(
-        &self,
+    pub fn apply_search_highlighting(
+        tui: &crate::app::event_loop::TUI,
         lines: &[ratatui::text::Line],
         message_index: usize,
     ) -> Vec<ratatui::text::Line<'static>> {
@@ -163,7 +156,7 @@ impl TUI {
         const MAX_MATCHES_PER_MESSAGE: usize = 50;
 
         // Collect matches for this message, capped
-        let matches: Vec<_> = self
+        let matches: Vec<_> = tui
             .search_state
             .matches
             .iter()
@@ -187,7 +180,7 @@ impl TUI {
         }
 
         // Pre-compute current match for fast comparison
-        let current_match = self.search_state.current_match();
+        let current_match = tui.search_state.current_match();
 
         let mut highlighted_lines = Vec::with_capacity(lines.len());
         let mut byte_offset = 0;
@@ -293,5 +286,3 @@ impl TUI {
 
         highlighted_lines
     }
-
-}
