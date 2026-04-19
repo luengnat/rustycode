@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 pub type AgentId = String;
 
 /// What role this agent is performing
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AgentRole {

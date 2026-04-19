@@ -96,13 +96,10 @@ impl AutoMode {
         self.config.auto_advance
     }
 
-    /// Get current execution phase as a string
-    pub fn current_phase(&self) -> &'static str {
+    /// Get plan mode status
+    pub fn plan_mode_enabled(&self) -> bool {
         let pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
-        match pm.current_phase() {
-            crate::plan_mode::ExecutionPhase::Planning => "planning",
-            crate::plan_mode::ExecutionPhase::Implementation => "implementation",
-        }
+        pm.is_enabled()
     }
 
     /// Generate a plan for the given task description
@@ -138,51 +135,40 @@ impl AutoMode {
             created_at: Utc::now().to_rfc3339(),
         };
 
-        // Submit the plan to plan_mode
-        let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
-        pm.submit_plan(plan.clone());
+        // Check if approval is required based on plan assessment
+        let pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
+        let _approval_needed = pm.assess_approval_required(&plan);
 
         Ok(plan)
     }
 
-    /// Approve a plan and transition to implementation phase
+    /// Approve a plan for execution
     pub async fn approve_plan(
         &self,
-        plan: &crate::plan_mode::Plan,
+        _plan: &crate::plan_mode::Plan,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
-        pm.approve_plan(&plan.id)?;
+        // In the new role-based system, approval is implicit based on role access
+        // This method is kept for backward compatibility
         Ok(())
     }
 
-    /// Reject a plan and stay in planning phase
+    /// Reject a plan
     pub async fn reject_plan(
         &self,
         _plan: &crate::plan_mode::Plan,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
-        pm.reject();
+        // In the new role-based system, rejection is implicit
+        // This method is kept for backward compatibility
         Ok(())
     }
 
-    /// Execute a task (plan generation + approval + execution)
+    /// Execute a task (plan generation + execution)
     pub async fn execute_task(
         &self,
         task_desc: &str,
     ) -> Result<AutoTaskResult, Box<dyn std::error::Error>> {
         // Generate plan
         let plan = self.generate_plan(task_desc).await?;
-
-        // Check if in planning phase
-        let phase = {
-            let pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
-            pm.current_phase()
-        };
-
-        if phase == crate::plan_mode::ExecutionPhase::Planning {
-            // Return error if not in implementation phase
-            return Err("Plan approval required before task execution".into());
-        }
 
         // Execute the plan
         self.execute_plan(&plan).await

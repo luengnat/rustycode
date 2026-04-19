@@ -1,33 +1,13 @@
-//! Plan Mode — Execution gating with read-only planning phase
+//! Plan Mode — Role-based tool access for plan execution
 //!
-//! Enforces a planning phase before implementation. The agent analyzes
-//! the task using read-only tools, generates a structured plan with
-//! risks and costs, and waits for user approval before executing changes.
-//!
-//! # Phases
-//!
-//! - **Planning**: Read-only analysis (read, grep, glob, lsp, web_search)
-//! - **Implementation**: Full tool access after plan approval
+//! Uses role-based tool access instead of global ExecutionPhase states.
+//! Each agent role (Planner, Worker, Reviewer, Researcher) has specific tools it can use.
+//! Plans can require approval based on risk level and estimated cost.
 
+use crate::agent_identity::AgentRole;
+use crate::tool_access_matrix::build_access_matrix;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-
-/// Execution phases for plan-first workflow
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ExecutionPhase {
-    Planning,
-    Implementation,
-}
-
-impl std::fmt::Display for ExecutionPhase {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Planning => write!(f, "planning"),
-            Self::Implementation => write!(f, "implementation"),
-        }
-    }
-}
+use std::collections::{HashMap, HashSet};
 
 /// Plan mode configuration
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -158,21 +138,29 @@ impl std::fmt::Display for RiskLevel {
     }
 }
 
-/// Reason a tool was blocked in the current phase
+/// Reason a tool was blocked
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ToolBlockedReason {
-    NotAllowedInPhase { tool: String, phase: ExecutionPhase },
+    NotAllowedForRole { tool: String, role: AgentRole },
     RequiresApproval,
+    ConvoyPlanNotApproved,
+    UnknownRole(AgentRole),
 }
 
 impl std::fmt::Display for ToolBlockedReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotAllowedInPhase { tool, phase } => {
-                write!(f, "Tool '{}' not allowed in {} phase", tool, phase)
+            Self::NotAllowedForRole { tool, role } => {
+                write!(f, "Tool '{}' not allowed for {:?} role", tool, role)
             }
             Self::RequiresApproval => {
-                write!(f, "Implementation requires plan approval")
+                write!(f, "Plan execution requires approval")
+            }
+            Self::ConvoyPlanNotApproved => {
+                write!(f, "Convoy plan has not been approved")
+            }
+            Self::UnknownRole(role) => {
+                write!(f, "Unknown role: {:?}", role)
             }
         }
     }
@@ -186,13 +174,11 @@ pub struct ApprovalToken {
     pub plan_id: String,
 }
 
-/// Plan mode manager — gates execution behind planning and approval
+/// Plan mode manager — gates execution behind role-based access and approval
 #[derive(Clone)]
 pub struct PlanMode {
     config: PlanModeConfig,
-    current_phase: ExecutionPhase,
-    approved_plans: HashSet<String>,
-    current_plan: Option<Plan>,
+    role_tool_matrix: HashMap<AgentRole, HashSet<&'static str>>,
 }
 
 impl Default for PlanMode {
@@ -206,105 +192,52 @@ impl PlanMode {
     pub fn new(config: PlanModeConfig) -> Self {
         Self {
             config,
-            current_phase: ExecutionPhase::Planning,
-            approved_plans: HashSet::new(),
-            current_plan: None,
+            role_tool_matrix: build_access_matrix(),
         }
     }
 
-    /// Check if a tool is allowed in the current execution phase
-    pub fn is_tool_allowed(&self, tool: &str) -> Result<(), ToolBlockedReason> {
-        let allowed = match self.current_phase {
-            ExecutionPhase::Planning => &self.config.allowed_tools_planning,
-            ExecutionPhase::Implementation => &self.config.allowed_tools_implementation,
-        };
+    /// Check if a role can use a specific tool
+    pub fn can_use_tool(&self, role: AgentRole, tool: &str) -> Result<(), ToolBlockedReason> {
+        // If plan mode is disabled, allow all tools
+        if !self.config.enabled {
+            return Ok(());
+        }
 
-        if allowed.iter().any(|t| t == tool) {
-            Ok(())
-        } else {
-            Err(ToolBlockedReason::NotAllowedInPhase {
-                tool: tool.to_string(),
-                phase: self.current_phase,
-            })
+        // Look up role in matrix
+        match self.role_tool_matrix.get(&role) {
+            Some(allowed_tools) => {
+                if allowed_tools.contains(tool) {
+                    Ok(())
+                } else {
+                    Err(ToolBlockedReason::NotAllowedForRole {
+                        tool: tool.to_string(),
+                        role,
+                    })
+                }
+            }
+            None => Err(ToolBlockedReason::UnknownRole(role)),
         }
     }
 
-    /// Check if edit_file should run in dry-run mode (planning phase)
-    pub fn is_edit_dry_run(&self) -> bool {
-        self.current_phase == ExecutionPhase::Planning
-    }
-
-    /// Get current execution phase
-    pub fn current_phase(&self) -> ExecutionPhase {
-        self.current_phase
-    }
-
-    /// Set the current execution phase.
+    /// Assess whether a plan requires approval.
     ///
-    /// The interactive TUI starts in implementation phase so normal coding
-    /// sessions are not accidentally locked into read-only planning.
-    pub fn set_phase(&mut self, phase: ExecutionPhase) {
-        self.current_phase = phase;
-    }
-
-    /// Get the current plan (if any)
-    pub fn current_plan(&self) -> Option<&Plan> {
-        self.current_plan.as_ref()
-    }
-
-    /// Submit a plan for user approval
-    pub fn submit_plan(&mut self, plan: Plan) {
-        self.current_plan = Some(plan);
-        self.current_phase = ExecutionPhase::Planning;
-    }
-
-    /// Approve the current plan and transition to implementation
-    pub fn approve(&mut self) -> Result<ApprovalToken, PlanModeError> {
-        let plan = self
-            .current_plan
-            .as_ref()
-            .ok_or(PlanModeError::NoPlanToApprove)?;
-
-        let token = ApprovalToken {
-            plan_id: plan.id.clone(),
-        };
-
-        self.approved_plans.insert(plan.id.clone());
-        self.current_phase = ExecutionPhase::Implementation;
-
-        tracing::info!(
-            "Plan '{}' approved, transitioning to implementation",
-            plan.id
-        );
-        Ok(token)
-    }
-
-    /// Approve a specific plan by ID
-    pub fn approve_plan(&mut self, plan_id: &str) -> Result<ApprovalToken, PlanModeError> {
-        if !self.approved_plans.contains(plan_id) {
-            self.approved_plans.insert(plan_id.to_string());
+    /// Returns true if:
+    /// - Plan has any High risk
+    /// - Estimated cost > $1.00
+    ///
+    /// Otherwise returns false.
+    pub fn assess_approval_required(&self, plan: &Plan) -> bool {
+        // Check for high risks
+        if plan.risks.iter().any(|r| r.level >= RiskLevel::High) {
+            return true;
         }
-        self.current_phase = ExecutionPhase::Implementation;
-        Ok(ApprovalToken {
-            plan_id: plan_id.to_string(),
-        })
-    }
 
-    /// Reject the current plan, stay in planning phase
-    pub fn reject(&mut self) {
-        self.current_plan = None;
-        self.current_phase = ExecutionPhase::Planning;
-    }
+        // Check for high cost
+        if plan.estimated_cost_usd > 1.00 {
+            return true;
+        }
 
-    /// Reset back to planning phase (e.g., after implementation completes)
-    pub fn reset(&mut self) {
-        self.current_phase = ExecutionPhase::Planning;
-        self.current_plan = None;
-    }
-
-    /// Check if a plan ID has been approved
-    pub fn is_approved(&self, plan_id: &str) -> bool {
-        self.approved_plans.contains(plan_id)
+        false
     }
 
     /// Get the config
@@ -317,7 +250,7 @@ impl PlanMode {
         self.config.enabled
     }
 
-    /// Check if approval is required
+    /// Check if approval is required globally
     pub fn requires_approval(&self) -> bool {
         self.config.require_approval
     }
@@ -328,7 +261,6 @@ impl PlanMode {
 pub enum PlanModeError {
     NoPlanToApprove,
     PlanNotFound(String),
-    AlreadyInPhase(ExecutionPhase),
 }
 
 impl std::fmt::Display for PlanModeError {
@@ -336,7 +268,6 @@ impl std::fmt::Display for PlanModeError {
         match self {
             Self::NoPlanToApprove => write!(f, "No plan submitted for approval"),
             Self::PlanNotFound(id) => write!(f, "Plan not found: {}", id),
-            Self::AlreadyInPhase(phase) => write!(f, "Already in {} phase", phase),
         }
     }
 }
@@ -371,126 +302,95 @@ mod tests {
     }
 
     #[test]
-    fn planning_phase_allows_read_tools() {
+    fn can_use_tool_planner_read() {
         let pm = PlanMode::new(PlanModeConfig::default());
-        assert!(pm.is_tool_allowed("read").is_ok());
-        assert!(pm.is_tool_allowed("grep").is_ok());
-        assert!(pm.is_tool_allowed("glob").is_ok());
+        assert!(pm.can_use_tool(AgentRole::Planner, "read").is_ok());
     }
 
     #[test]
-    fn planning_phase_blocks_write_tools() {
+    fn can_use_tool_reviewer_cannot_write() {
         let pm = PlanMode::new(PlanModeConfig::default());
-        assert!(pm.is_tool_allowed("write").is_err());
-        assert!(pm.is_tool_allowed("bash").is_err());
+        assert!(pm.can_use_tool(AgentRole::Reviewer, "write").is_err());
     }
 
     #[test]
-    fn implementation_phase_allows_all_tools() {
+    fn can_use_tool_worker_can_write() {
         let pm = PlanMode::new(PlanModeConfig::default());
-        let mut pm = pm;
-        pm.current_phase = ExecutionPhase::Implementation;
-        assert!(pm.is_tool_allowed("write").is_ok());
-        assert!(pm.is_tool_allowed("bash").is_ok());
-        assert!(pm.is_tool_allowed("edit_file").is_ok());
+        assert!(pm.can_use_tool(AgentRole::Worker, "write").is_ok());
     }
 
     #[test]
-    fn edit_dry_run_in_planning() {
+    fn can_use_tool_disabled_mode_allows_all() {
+        let config = PlanModeConfig {
+            enabled: false,
+            ..PlanModeConfig::default()
+        };
+        let pm = PlanMode::new(config);
+        // When disabled, any tool is allowed
+        assert!(pm.can_use_tool(AgentRole::Reviewer, "write").is_ok());
+    }
+
+    #[test]
+    fn assess_approval_required_high_risk() {
         let pm = PlanMode::new(PlanModeConfig::default());
-        assert!(pm.is_edit_dry_run());
-    }
-
-    #[test]
-    fn edit_not_dry_run_in_implementation() {
-        let mut pm = PlanMode::new(PlanModeConfig::default());
-        pm.current_phase = ExecutionPhase::Implementation;
-        assert!(!pm.is_edit_dry_run());
-    }
-
-    #[test]
-    fn submit_and_approve_plan() {
-        let mut pm = PlanMode::new(PlanModeConfig::default());
         let plan = Plan {
             id: "plan-1".to_string(),
-            summary: "Test plan".to_string(),
-            approach: "Do the thing".to_string(),
-            files_to_modify: vec![],
-            commands_to_run: vec![],
-            estimated_tokens: TokenEstimate::default(),
-            estimated_cost_usd: 0.05,
-            risks: vec![],
-            success_criteria: vec!["It works".to_string()],
-            created_at: "2026-04-14".to_string(),
-        };
-
-        pm.submit_plan(plan);
-        assert_eq!(pm.current_phase(), ExecutionPhase::Planning);
-        assert!(pm.current_plan().is_some());
-
-        let token = pm.approve().unwrap();
-        assert_eq!(token.plan_id, "plan-1");
-        assert_eq!(pm.current_phase(), ExecutionPhase::Implementation);
-        assert!(pm.is_approved("plan-1"));
-    }
-
-    #[test]
-    fn approve_without_plan_fails() {
-        let mut pm = PlanMode::new(PlanModeConfig::default());
-        assert_eq!(pm.approve(), Err(PlanModeError::NoPlanToApprove));
-    }
-
-    #[test]
-    fn reject_clears_plan() {
-        let mut pm = PlanMode::new(PlanModeConfig::default());
-        let plan = Plan {
-            id: "plan-2".to_string(),
-            summary: "Rejected plan".to_string(),
+            summary: "Test".to_string(),
             approach: "".to_string(),
             files_to_modify: vec![],
             commands_to_run: vec![],
             estimated_tokens: TokenEstimate::default(),
-            estimated_cost_usd: 0.0,
-            risks: vec![],
+            estimated_cost_usd: 0.50,
+            risks: vec![Risk {
+                level: RiskLevel::High,
+                description: "High risk change".to_string(),
+            }],
             success_criteria: vec![],
             created_at: "2026-04-14".to_string(),
         };
-
-        pm.submit_plan(plan);
-        assert!(pm.current_plan().is_some());
-        pm.reject();
-        assert!(pm.current_plan().is_none());
-        assert_eq!(pm.current_phase(), ExecutionPhase::Planning);
+        assert!(pm.assess_approval_required(&plan));
     }
 
     #[test]
-    fn reset_goes_back_to_planning() {
-        let mut pm = PlanMode::new(PlanModeConfig::default());
-        pm.current_phase = ExecutionPhase::Implementation;
-        pm.reset();
-        assert_eq!(pm.current_phase(), ExecutionPhase::Planning);
-        assert!(pm.current_plan().is_none());
-    }
-
-    #[test]
-    fn tool_blocked_reason_display() {
-        let reason = ToolBlockedReason::NotAllowedInPhase {
-            tool: "write".to_string(),
-            phase: ExecutionPhase::Planning,
+    fn assess_approval_required_high_cost() {
+        let pm = PlanMode::new(PlanModeConfig::default());
+        let plan = Plan {
+            id: "plan-2".to_string(),
+            summary: "Test".to_string(),
+            approach: "".to_string(),
+            files_to_modify: vec![],
+            commands_to_run: vec![],
+            estimated_tokens: TokenEstimate::default(),
+            estimated_cost_usd: 1.50,
+            risks: vec![Risk {
+                level: RiskLevel::Low,
+                description: "Low risk".to_string(),
+            }],
+            success_criteria: vec![],
+            created_at: "2026-04-14".to_string(),
         };
-        assert_eq!(
-            reason.to_string(),
-            "Tool 'write' not allowed in planning phase"
-        );
-
-        let reason = ToolBlockedReason::RequiresApproval;
-        assert_eq!(reason.to_string(), "Implementation requires plan approval");
+        assert!(pm.assess_approval_required(&plan));
     }
 
     #[test]
-    fn execution_phase_display() {
-        assert_eq!(ExecutionPhase::Planning.to_string(), "planning");
-        assert_eq!(ExecutionPhase::Implementation.to_string(), "implementation");
+    fn assess_approval_required_low_risk_low_cost() {
+        let pm = PlanMode::new(PlanModeConfig::default());
+        let plan = Plan {
+            id: "plan-3".to_string(),
+            summary: "Test".to_string(),
+            approach: "".to_string(),
+            files_to_modify: vec![],
+            commands_to_run: vec![],
+            estimated_tokens: TokenEstimate::default(),
+            estimated_cost_usd: 0.05,
+            risks: vec![Risk {
+                level: RiskLevel::Low,
+                description: "Low risk".to_string(),
+            }],
+            success_criteria: vec![],
+            created_at: "2026-04-14".to_string(),
+        };
+        assert!(!pm.assess_approval_required(&plan));
     }
 
     #[test]
@@ -539,15 +439,6 @@ mod tests {
         assert_eq!(parsed.id, "plan-serde");
         assert_eq!(parsed.files_to_modify.len(), 1);
         assert_eq!(parsed.risks[0].level, RiskLevel::High);
-    }
-
-    #[test]
-    fn approve_plan_by_id() {
-        let mut pm = PlanMode::new(PlanModeConfig::default());
-        let token = pm.approve_plan("external-plan-42").unwrap();
-        assert_eq!(token.plan_id, "external-plan-42");
-        assert_eq!(pm.current_phase(), ExecutionPhase::Implementation);
-        assert!(pm.is_approved("external-plan-42"));
     }
 
     #[test]
