@@ -149,6 +149,23 @@ fn load_ignore_patterns(cwd: &Path) -> Vec<String> {
     patterns
 }
 
+/// Find a project instruction file at the workspace root.
+///
+/// RustyCode looks for `instruction.md` first and then `instructions.md`.
+/// Returns the filename and file contents when one exists and is non-empty.
+pub fn find_project_instruction_file(cwd: &Path) -> Option<(String, String)> {
+    for filename in ["instruction.md", "instructions.md"] {
+        let path = cwd.join(filename);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if !content.trim().is_empty() {
+                return Some((filename.to_string(), content));
+            }
+        }
+    }
+
+    None
+}
+
 /// Check if a path matches any ignore pattern
 ///
 /// Patterns can be:
@@ -301,6 +318,8 @@ pub fn load_workspace_context_with_progress(
     let important_files = vec![
         "README.md",
         "README.txt",
+        "instruction.md",
+        "instructions.md",
         "CLAUDE.md",
         "CONTRIBUTING.md",
         "package.json",

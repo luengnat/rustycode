@@ -47,6 +47,7 @@ impl Default for PlanModeConfig {
             require_approval: true,
             allowed_tools_planning: vec![
                 "read".to_string(),
+                "read_file".to_string(),
                 "grep".to_string(),
                 "glob".to_string(),
                 "list_dir".to_string(),
@@ -57,8 +58,12 @@ impl Default for PlanModeConfig {
             ],
             allowed_tools_implementation: vec![
                 "read".to_string(),
+                "read_file".to_string(),
                 "edit_file".to_string(),
+                "write_file".to_string(),
                 "write".to_string(),
+                "apply_patch".to_string(),
+                "search_replace".to_string(),
                 "bash".to_string(),
                 "grep".to_string(),
                 "glob".to_string(),
@@ -232,6 +237,14 @@ impl PlanMode {
     /// Get current execution phase
     pub fn current_phase(&self) -> ExecutionPhase {
         self.current_phase
+    }
+
+    /// Set the current execution phase.
+    ///
+    /// The interactive TUI starts in implementation phase so normal coding
+    /// sessions are not accidentally locked into read-only planning.
+    pub fn set_phase(&mut self, phase: ExecutionPhase) {
+        self.current_phase = phase;
     }
 
     /// Get the current plan (if any)

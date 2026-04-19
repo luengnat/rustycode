@@ -187,6 +187,8 @@ pub enum WorkspaceUpdate {
     },
     /// Workspace context loaded
     ContextLoaded(String),
+    /// Workspace notice for the user
+    Notice(String),
     /// Workspace scan error
     Error(String),
 }

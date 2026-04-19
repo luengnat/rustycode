@@ -1350,6 +1350,10 @@ pub fn handle_workspace_update(tui: &mut TUI, update: WorkspaceUpdate) {
                 context.lines().count()
             ));
         }
+        WorkspaceUpdate::Notice(message) => {
+            tracing::info!("Workspace notice: {}", message);
+            tui.add_system_message(message);
+        }
         WorkspaceUpdate::ScanProgress { scanned, total } => {
             tracing::debug!("Workspace scan: {}/{}", scanned, total);
             tui.workspace_scan_progress = Some((scanned, total));

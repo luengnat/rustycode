@@ -552,9 +552,13 @@ impl TUI {
                 rustycode_tools::hooks::HookProfile::Standard,
                 String::new(),
             ),
-            plan_mode: rustycode_orchestra::plan_mode::PlanMode::new(
-                rustycode_orchestra::plan_mode::PlanModeConfig::default(),
-            ),
+            plan_mode: {
+                use rustycode_orchestra::plan_mode::{ExecutionPhase, PlanMode, PlanModeConfig};
+
+                let mut plan_mode = PlanMode::new(PlanModeConfig::default());
+                plan_mode.set_phase(ExecutionPhase::Implementation);
+                plan_mode
+            },
             // Cached API key warning (computed once)
             api_key_warning: Self::compute_api_key_warning(),
         })
@@ -721,7 +725,13 @@ impl TUI {
                 rustycode_tools::hooks::HookProfile::Standard,
                 String::new(),
             ),
-            plan_mode: rustycode_orchestra::plan_mode::PlanMode::default(),
+            plan_mode: {
+                use rustycode_orchestra::plan_mode::{ExecutionPhase, PlanMode, PlanModeConfig};
+
+                let mut plan_mode = PlanMode::new(PlanModeConfig::default());
+                plan_mode.set_phase(ExecutionPhase::Implementation);
+                plan_mode
+            },
             // Cached API key warning
             api_key_warning: String::new(),
         }

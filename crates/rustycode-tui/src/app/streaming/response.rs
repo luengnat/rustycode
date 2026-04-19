@@ -384,6 +384,13 @@ pub async fn stream_llm_response(config: StreamConfig) -> Result<()> {
             }
         }
     }
+    if let Some((filename, content)) = crate::workspace_context::find_project_instruction_file(&cwd)
+    {
+        system_parts.push(format!(
+            "## Project Instructions (authoritative: {})\nFollow the instructions below exactly unless they conflict with safety or explicit user requests.\n\n{}",
+            filename, content
+        ));
+    }
     // Also load .rustycode_system_prompt from project root (Goose hints pattern)
     if let Some(cwd_str) = cwd.to_str() {
         let project_prompt = std::path::Path::new(cwd_str).join(".rustycode_system_prompt");
@@ -1114,4 +1121,29 @@ pub async fn stream_llm_response(config: StreamConfig) -> Result<()> {
 
     let _ = stream_tx.send(StreamChunk::Done);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::workspace_context::find_project_instruction_file;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_load_project_instruction_file_prefers_instruction_md() {
+        let temp_dir = TempDir::new().unwrap();
+        std::fs::write(temp_dir.path().join("instruction.md"), "Follow the steps").unwrap();
+        std::fs::write(temp_dir.path().join("instructions.md"), "Use this instead").unwrap();
+
+        let loaded = find_project_instruction_file(temp_dir.path());
+        let (filename, content) = loaded.expect("instruction file should load");
+
+        assert_eq!(filename, "instruction.md");
+        assert_eq!(content, "Follow the steps");
+    }
+
+    #[test]
+    fn test_load_project_instruction_file_missing() {
+        let temp_dir = TempDir::new().unwrap();
+        assert!(find_project_instruction_file(temp_dir.path()).is_none());
+    }
 }

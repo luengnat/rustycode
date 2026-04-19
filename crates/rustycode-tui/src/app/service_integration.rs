@@ -497,6 +497,21 @@ impl ServiceManager {
 
             // Send final context loaded message
             let _ = tx_final.send(WorkspaceUpdate::ContextLoaded(context));
+
+            match workspace_context::find_project_instruction_file(&cwd) {
+                Some((filename, _)) => {
+                    let _ = tx_final.send(WorkspaceUpdate::Notice(format!(
+                        "Loaded {} from the workspace root",
+                        filename
+                    )));
+                }
+                None => {
+                    let _ = tx_final.send(WorkspaceUpdate::Notice(
+                        "No instruction.md or instructions.md found in the workspace root"
+                            .to_string(),
+                    ));
+                }
+            }
         });
 
         self.workspace_channel = Some(workspace_channel);
