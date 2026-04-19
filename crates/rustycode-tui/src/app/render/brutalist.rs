@@ -1,24 +1,48 @@
 // BrutalistRenderer construction helper — single source of truth for all parameters.
 //
-// Use create_brutalist_renderer() instead of BrutalistRenderer::new() directly —
-// it ensures all fields are consistently populated from live TUI state.
+// `BrutalistRendererState::snapshot()` extracts all backend-specific fields
+// from live `TUI` state in one place, replacing the old 25-field builder
+// chain that was buried inside the `TUI` impl.
+//
+// Usage:
+//   let state = BrutalistRendererState::snapshot(&self, &input_text);
+//   let renderer = BrutalistRenderer::from_state(state);
 
 use crate::app::brutalist_renderer::{BrutalistRenderer, BrutalistRendererBuilder};
 use crate::app::context_usage::ContextUsage;
 
+// ============================================================================
+// BRUTALIST RENDERER STATE — explicit snapshot for the brutalist backend
+// ============================================================================
+
+/// All fields required to construct a [`BrutalistRenderer`] for one frame.
+///
+/// Extracted from live `TUI` state via [`BrutalistRendererState::snapshot`].
+/// Keeping construction explicit here means the `TUI` struct no longer needs
+/// to know about the renderer's internal fields.
+pub struct BrutalistRendererState<'a> {
+    // These are the same fields the old builder accepted, grouped for clarity.
+    pub input_text: &'a str,
+    pub agent_status: &'a str,
+    pub auto_memory_status: &'a str,
+    pub active_tool_count: usize,
+    pub active_tool_display: String,
+    pub input_line_count: usize,
+    pub context_usage: ContextUsage,
+}
+
 impl super::TUI {
-    /// Create a BrutalistRenderer populated with current session data.
+    /// Capture all state needed by the brutalist renderer for one frame.
     ///
-    /// `input_text` must be passed in because the renderer borrows it.
-    /// Get it via `self.input_handler.state.all_text()` before calling.
-    pub(crate) fn create_brutalist_renderer<'a>(
+    /// Returns a tuple of `(BrutalistRendererState, RendererState)` so callers
+    /// can use the shared state for header/footer chrome without re-extracting.
+    ///
+    /// `input_text` must be passed in because the renderer borrows it;
+    /// get it via `self.input_handler.state.all_text()` before calling.
+    pub(crate) fn snapshot_brutalist_state<'a>(
         &'a self,
         input_text: &'a str,
-    ) -> BrutalistRenderer<'a> {
-        let mut context_usage = ContextUsage::new();
-        context_usage.update(self.session_input_tokens, self.session_output_tokens);
-        context_usage.set_limit(self.context_monitor.max_tokens);
-
+    ) -> BrutalistRendererState<'a> {
         let agent_status = if self.is_streaming {
             "thinking"
         } else if !self.active_tools.is_empty() {
@@ -26,18 +50,14 @@ impl super::TUI {
         } else {
             "ready"
         };
-        let auto_memory_status = if self.auto_memory.is_some() {
-            "on"
-        } else {
-            "off"
-        };
+
+        let auto_memory_status = if self.auto_memory.is_some() { "on" } else { "off" };
 
         let active_tool_count = self.active_tools.len();
-        // Show all running tool names (not just the first one)
         let active_tool_names: String = self
             .active_tools
             .keys()
-            .take(3) // Cap at 3 to avoid overflowing status bar
+            .take(3)
             .cloned()
             .collect::<Vec<_>>()
             .join(", ");
@@ -47,7 +67,34 @@ impl super::TUI {
         } else {
             active_tool_names
         };
-        let input_line_count = input_text.lines().count().max(1);
+
+        let mut context_usage = ContextUsage::new();
+        context_usage.update(self.session_input_tokens, self.session_output_tokens);
+        context_usage.set_limit(self.context_monitor.max_tokens);
+
+        BrutalistRendererState {
+            input_text,
+            agent_status,
+            auto_memory_status,
+            active_tool_count,
+            active_tool_display,
+            input_line_count: input_text.lines().count().max(1),
+            context_usage,
+        }
+    }
+
+    /// Create a [`BrutalistRenderer`] populated with current session data.
+    ///
+    /// Prefer this over calling `BrutalistRendererBuilder` directly — it
+    /// ensures all fields are consistently populated from live TUI state.
+    ///
+    /// `input_text` must be passed in because the renderer borrows it.
+    /// Get it via `self.input_handler.state.all_text()` before calling.
+    pub(crate) fn create_brutalist_renderer<'a>(
+        &'a self,
+        input_text: &'a str,
+    ) -> BrutalistRenderer<'a> {
+        let bs = self.snapshot_brutalist_state(input_text);
 
         // Compute stream elapsed time for live timing display (Goose pattern)
         let stream_elapsed = self.stream_start_time.map(|t| t.elapsed());
@@ -64,15 +111,15 @@ impl super::TUI {
             .scroll(self.scroll_offset_line, self.user_scrolled)
             .selection(self.selected_message, self.viewport_height)
             .theme(self.theme_colors.clone())
-            .statuses(agent_status, auto_memory_status)
+            .statuses(bs.agent_status, bs.auto_memory_status)
             .input_mode(self.input_mode)
             .rate_limit(self.rate_limit.until)
             .streaming_state(
                 self.chunks_received,
                 self.animator.current_frame().progress_frame,
             )
-            .context_usage(context_usage)
-            .tool_status(active_tool_count, active_tool_display)
+            .context_usage(bs.context_usage)
+            .tool_status(bs.active_tool_count, bs.active_tool_display)
             .session_info(
                 self.session_cost_usd,
                 self.session_input_tokens,
@@ -82,7 +129,7 @@ impl super::TUI {
             .warnings(self.api_key_warning.clone())
             .collapsed(self.status_bar_collapsed, self.footer_collapsed)
             .input_state(
-                input_line_count,
+                bs.input_line_count,
                 self.queued_message.is_some(),
                 self.queued_message.as_deref().unwrap_or("").to_string(),
             )

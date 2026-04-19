@@ -160,9 +160,11 @@ impl<'a> RunController for SessionRunController<'a> {
 }
 
 pub mod markdown;
+pub mod renderer;
 pub mod syntax_highlighter;
 
 pub use markdown::{render_diff, MarkdownConfig, MarkdownRenderer, MessageTheme, StreamingMessage};
+pub use renderer::{RendererFrame, TuiRenderer};
 pub use syntax_highlighter::SyntaxHighlighter;
 
 #[cfg(test)]

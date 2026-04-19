@@ -1,3 +1,11 @@
+// Re-use helpers from the shared render module so we have a single
+// source of truth instead of duplicated private functions.
+// Note: this file is include!()-ed inside event_loop.rs so "super" doesn't
+// exist — use the full crate path.
+use crate::app::render::shared::{
+    estimate_line_count, format_duration_ms, safe_truncate, shorten_path, tool_kind_icon,
+};
+
 impl TUI {
     /// Render messages area with line-based auto-scrolling
     pub fn render_messages(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
@@ -932,134 +940,14 @@ fn extract_file_path(s: &str) -> Option<String> {
 /// `src/rustycode_tui/app/render/mod.rs` → `s/r/a/r/mod.rs`
 ///
 /// Paths with ≤ 3 components are left unchanged.
-fn shorten_path(path: &str) -> String {
-    use std::path::Path;
+// shorten_path is imported from super::shared at the top of this file.
 
-    // Replace home directory prefix with ~
-    let display = if let Ok(home) = std::env::var("HOME") {
-        if path.starts_with(&home) {
-            format!("~{}", &path[home.len()..])
-        } else {
-            path.to_string()
-        }
-    } else {
-        path.to_string()
-    };
+// tool_kind_icon is imported from super::shared at the top of this file.
 
-    let components: Vec<&str> = Path::new(&display)
-        .components()
-        .filter_map(|c| c.as_os_str().to_str())
-        .collect();
-
-    // Don't shorten short paths (≤ 3 components or already starts with ~ and ≤ 4)
-    let threshold = if display.starts_with("~/") { 4 } else { 3 };
-    if components.len() <= threshold {
-        return display;
-    }
-
-    // Shorten all components except the last one (filename) and first (root or ~)
-    let mut shortened = Vec::with_capacity(components.len());
-    for (i, component) in components.iter().enumerate() {
-        if i == 0 || i == components.len() - 1 {
-            // Keep first component (root/~) and last (filename) intact
-            shortened.push((*component).to_string());
-        } else {
-            // Shorten middle component to first character
-            let first_char = component.chars().next().unwrap_or('?');
-            // Handle dotfiles like ".cargo" → ".c"
-            if component.starts_with('.') {
-                let second = component.chars().nth(1).unwrap_or(first_char);
-                shortened.push(format!(".{}", second));
-            } else {
-                shortened.push(first_char.to_string());
-            }
-        }
-    }
-
-    shortened.join("/")
-}
-
-/// Tool kind icon — maps tool names to descriptive icons.
-/// Claw-code inspired: context-aware icons that convey what the tool does.
-pub fn tool_kind_icon(name: &str) -> &'static str {
-    let lower = name.to_lowercase();
-    if lower.contains("read") || lower.contains("cat") || lower.contains("view") {
-        "R" // Read file
-    } else if lower.contains("write") || lower.contains("create") || lower.contains("insert") {
-        "W" // Write/create file
-    } else if lower.contains("edit")
-        || lower.contains("patch")
-        || lower.contains("replace")
-        || lower.contains("search_replace")
-    {
-        "E" // Edit existing file
-    } else if lower.contains("delete") || lower.contains("remove") {
-        "D" // Delete file/content
-    } else if lower.contains("grep") || lower.contains("search") {
-        "G" // Grep/search content
-    } else if lower.contains("glob") || lower.contains("find") || lower.contains("list") {
-        "F" // Find/list files
-    } else if lower.contains("bash")
-        || lower.contains("exec")
-        || lower.contains("shell")
-        || lower.contains("run")
-        || lower.contains("cmd")
-    {
-        "$" // Shell command
-    } else if lower.contains("git") {
-        "G" // Git operation
-    } else if lower.contains("fetch")
-        || lower.contains("http")
-        || lower.contains("web")
-        || lower.contains("curl")
-        || lower.contains("download")
-    {
-        "~" // Network operation
-    } else if lower.contains("question")
-        || lower.contains("ask")
-        || lower.contains("think")
-        || lower.contains("reason")
-    {
-        "?" // Question/prompt or thinking/reasoning
-    } else if lower.contains("todo") {
-        "T" // Todo management
-    } else if lower.contains("agent") || lower.contains("spawn") || lower.contains("team") {
-        "A" // Agent spawning or team management
-    } else {
-        "*" // Generic/unknown
-    }
-}
-
-/// Format duration for display
+/// Format duration for display — thin wrapper over the shared helper.
+#[inline]
 fn format_duration(ms: u64) -> String {
-    if ms < 1000 {
-        format!("{}ms", ms)
-    } else if ms < 60_000 {
-        format!("{:.1}s", ms as f64 / 1000.0)
-    } else {
-        let secs = ms / 1000;
-        let mins = secs / 60;
-        let remain_secs = secs % 60;
-        format!("{}m{}s", mins, remain_secs)
-    }
-}
-
-/// Estimate line count for a string without iterating all content.
-///
-/// For small strings (<4KB), uses exact count. For larger strings,
-/// counts newlines in a 4KB prefix and extrapolates from byte ratio.
-/// This avoids O(n) scans on 100KB+ thinking blocks every render frame.
-fn estimate_line_count(s: &str) -> usize {
-    if s.len() < 4096 {
-        return s.lines().count();
-    }
-    // Count newlines in first 4KB prefix for accurate ratio.
-    // floor_char_boundary ensures we don't slice mid-character.
-    let prefix = &s[..s.floor_char_boundary(4096)];
-    let prefix_newlines = prefix.bytes().filter(|&b| b == b'\n').count();
-    let ratio = prefix_newlines as f64 / 4096.0;
-    // Extrapolate, add 1 for the last line
-    (s.len() as f64 * ratio) as usize + 1
+    format_duration_ms(ms)
 }
 
 /// Render a thinking block (collapsed header or expanded content).
@@ -1169,16 +1057,4 @@ fn render_thinking_block(
     lines
 }
 
-/// Unicode-safe string truncation.
-///
-/// Takes the first `max_chars` characters (respecting char boundaries)
-/// and appends "..." if truncation occurred.
-fn safe_truncate(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_chars {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max_chars.saturating_sub(3)).collect();
-        format!("{}...", truncated)
-    }
-}
+// safe_truncate is imported from super::shared at the top of this file.

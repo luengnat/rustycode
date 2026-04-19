@@ -51,6 +51,11 @@ pub mod handlers;
 pub mod service_integration;
 pub mod streaming;
 
+// render sub-module — shared helpers + per-section render files
+pub mod render {
+    pub mod shared;
+}
+
 // Tests
 #[cfg(test)]
 mod event_loop_tests;
