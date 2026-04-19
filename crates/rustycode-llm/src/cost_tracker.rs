@@ -264,8 +264,9 @@ impl CostTracker {
         let count = self.calls.len();
 
         // Calculate cache hit rate: cache_read / (cache_read + cache_creation + input_tokens)
-        let total_all_input =
-            total_cache_read as usize + total_cache_creation as usize + total_input;
+        let total_all_input = (total_cache_read as usize)
+            .saturating_add(total_cache_creation as usize)
+            .saturating_add(total_input);
         let cache_hit_rate = if total_all_input > 0 {
             (total_cache_read as f64 / total_all_input as f64) * 100.0
         } else {

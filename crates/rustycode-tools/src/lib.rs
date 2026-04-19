@@ -851,6 +851,21 @@ impl ToolRegistry {
             };
         }
 
+        // Check plan gate — enforced at the registry level so all callers
+        // are covered, including batch, ACP, headless, and auto_tool paths.
+        if let Some(ref gate) = ctx.plan_gate {
+            if let Err(reason) = gate.check_access(ctx.role, &call.name) {
+                return ToolResult {
+                    call_id: call.call_id.clone(),
+                    output: String::new(),
+                    error: Some(reason.to_string()),
+                    success: false,
+                    exit_code: None,
+                    data: None,
+                };
+            }
+        }
+
         match self.tools.get(&call.name) {
             None => ToolResult {
                 call_id: call.call_id.clone(),
@@ -1212,6 +1227,22 @@ impl ToolExecutor {
                         data: None,
                     };
                 }
+            }
+        }
+
+        // Centralized plan gate check — enforced for ALL tools before dispatch.
+        // Individual tools may also check the gate, but this ensures no tool can
+        // bypass role-based access regardless of implementation.
+        if let Some(ref gate) = self.context.plan_gate {
+            if let Err(reason) = gate.check_access(self.context.role, &call.name) {
+                return ToolResult {
+                    call_id: call.call_id.clone(),
+                    output: String::new(),
+                    error: Some(reason.to_string()),
+                    success: false,
+                    exit_code: None,
+                    data: None,
+                };
             }
         }
 
@@ -2080,5 +2111,105 @@ mod tests {
         assert_eq!(tool.name(), "read_file");
         assert!(tool.description().contains("file"));
         assert_eq!(tool.permission(), CatalogPermission::Read);
+    }
+
+    // ── Centralized Plan Gate Tests ──────────────────────────────────────────────
+
+    #[derive(Debug)]
+    struct DenyAllGate;
+
+    impl ToolGate for DenyAllGate {
+        fn check_access(
+            &self,
+            _role: AgentRole,
+            tool_name: &str,
+        ) -> Result<(), rustycode_protocol::permission_role::ToolBlockedReason> {
+            Err(rustycode_protocol::permission_role::ToolBlockedReason::NotAllowedForRole {
+                tool: tool_name.to_string(),
+                role: AgentRole::Reviewer,
+            })
+        }
+    }
+
+    #[test]
+    fn centralized_gate_blocks_tool_execution() {
+        let executor = ToolExecutor::new(std::env::temp_dir().to_path_buf())
+            .with_plan_gate(std::sync::Arc::new(DenyAllGate));
+
+        let call = ToolCall {
+            call_id: "gate-test-1".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({"command": "echo hello"}),
+        };
+
+        let result = executor.execute_with_session(&call, None);
+        assert!(!result.success, "Gate should have blocked execution");
+        assert!(
+            result.error.as_ref().unwrap().contains("not allowed"),
+            "Error should mention not allowed: {:?}",
+            result.error
+        );
+    }
+
+    #[test]
+    fn no_gate_allows_execution() {
+        let executor = ToolExecutor::new(std::env::temp_dir().to_path_buf());
+        // No gate set — should not block
+
+        let call = ToolCall {
+            call_id: "no-gate-1".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({"command": "echo hello"}),
+        };
+
+        let result = executor.execute_with_session(&call, None);
+        // May succeed or fail based on bash availability, but should NOT be
+        // blocked by gate (no gate set)
+        if let Some(err) = &result.error {
+            assert!(
+                !err.contains("not allowed"),
+                "Should not be blocked by gate: {}",
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn registry_level_gate_blocks_execution() {
+        // Verify that ToolRegistry::execute() itself checks the gate,
+        // even without going through ToolExecutor::execute_with_session().
+        let registry = default_registry();
+        let context = ToolContext::new(std::env::temp_dir())
+            .with_plan_gate(std::sync::Arc::new(DenyAllGate));
+
+        let call = ToolCall {
+            call_id: "reg-gate-1".into(),
+            name: "read_file".into(),
+            arguments: serde_json::json!({"file_path": "/etc/hosts"}),
+        };
+
+        let result = registry.execute(&call, &context);
+        assert!(!result.success, "Registry gate should block execution");
+        assert!(
+            result.error.as_ref().unwrap().contains("not allowed"),
+            "Error should mention not allowed: {:?}",
+            result.error
+        );
+    }
+
+    #[test]
+    fn registry_without_gate_allows_execution() {
+        let registry = default_registry();
+        let context = ToolContext::new(std::env::temp_dir());
+
+        let call = ToolCall {
+            call_id: "reg-no-gate-1".into(),
+            name: "glob".into(),
+            arguments: serde_json::json!({"pattern": "*.toml"}),
+        };
+
+        let result = registry.execute(&call, &context);
+        // glob should succeed and NOT be blocked by gate (no gate set)
+        assert!(result.success, "Should execute successfully: {:?}", result.error);
     }
 }

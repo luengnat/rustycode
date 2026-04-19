@@ -124,6 +124,10 @@ impl WorkflowState {
 
     /// Advance to next phase. Returns false if workflow is complete.
     pub fn advance(&mut self, workflow: &Workflow) -> bool {
+        if self.current_phase >= workflow.phases.len() {
+            self.is_complete = true;
+            return false;
+        }
         self.current_phase += 1;
         if self.current_phase >= workflow.phases.len() {
             self.is_complete = true;

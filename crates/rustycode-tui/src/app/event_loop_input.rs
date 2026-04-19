@@ -643,6 +643,7 @@ impl TUI {
         let _ = crossterm::execute!(
             std::io::stdout(),
             crossterm::terminal::LeaveAlternateScreen,
+            crossterm::event::DisableBracketedPaste,
             crossterm::event::DisableMouseCapture,
             crossterm::cursor::Show,
         );
@@ -659,8 +660,14 @@ impl TUI {
             crossterm::event::EnableMouseCapture,
         );
         let _ = crossterm::terminal::enable_raw_mode();
-        // Request a full redraw on next frame
-        // (dirty will be set by caller)
+        // Clear the screen to invalidate ratatui's stale back-buffer.
+        // Without this, differential rendering skips cells that haven't
+        // changed vs the old buffer, even though the alternate screen is blank.
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+        );
+        let _ = std::io::Write::flush(&mut std::io::stdout());
 
         let status = status?;
         if !status.success() {

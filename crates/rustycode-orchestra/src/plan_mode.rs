@@ -72,7 +72,7 @@ impl PlanMode {
             config,
             role_tool_matrix: build_access_matrix(),
             approval_triggers,
-            current_role: AgentRole::Worker,
+            current_role: AgentRole::Planner,
             current_plan: None,
         }
     }
@@ -83,18 +83,36 @@ impl PlanMode {
             return Ok(());
         }
 
+        // 1. Check basic role-based access
         let allowed = self.role_tool_matrix
             .get(&role)
             .ok_or(ToolBlockedReason::UnknownRole(role))?;
 
-        if allowed.contains(tool) {
-            Ok(())
-        } else {
-            Err(ToolBlockedReason::NotAllowedForRole {
+        if !allowed.contains(tool) {
+            return Err(ToolBlockedReason::NotAllowedForRole {
                 tool: tool.to_string(),
                 role,
-            })
+            });
         }
+
+        // 2. Enforcement: If sensitive tool and plan approval is required but missing, block implementation roles
+        if self.is_sensitive_tool(tool) {
+            if let Some(plan) = &self.current_plan {
+                // If the plan requires approval and hasn't been approved yet
+                if self.assess_approval_required(plan) && !plan.approval.approved {
+                    // Block sensitive tools for implementation roles (Worker, Builder, etc.)
+                    // Note: Planner is exempted so they can finish drafting the plan/artifacts.
+                    if matches!(
+                        role,
+                        AgentRole::Worker | AgentRole::Builder | AgentRole::Architect | AgentRole::Scalpel
+                    ) {
+                        return Err(ToolBlockedReason::ConvoyPlanNotApproved);
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Assess whether a plan requires approval based on risk and cost.
@@ -172,12 +190,17 @@ impl PlanMode {
     pub fn approve(&mut self) -> Result<ApprovalToken, PlanModeError> {
         let plan = self
             .current_plan
-            .as_ref()
+            .as_mut()
             .ok_or(PlanModeError::NoPlanToApprove)?;
+
+        // Set approval state
+        plan.approval.approved = true;
+        plan.approval.approved_at = Some(chrono::Utc::now());
+        plan.approval.approved_by = Some("User".to_string());
 
         let token = ApprovalToken {
             plan_id: plan.id.clone(),
-            approved_at: chrono::Utc::now(),
+            approved_at: plan.approval.approved_at.unwrap(),
         };
 
         self.current_role = AgentRole::Worker;
@@ -190,9 +213,39 @@ impl PlanMode {
         self.current_plan = None;
     }
 
+    /// Approve a specific plan by ID and switch to worker role.
+    pub fn approve_plan(&mut self, plan_id: &str) -> Result<ApprovalToken, PlanModeError> {
+        if let Some(plan) = &mut self.current_plan {
+            if plan.id == plan_id {
+                plan.approval.approved = true;
+                plan.approval.approved_at = Some(chrono::Utc::now());
+            }
+        }
+
+        self.current_role = AgentRole::Worker;
+        Ok(ApprovalToken {
+            plan_id: plan_id.to_string(),
+            approved_at: chrono::Utc::now(),
+        })
+    }
+
+    /// Reject the current plan and stay in planner role.
+    pub fn reject(&mut self) {
+        self.current_plan = None;
+        self.current_role = AgentRole::Planner;
+    }
+
     /// Check if a tool is allowed for the current role.
     pub fn is_tool_allowed(&self, tool_name: &str) -> Result<(), ToolBlockedReason> {
         self.can_use_tool(self.current_role, tool_name)
+    }
+
+    /// Helper to identify tools that require an approved plan for execution roles.
+    pub fn is_sensitive_tool(&self, tool: &str) -> bool {
+        matches!(
+            tool,
+            "bash" | "write_file" | "edit_file" | "multiedit" | "apply_patch" | "git_commit" | "text_editor_20250728"
+        )
     }
 }
 
@@ -200,6 +253,7 @@ impl PlanMode {
 #[derive(Debug, Clone)]
 pub struct ApprovalToken {
     plan_id: String,
+    #[allow(dead_code)]
     approved_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -246,20 +300,20 @@ mod tests {
     #[test]
     fn can_use_tool_planner_read() {
         let pm = PlanMode::new(PlanModeConfig::default());
-        assert!(pm.can_use_tool(AgentRole::Planner, "read").is_ok());
-        assert!(pm.can_use_tool(AgentRole::Planner, "write").is_ok());
+        assert!(pm.can_use_tool(AgentRole::Planner, "read_file").is_ok());
+        assert!(pm.can_use_tool(AgentRole::Planner, "write_file").is_ok());
     }
 
     #[test]
     fn can_use_tool_reviewer_cannot_write() {
         let pm = PlanMode::new(PlanModeConfig::default());
-        assert!(pm.can_use_tool(AgentRole::Reviewer, "write").is_err());
+        assert!(pm.can_use_tool(AgentRole::Reviewer, "write_file").is_err());
     }
 
     #[test]
     fn can_use_tool_worker_can_write() {
         let pm = PlanMode::new(PlanModeConfig::default());
-        assert!(pm.can_use_tool(AgentRole::Worker, "write").is_ok());
+        assert!(pm.can_use_tool(AgentRole::Worker, "write_file").is_ok());
     }
 
     #[test]
@@ -276,6 +330,8 @@ mod tests {
                 description: "High risk change".to_string(),
                 mitigation: String::new(),
             }],
+            estimated_cost_usd: 0.0,
+            success_criteria: vec![],
             approval: PlanApproval::default(),
             created_at: chrono::Utc::now(),
         };
@@ -296,6 +352,8 @@ mod tests {
                 description: "Low risk".to_string(),
                 mitigation: String::new(),
             }],
+            estimated_cost_usd: 0.0,
+            success_criteria: vec![],
             approval: PlanApproval::default(),
             created_at: chrono::Utc::now(),
         };
@@ -305,8 +363,134 @@ mod tests {
     #[test]
     fn set_role_changes_phase() {
         let mut pm = PlanMode::new(PlanModeConfig::default());
-        assert_eq!(pm.current_role(), AgentRole::Worker);
-        pm.set_role(AgentRole::Planner);
         assert_eq!(pm.current_role(), AgentRole::Planner);
+        pm.set_role(AgentRole::Worker);
+        assert_eq!(pm.current_role(), AgentRole::Worker);
+    }
+
+    #[test]
+    fn is_sensitive_tool_identifies_mutating_tools() {
+        let pm = PlanMode::new(PlanModeConfig::default());
+        assert!(pm.is_sensitive_tool("bash"));
+        assert!(pm.is_sensitive_tool("write_file"));
+        assert!(pm.is_sensitive_tool("edit_file"));
+        assert!(pm.is_sensitive_tool("apply_patch"));
+        assert!(pm.is_sensitive_tool("multiedit"));
+        assert!(pm.is_sensitive_tool("git_commit"));
+        assert!(!pm.is_sensitive_tool("read_file"));
+        assert!(!pm.is_sensitive_tool("grep"));
+        assert!(!pm.is_sensitive_tool("glob"));
+    }
+
+    #[test]
+    fn unapproved_high_risk_plan_blocks_worker_bash() {
+        let mut pm = PlanMode::new(PlanModeConfig::default());
+        let plan = ConvoyPlan {
+            id: "plan-blocked".to_string(),
+            summary: "Risky".to_string(),
+            approach: String::new(),
+            files_to_modify: vec![],
+            commands_to_run: vec![],
+            risks: vec![ConvoyRisk {
+                level: RiskLevel::High,
+                description: "danger".to_string(),
+                mitigation: String::new(),
+            }],
+            estimated_cost_usd: 0.0,
+            success_criteria: vec![],
+            approval: PlanApproval::default(),
+            created_at: chrono::Utc::now(),
+        };
+        pm.submit_plan(plan);
+        // Worker should be blocked on sensitive tools when plan is unapproved
+        assert!(pm.can_use_tool(AgentRole::Worker, "bash").is_err());
+        assert!(pm.can_use_tool(AgentRole::Worker, "write_file").is_err());
+        // Planner should still be allowed
+        assert!(pm.can_use_tool(AgentRole::Planner, "bash").is_ok());
+        // Non-sensitive tools still allowed
+        assert!(pm.can_use_tool(AgentRole::Worker, "read_file").is_ok());
+    }
+
+    #[test]
+    fn approved_plan_allows_worker_sensitive_tools() {
+        let mut pm = PlanMode::new(PlanModeConfig::default());
+        let plan = ConvoyPlan {
+            id: "plan-ok".to_string(),
+            summary: "Safe".to_string(),
+            approach: String::new(),
+            files_to_modify: vec![],
+            commands_to_run: vec![],
+            risks: vec![ConvoyRisk {
+                level: RiskLevel::Low,
+                description: "safe".to_string(),
+                mitigation: String::new(),
+            }],
+            estimated_cost_usd: 0.0,
+            success_criteria: vec![],
+            approval: PlanApproval::default(),
+            created_at: chrono::Utc::now(),
+        };
+        pm.submit_plan(plan);
+        pm.approve().unwrap();
+        // Worker should now be allowed on sensitive tools
+        assert!(pm.can_use_tool(AgentRole::Worker, "bash").is_ok());
+        assert!(pm.can_use_tool(AgentRole::Worker, "write_file").is_ok());
+    }
+
+    #[test]
+    fn disabled_plan_mode_allows_all_tools() {
+        let config = PlanModeConfig {
+            enabled: false,
+            require_approval: false,
+            cost_threshold: 0.0,
+        };
+        let pm = PlanMode::new(config);
+        assert!(pm.can_use_tool(AgentRole::Researcher, "bash").is_ok());
+        assert!(pm.can_use_tool(AgentRole::Researcher, "write_file").is_ok());
+    }
+
+    #[test]
+    fn reject_clears_plan_and_stays_planner() {
+        let mut pm = PlanMode::new(PlanModeConfig::default());
+        let plan = ConvoyPlan {
+            id: "plan-reject".to_string(),
+            summary: "Bad".to_string(),
+            approach: String::new(),
+            files_to_modify: vec![],
+            commands_to_run: vec![],
+            risks: vec![],
+            estimated_cost_usd: 0.0,
+            success_criteria: vec![],
+            approval: PlanApproval::default(),
+            created_at: chrono::Utc::now(),
+        };
+        pm.submit_plan(plan);
+        assert!(pm.current_plan().is_some());
+        pm.reject();
+        assert!(pm.current_plan().is_none());
+        assert_eq!(pm.current_role(), AgentRole::Planner);
+    }
+
+    #[test]
+    fn reset_clears_everything() {
+        let mut pm = PlanMode::new(PlanModeConfig::default());
+        let plan = ConvoyPlan {
+            id: "plan-reset".to_string(),
+            summary: "Reset".to_string(),
+            approach: String::new(),
+            files_to_modify: vec![],
+            commands_to_run: vec![],
+            risks: vec![],
+            estimated_cost_usd: 0.0,
+            success_criteria: vec![],
+            approval: PlanApproval::default(),
+            created_at: chrono::Utc::now(),
+        };
+        pm.submit_plan(plan);
+        pm.approve().unwrap();
+        assert_eq!(pm.current_role(), AgentRole::Worker);
+        pm.reset();
+        assert_eq!(pm.current_role(), AgentRole::Planner);
+        assert!(pm.current_plan().is_none());
     }
 }

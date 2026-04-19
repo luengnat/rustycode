@@ -180,6 +180,23 @@ impl Tool for BatchTool {
                         arguments: parameters,
                     };
 
+                    // Check plan gate before dispatching each tool in the batch
+                    if let Some(ref gate) = ctx.plan_gate {
+                        if let Err(reason) = gate.check_access(ctx.role, &call.name) {
+                            return (
+                                index,
+                                ToolResult {
+                                    call_id: call.call_id,
+                                    output: String::new(),
+                                    error: Some(format!("Permission denied: {}", reason)),
+                                    success: false,
+                                    exit_code: None,
+                                    data: None,
+                                },
+                            );
+                        }
+                    }
+
                     (index, registry.execute(&call, &ctx))
                 })
             })
@@ -519,5 +536,55 @@ mod tests {
         let result = tool.execute(json!({"calls": "not an array"}), &ctx);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_batch_gate_blocks_unauthorized_tools() {
+        // Batch tool should respect plan gate — blocked tools should be denied
+        // even when called through the batch parallel execution path.
+        use crate::ToolGate;
+        use rustycode_protocol::permission_role::ToolBlockedReason;
+
+        #[derive(Debug)]
+        struct BlockWriteGate;
+        impl ToolGate for BlockWriteGate {
+            fn check_access(
+                &self,
+                _role: rustycode_protocol::AgentRole,
+                tool_name: &str,
+            ) -> Result<(), ToolBlockedReason> {
+                if tool_name == "write_file" {
+                    return Err(ToolBlockedReason::NotAllowedForRole {
+                        tool: tool_name.to_string(),
+                        role: rustycode_protocol::AgentRole::Reviewer,
+                    });
+                }
+                Ok(())
+            }
+        }
+
+        let registry = Arc::new(crate::default_registry());
+        let tool = BatchTool::new(registry);
+        let ctx = ToolContext::new("/tmp")
+            .with_plan_gate(std::sync::Arc::new(BlockWriteGate));
+
+        let result = tool.execute(
+            json!({
+                "calls": [
+                    {"tool": "read_file", "parameters": {"path": "/tmp/test1"}},
+                    {"tool": "write_file", "parameters": {"path": "/tmp/test2", "content": "x"}}
+                ]
+            }),
+            &ctx,
+        );
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        // The write_file call should have been blocked by the gate
+        assert!(
+            output.text.contains("Permission denied") || output.text.contains("not allowed"),
+            "Expected gate block in output: {:?}",
+            output.text
+        );
     }
 }

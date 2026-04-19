@@ -168,6 +168,8 @@ pub struct TUI {
 
     // Performance: dirty flag - only render when state changes
     pub(crate) dirty: bool,
+    // Set after external editor returns to force terminal.clear() + full redraw
+    pub(crate) needs_full_redraw: bool,
 
     // Token compaction
     pub(crate) context_monitor: ContextMonitor,
@@ -470,6 +472,7 @@ impl TUI {
             turn_snapshot: None,
             doom_loop: crate::app::doom_loop::DoomLoopDetector::new(),
             dirty: true,
+            needs_full_redraw: false,
             context_monitor,
             theme_colors,
             compaction_config,
@@ -657,6 +660,7 @@ impl TUI {
             turn_snapshot: None,
             doom_loop: crate::app::doom_loop::DoomLoopDetector::new(),
             dirty: true,
+            needs_full_redraw: false,
             context_monitor,
             theme_colors,
             compaction_config,
@@ -1253,9 +1257,13 @@ impl TUI {
                 let should_render = self.dirty || frame_count < 3;
 
                 if should_render {
+                    if self.needs_full_redraw {
+                        terminal.clear()?;
+                        self.needs_full_redraw = false;
+                    }
                     terminal.draw(|f| self.render(f))?;
                     frame_count += 1;
-                    self.dirty = false; // Clear dirty after render
+                    self.dirty = false;
                 }
 
                 // Phase 5: Handle input with remaining time

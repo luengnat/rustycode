@@ -445,6 +445,11 @@ async fn async_main() -> Result<()> {
                         "none".to_string()
                     }
                 }
+                "temperature" => config.temperature.map(|v| v.to_string()).unwrap_or_default(),
+                "max_tokens" => config.max_tokens.map(|v| v.to_string()).unwrap_or_default(),
+                "data_dir" => config.data_dir.display().to_string(),
+                "memory_dir" => config.memory_dir.display().to_string(),
+                "skills_dir" => config.skills_dir.display().to_string(),
                 "log_level" => config.advanced.log_level.clone(),
                 "telemetry_enabled" => config.advanced.telemetry_enabled.to_string(),
                 "cache_enabled" => config.advanced.cache_enabled.to_string(),
@@ -465,15 +470,71 @@ async fn async_main() -> Result<()> {
         Command::Config {
             command: ConfigCommand::Set { key, value },
         } => {
-            eprintln!("Note: Configuration is stored in ~/.rustycode/config.toml");
-            eprintln!("Edit the file directly to change settings.");
-            eprintln!();
-            eprintln!(
-                "To set '{}' to '{}', add/update this in your config:",
-                key, value
-            );
-            eprintln!("[{}]", key);
-            eprintln!("{} = \"{}\"", key, value);
+            // Keys that live at the top level of config.json
+            let top_level_keys = [
+                "model", "temperature", "max_tokens",
+                "data_dir", "memory_dir", "skills_dir",
+            ];
+            // Keys that live under the "advanced" object
+            let advanced_keys = ["log_level", "telemetry_enabled", "cache_enabled"];
+
+            if !top_level_keys.contains(&key.as_str()) && !advanced_keys.contains(&key.as_str()) {
+                eprintln!(
+                    "Unknown config key: {}. Valid keys: {}",
+                    key,
+                    top_level_keys.iter().chain(advanced_keys.iter()).copied().collect::<Vec<_>>().join(", ")
+                );
+                std::process::exit(1);
+            }
+
+            let config_path = dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".rustycode")
+                .join("config.json");
+
+            if !config_path.exists() {
+                eprintln!("Config file not found at {}", config_path.display());
+                eprintln!("Run 'rustycode config show' to see current configuration.");
+                std::process::exit(1);
+            }
+
+            let content = std::fs::read_to_string(&config_path)
+                .with_context(|| format!("Failed to read {}", config_path.display()))?;
+            let mut config_json: serde_json::Value = serde_json::from_str(&content)
+                .with_context(|| format!("Failed to parse {}", config_path.display()))?;
+
+            // Parse value with proper type inference: bool > i64 > f64 > string
+            let json_value = if let Ok(b) = value.parse::<bool>() {
+                serde_json::json!(b)
+            } else if let Ok(n) = value.parse::<i64>() {
+                serde_json::json!(n)
+            } else if let Ok(n) = value.parse::<f64>() {
+                serde_json::json!(n)
+            } else {
+                serde_json::json!(value)
+            };
+
+            // Route the key to the correct nesting level
+            if advanced_keys.contains(&key.as_str()) {
+                // Ensure "advanced" object exists
+                if config_json.get("advanced").is_none_or(|v| !v.is_object()) {
+                    config_json["advanced"] = serde_json::json!({});
+                }
+                config_json["advanced"][&key] = json_value;
+            } else {
+                config_json[&key] = json_value;
+            }
+
+            let output = serde_json::to_string_pretty(&config_json)?;
+            std::fs::write(&config_path, output)
+                .with_context(|| format!("Failed to write {}", config_path.display()))?;
+
+            if cli.format == "json" {
+                println!("{}", serde_json::json!({"key": key, "value": value, "status": "updated"}));
+            } else {
+                println!("Set {} = {}", key, value);
+                println!("Config updated at {}", config_path.display());
+            }
         }
         Command::Context { prompt } => {
             let report = runtime.run(&cwd, &prompt).await?;
@@ -742,13 +803,29 @@ async fn async_main() -> Result<()> {
             command: SessionsCommand::List { limit },
         } => {
             let sessions = runtime.recent_sessions(limit).await?;
-            println!("{}", serde_json::to_string_pretty(&sessions)?);
+            if cli.format == "json" {
+                println!("{}", serde_json::to_string_pretty(&sessions)?);
+            } else {
+                println!("Recent Sessions");
+                println!("===============");
+                for s in &sessions {
+                    println!(
+                        "  {}  {}  {:?}  {}",
+                        s.id,
+                        s.created_at.format("%Y-%m-%d %H:%M"),
+                        s.mode,
+                        s.task
+                    );
+                }
+                if sessions.is_empty() {
+                    println!("  No sessions found.");
+                }
+            }
         }
         Command::Sessions {
             command: SessionsCommand::Show { id },
         } => {
             let session_id = SessionId::parse(&id)?;
-            // Check if session exists first
             let sessions = runtime.recent_sessions(1000).await?;
             let found = sessions.iter().find(|s| s.id == session_id);
             if found.is_none() {
@@ -757,11 +834,31 @@ async fn async_main() -> Result<()> {
             }
             let session = found.unwrap();
             let events = runtime.session_events(&session_id).await?;
-            let output = serde_json::json!({
-                "session": session,
-                "events": events,
-            });
-            println!("{}", serde_json::to_string_pretty(&output)?);
+            if cli.format == "json" {
+                let output = serde_json::json!({
+                    "session": session,
+                    "events": events,
+                });
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            } else {
+                println!("Session: {}", session.id);
+                println!("  Task:    {}", session.task);
+                println!(
+                    "  Created: {}",
+                    session.created_at.format("%Y-%m-%d %H:%M:%S")
+                );
+                println!("  Mode:    {:?}", session.mode);
+                println!("  Status:  {}", session.status);
+                println!();
+                if events.is_empty() {
+                    println!("  No events.");
+                } else {
+                    println!("Events ({}):", events.len());
+                    for evt in &events {
+                        println!("  {:?}", evt);
+                    }
+                }
+            }
         }
         Command::Events {
             command:

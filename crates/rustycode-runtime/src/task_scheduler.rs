@@ -540,13 +540,13 @@ impl TaskScheduler {
         let (critical, high, medium, low, background) =
             queue
                 .iter()
-                .fold((0, 0, 0, 0, 0), |(c, h, m, l, b), entry| {
+                .fold((0usize, 0usize, 0usize, 0usize, 0usize), |(c, h, m, l, b), entry| {
                     match entry.task.priority {
-                        TaskPriority::Critical => (c + 1, h, m, l, b),
-                        TaskPriority::High => (c, h + 1, m, l, b),
-                        TaskPriority::Medium => (c, h, m + 1, l, b),
-                        TaskPriority::Low => (c, h, m, l + 1, b),
-                        TaskPriority::Background => (c, h, m, l, b + 1),
+                        TaskPriority::Critical => (c.saturating_add(1), h, m, l, b),
+                        TaskPriority::High => (c, h.saturating_add(1), m, l, b),
+                        TaskPriority::Medium => (c, h, m.saturating_add(1), l, b),
+                        TaskPriority::Low => (c, h, m, l.saturating_add(1), b),
+                        TaskPriority::Background => (c, h, m, l, b.saturating_add(1)),
                     }
                 });
 

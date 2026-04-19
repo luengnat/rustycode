@@ -311,7 +311,7 @@ fn snapshot_key(unit_type: &str, unit_id: &str, entries: &[SessionEntry]) -> Str
 /// Find next available activity file path with atomic creation
 fn next_activity_file_path(
     activity_dir: &Path,
-    state: &ActivityLogState,
+    state: &mut ActivityLogState,
     unit_type: &str,
     unit_id: &str,
 ) -> Option<PathBuf> {
@@ -328,9 +328,7 @@ fn next_activity_file_path(
         {
             Ok(_) => return Some(file_path),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                // File exists, try next sequence
-                // Note: we'd need to mutate state.next_seq here, but we can't
-                // because we're borrowing state. The caller will increment.
+                state.next_seq = state.next_seq.saturating_add(1);
                 continue;
             }
             Err(_) => return None,
@@ -512,5 +510,21 @@ mod tests {
         // Saving again should create new file (not be detected as duplicate)
         let result = save_activity_log(project_root, "execute-task", "M01-S01-T01", &entries);
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_prune_empty_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let empty_dir = temp_dir.path().join("activity");
+        let pruned = prune_activity_logs(&empty_dir, 7).unwrap();
+        assert_eq!(pruned, 0);
+    }
+
+    #[test]
+    fn test_prune_nonexistent_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let missing = temp_dir.path().join("no-such-dir");
+        let pruned = prune_activity_logs(&missing, 7).unwrap();
+        assert_eq!(pruned, 0);
     }
 }

@@ -49,7 +49,13 @@ impl ToolProxy {
             config,
             client: Arc::new(RwLock::new(client)),
             tool_cache: Arc::new(RwLock::new(HashMap::new())),
-            allowlist: Arc::new(RwLock::new(AllowlistManager::default())),
+            allowlist: Arc::new(RwLock::new(
+                AllowlistManager::new().unwrap_or_else(|e| {
+                    tracing::warn!("Failed to load allowlist, using empty: {}", e);
+                    AllowlistManager::with_file_path(std::path::PathBuf::from("/dev/null"))
+                        .unwrap_or_else(|_| AllowlistManager::empty())
+                })
+            )),
         })
     }
 

@@ -26,7 +26,7 @@ use rustycode_storage::{
     },
     Storage,
 };
-use rustycode_tools::{check_tool_permission, ToolContext, ToolInfo, ToolRegistry};
+use rustycode_tools::{check_tool_permission, skills::SkillRegistry, ToolContext, ToolInfo, ToolRegistry};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -469,13 +469,25 @@ impl Runtime {
             .get_memory("project")
             .map(|v| v.len())
             .unwrap_or(0);
-        let skills = if self.config.skills_dir.exists() {
+        // Count built-in skills (always available)
+        let builtin_count = SkillRegistry::builtin_skills().len();
+        // Count custom skills from the skills directory (only valid skill files)
+        let custom_count = if self.config.skills_dir.exists() {
             std::fs::read_dir(&self.config.skills_dir)
-                .map(|rd| rd.count())
+                .map(|rd| {
+                    rd.filter_map(|e| e.ok())
+                        .filter(|e| {
+                            e.path().extension().is_some_and(|ext| {
+                                matches!(ext.to_str(), Some("yaml") | Some("yml") | Some("toml") | Some("json"))
+                            })
+                        })
+                        .count()
+                })
                 .unwrap_or(0)
         } else {
             0
         };
+        let skills = builtin_count + custom_count;
         let sample_context_plan = ContextPlan::default();
         Ok(DoctorReport {
             config: self.config.clone(),

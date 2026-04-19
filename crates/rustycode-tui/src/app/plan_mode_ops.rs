@@ -125,6 +125,9 @@ impl TUI {
         let banner = PlanModeBanner::Stalled {
             action_hint: "Use /plan to switch to implementation mode and continue.".to_string(),
         };
+        if self.plan_mode_banner.as_ref() == Some(&banner) {
+            return;
+        }
         self.set_plan_mode_banner(Some(banner.clone()));
         let message = banner.message();
         self.add_system_message(message.clone());

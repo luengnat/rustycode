@@ -393,7 +393,6 @@ impl TUI {
                             let trimmed = edited.trim();
                             if !trimmed.is_empty() && trimmed != current_text.trim() {
                                 self.input_handler.state.clear();
-                                // Set edited content as input
                                 for c in trimmed.chars() {
                                     self.input_handler.state.insert_char(c);
                                 }
@@ -401,16 +400,18 @@ impl TUI {
                                 self.add_system_message(
                                     "📝 Loaded from editor - press Enter to send".to_string(),
                                 );
-                                self.dirty = true;
                             } else if trimmed.is_empty() {
                                 self.add_system_message(
                                     "Editor returned empty - input unchanged".to_string(),
                                 );
                             }
-                            // If content unchanged, no message needed
+                            self.dirty = true;
+                            self.needs_full_redraw = true;
                         }
                         Err(e) => {
                             self.add_system_message(format!("⚠️ Editor error: {}", e));
+                            self.dirty = true;
+                            self.needs_full_redraw = true;
                         }
                     }
                 }

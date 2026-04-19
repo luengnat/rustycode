@@ -84,6 +84,16 @@ impl Transport for HttpTransport {
             }
         };
 
+        let status = resp.status();
+        if status.is_client_error() || status.is_server_error() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(McpError::TransportError(format!(
+                "HTTP {} response: {}",
+                status,
+                body.chars().take(200).collect::<String>()
+            )));
+        }
+
         if let Some(val) = resp.headers().get("Mcp-Session-Id") {
             if let Ok(s) = val.to_str() {
                 self.session_id = Some(s.to_string());
@@ -176,5 +186,29 @@ mod tests {
         let t = HttpTransport::new("http://example.invalid/mcp", headers).unwrap();
         // is_connected must be true on creation in our simplified implementation
         assert!(t.is_connected());
+    }
+
+    #[test]
+    fn test_http_transport_stores_headers() {
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer test-token".to_string());
+        let t = HttpTransport::new("http://localhost:8080/mcp", headers).unwrap();
+        assert_eq!(t.headers.get("Authorization").unwrap(), "Bearer test-token");
+    }
+
+    #[test]
+    fn test_http_transport_session_id_initially_none() {
+        let headers = HashMap::new();
+        let t = HttpTransport::new("http://localhost:8080/mcp", headers).unwrap();
+        assert!(t.session_id.is_none());
+    }
+
+    #[test]
+    fn test_http_transport_test_set_session_id() {
+        let headers = HashMap::new();
+        let mut t = HttpTransport::new("http://localhost:8080/mcp", headers).unwrap();
+        assert!(t.session_id.is_none());
+        t.test_set_session_id(Some("sess-123".to_string()));
+        assert_eq!(t.session_id.as_deref(), Some("sess-123"));
     }
 }

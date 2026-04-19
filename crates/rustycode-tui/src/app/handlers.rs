@@ -367,14 +367,13 @@ pub fn handle_stream_chunk(tui: &mut TUI, chunk: StreamChunk) {
                 check_and_trigger_auto_continue(tui);
             }
 
-            if !was_cancelled && !tui.auto_continue_enabled {
-                if tui.plan_mode.current_phase() == "planning"
-                    && !tui.is_plan_mode_stalled()
-                {
-                    tui.show_plan_mode_ready_to_switch(
-                        "Planning complete.".to_string(),
-                    );
-                }
+            if !was_cancelled && !tui.auto_continue_enabled
+                && tui.plan_mode.current_phase() == "planning"
+                && !tui.is_plan_mode_stalled()
+            {
+                tui.show_plan_mode_ready_to_switch(
+                    "Planning complete.".to_string(),
+                );
             }
 
             tracing::debug!("Stream completed");

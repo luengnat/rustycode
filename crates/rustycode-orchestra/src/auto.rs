@@ -83,9 +83,8 @@ impl AutoMode {
 
     /// Get current phase as a string
     pub fn current_phase(&self) -> &'static str {
-        // let pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
-        // pm.current_phase()
-        "implementation"
+        let pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
+        pm.current_phase()
     }
 
     /// Generate a plan for the given task description
@@ -115,8 +114,8 @@ impl AutoMode {
             created_at: Utc::now(),
         };
 
-        // let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
-        // pm.submit_plan(plan.clone());
+        let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
+        pm.submit_plan(plan.clone());
 
         Ok(plan)
     }
@@ -124,10 +123,10 @@ impl AutoMode {
     /// Approve a plan and transition to implementation
     pub async fn approve_plan(
         &self,
-        _plan: &rustycode_protocol::ConvoyPlan,
+        plan: &rustycode_protocol::ConvoyPlan,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
-        // pm.approve_plan(&plan.id)?;
+        let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
+        pm.approve_plan(&plan.id)?;
         Ok(())
     }
 
@@ -136,18 +135,27 @@ impl AutoMode {
         &self,
         _plan: &rustycode_protocol::ConvoyPlan,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
-        // pm.reject();
+        let mut pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
+        pm.reject();
         Ok(())
     }
 
-    /// Execute a task (plan generation + execution)
+    /// Execute a task (plan generation + execution).
+    /// Fails if plan mode is active and no plan has been approved.
     pub async fn execute_task(
         &self,
         task_desc: &str,
     ) -> Result<AutoTaskResult, Box<dyn std::error::Error>> {
-        // Generate plan
+        // Generate plan (this submits it but doesn't approve)
         let plan = self.generate_plan(task_desc).await?;
+
+        // Check if approval is needed but not granted
+        {
+            let pm = self.plan_mode.lock().unwrap_or_else(|e| e.into_inner());
+            if pm.is_enabled() && pm.current_plan().is_some() && pm.current_phase() == "planning" {
+                return Err("Plan requires approval before execution".into());
+            }
+        }
 
         // Execute the plan
         self.execute_plan(&plan).await

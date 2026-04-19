@@ -108,6 +108,7 @@ impl Default for SessionAllowlist {
 }
 
 /// Persistent allowlist stored on disk
+#[derive(Debug)]
 pub struct PersistentAllowlist {
     file_path: PathBuf,
     entries: HashSet<AllowlistEntry>,
@@ -140,10 +141,10 @@ impl PersistentAllowlist {
         }
 
         let content = fs::read_to_string(file_path)?;
-        let entries: Vec<AllowlistEntry> = serde_json::from_str(&content).unwrap_or_else(|e| {
+        let entries: Vec<AllowlistEntry> = serde_json::from_str(&content).map_err(|e| {
             warn!("Failed to parse allowlist file: {}", e);
-            Vec::new()
-        });
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("corrupt allowlist: {}", e))
+        })?;
 
         Ok(entries.into_iter().collect())
     }
@@ -238,6 +239,17 @@ impl AllowlistManager {
             session: SessionAllowlist::new(),
             persistent: PersistentAllowlist::new(Some(file_path))?,
         })
+    }
+
+    /// Create an empty allowlist manager (no persistent storage).
+    pub fn empty() -> Self {
+        Self {
+            session: SessionAllowlist::new(),
+            persistent: PersistentAllowlist {
+                file_path: PathBuf::new(),
+                entries: HashSet::new(),
+            },
+        }
     }
 
     /// Add an entry to session allowlist only
@@ -655,5 +667,25 @@ mod tests {
         let manager = create_test_manager();
         assert!(manager.session().entries().is_empty());
         assert!(manager.persistent().entries().is_empty());
+    }
+
+    #[test]
+    fn test_corrupt_allowlist_file_returns_error() -> io::Result<()> {
+        let file_path = unique_test_path("mcp-allowlist-corrupt-test");
+        fs::write(&file_path, "this is not valid json{{{")?;
+
+        let result = PersistentAllowlist::new(Some(file_path.clone()));
+        assert!(result.is_err(), "Corrupt file should return an error, not silently load empty");
+        assert!(result.unwrap_err().kind() == io::ErrorKind::InvalidData);
+
+        let _ = fs::remove_file(file_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_empty_manager_works() {
+        let manager = AllowlistManager::empty();
+        assert!(!manager.is_allowed("any-server", "any-tool"));
+        assert!(manager.entries().is_empty());
     }
 }

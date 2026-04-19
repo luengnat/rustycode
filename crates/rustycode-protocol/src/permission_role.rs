@@ -3,8 +3,10 @@ use std::fmt;
 use crate::agent_protocol::AgentRole;
 
 /// Permissions roles for high-level agent tasking and tool access gating.
-/// Unlike TeamRole (Architect, Builder, etc.), these roles define what an agent
-/// is allowed to do within a session or convoy.
+///
+/// **Deprecated in favor of `AgentRole`.** `PermissionRole` overlaps with
+/// `AgentRole` but has fewer variants. New code should use `AgentRole` directly.
+/// This type is kept for backwards compatibility with serialized data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]

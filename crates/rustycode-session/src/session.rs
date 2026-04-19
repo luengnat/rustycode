@@ -29,9 +29,11 @@ impl SessionId {
     }
 
     /// Parse from string
+    ///
+    /// Rejects strings containing path traversal characters (`/`, `\`, `..`).
     pub fn parse(s: impl Into<String>) -> Option<Self> {
         let s = s.into();
-        if s.starts_with("sess_") {
+        if s.starts_with("sess_") && !s.contains('/') && !s.contains('\\') && !s.contains("..") {
             Some(Self(s))
         } else {
             None
@@ -542,6 +544,14 @@ mod tests {
         assert!(SessionId::parse("invalid").is_none());
         assert!(SessionId::parse("session_123").is_none());
         assert!(SessionId::parse("").is_none());
+    }
+
+    #[test]
+    fn test_session_id_parse_rejects_path_traversal() {
+        assert!(SessionId::parse("sess_../../etc/passwd").is_none());
+        assert!(SessionId::parse("sess_foo\\bar").is_none());
+        assert!(SessionId::parse("sess_..").is_none());
+        assert!(SessionId::parse("sess_a/b").is_none());
     }
 
     #[test]

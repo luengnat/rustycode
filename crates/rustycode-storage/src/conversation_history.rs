@@ -158,13 +158,7 @@ impl ConversationHistory {
     /// # }
     /// ```
     pub fn save(&self, conversation: &Conversation) -> anyhow::Result<()> {
-        // Validate ID to prevent path traversal
-        if conversation.id.contains('/')
-            || conversation.id.contains('\\')
-            || conversation.id == ".."
-        {
-            anyhow::bail!("invalid conversation ID: {}", conversation.id);
-        }
+        validate_id(&conversation.id)?;
         let filename = format!("{}.json", conversation.id);
         let path = self.storage_dir.join(&filename);
         let json = serde_json::to_string_pretty(conversation)
@@ -204,6 +198,7 @@ impl ConversationHistory {
     /// # }
     /// ```
     pub fn load(&self, id: &str) -> anyhow::Result<Conversation> {
+        validate_id(id)?;
         let filename = format!("{}.json", id);
         let path = self.storage_dir.join(&filename);
         let json = std::fs::read_to_string(&path)
@@ -236,6 +231,7 @@ impl ConversationHistory {
     /// # }
     /// ```
     pub fn delete(&self, id: &str) -> anyhow::Result<()> {
+        validate_id(id)?;
         let filename = format!("{}.json", id);
         let path = self.storage_dir.join(&filename);
         std::fs::remove_file(&path)
@@ -534,6 +530,14 @@ fn capitalize(s: &str) -> String {
         None => String::new(),
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
+}
+
+/// Validate that a conversation ID doesn't contain path traversal characters.
+fn validate_id(id: &str) -> anyhow::Result<()> {
+    if id.contains('/') || id.contains('\\') || id == ".." {
+        anyhow::bail!("invalid conversation ID: {}", id);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1113,5 +1117,25 @@ mod tests {
 
         conv.id = "..".to_string();
         assert!(history.save(&conv).is_err());
+    }
+
+    #[test]
+    fn test_load_rejects_path_traversal() {
+        let dir = TempDir::new().unwrap();
+        let history = ConversationHistory::new(dir.path()).unwrap();
+
+        assert!(history.load("../etc/passwd").is_err());
+        assert!(history.load("foo\\bar").is_err());
+        assert!(history.load("..").is_err());
+    }
+
+    #[test]
+    fn test_delete_rejects_path_traversal() {
+        let dir = TempDir::new().unwrap();
+        let history = ConversationHistory::new(dir.path()).unwrap();
+
+        assert!(history.delete("../etc/passwd").is_err());
+        assert!(history.delete("foo\\bar").is_err());
+        assert!(history.delete("..").is_err());
     }
 }

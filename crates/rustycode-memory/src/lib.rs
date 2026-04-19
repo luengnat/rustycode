@@ -443,8 +443,14 @@ pub fn save_entries(path: &Path, entries: &[MemoryEntry]) -> Result<()> {
             .with_context(|| format!("Failed to create memory directory {}", parent.display()))?;
     }
 
-    fs::write(path, yaml_content)
-        .with_context(|| format!("Failed to write memory file {}", path.display()))?;
+    // Atomic write: temp file + rename to avoid corruption on crash
+    let tmp_path = path.with_extension("yaml.tmp");
+    fs::write(&tmp_path, &yaml_content)
+        .with_context(|| format!("Failed to write temp file {}", tmp_path.display()))?;
+    if let Err(e) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e).with_context(|| format!("Failed to rename temp file to {}", path.display()));
+    }
     Ok(())
 }
 
@@ -1192,5 +1198,64 @@ use_count: 0
         let loaded = load(&nested).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].id, "nested-test");
+    }
+
+    #[test]
+    fn save_entries_atomic_no_leftover_tmp() {
+        let dir = temp_dir();
+        let path = dir.join("memory.yaml");
+        let entry = MemoryEntry::new(MemoryEntryConfig {
+            id: "atomic-test".to_string(),
+            trigger: "t".to_string(),
+            confidence: 0.5,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a".to_string(),
+        });
+
+        save_entries(&path, &[entry]).unwrap();
+
+        // No temp file should remain after successful save
+        let tmp_path = dir.join("memory.yaml.tmp");
+        assert!(!tmp_path.exists(), "temp file should be cleaned up after rename");
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn save_entries_overwrite_preserves_data() {
+        let dir = temp_dir();
+        let path = dir.join("memory.yaml");
+
+        let entry1 = MemoryEntry::new(MemoryEntryConfig {
+            id: "first".to_string(),
+            trigger: "t1".to_string(),
+            confidence: 0.5,
+            domain: MemoryDomain::CodeStyle,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a1".to_string(),
+        });
+
+        save_entries(&path, &[entry1]).unwrap();
+        assert_eq!(load(&dir).unwrap().len(), 1);
+
+        let entry2 = MemoryEntry::new(MemoryEntryConfig {
+            id: "second".to_string(),
+            trigger: "t2".to_string(),
+            confidence: 0.7,
+            domain: MemoryDomain::Workflow,
+            source: MemorySource::ManualEntry,
+            scope: MemoryScope::Global,
+            project_id: None,
+            action: "a2".to_string(),
+        });
+
+        save_entries(&path, &[entry2]).unwrap();
+        let loaded = load(&dir).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "second");
     }
 }

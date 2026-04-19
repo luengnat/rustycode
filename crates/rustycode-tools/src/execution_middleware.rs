@@ -45,7 +45,7 @@ impl Default for MiddlewareConfig {
             plan_mode_enabled: true,
             cost_tracking_enabled: true,
             max_session_cost: None,
-            checkpoint_tools: vec!["edit".to_string(), "write".to_string(), "bash".to_string()],
+            checkpoint_tools: vec!["edit_file".to_string(), "multiedit".to_string(), "write_file".to_string(), "bash".to_string()],
         }
     }
 }
@@ -279,7 +279,7 @@ mod tests {
         assert!(config.hooks_enabled);
         assert!(config.plan_mode_enabled);
         assert!(config.cost_tracking_enabled);
-        assert!(config.checkpoint_tools.contains(&"edit".to_string()));
+        assert!(config.checkpoint_tools.contains(&"edit_file".to_string()));
     }
 
     #[test]
